@@ -171,17 +171,7 @@
       <div class="alert-body" id="alertBody">
 
         <div class="alert-note">
-          Uses <a href="https://www.emailjs.com" target="_blank">EmailJS</a> — free, 200 emails/month, no backend required.
-          &nbsp;<button class="link-btn" onclick="showEmailjsHelp()">How to set up →</button>
-        </div>
-
-        <div class="emailjs-help" id="emailjsHelp" style="display:none">
-          <div class="help-step"><span class="help-num">1</span><span>Go to <a href="https://www.emailjs.com" target="_blank">emailjs.com</a> → sign up free</span></div>
-          <div class="help-step"><span class="help-num">2</span><span>Email Services → Add Service → connect Gmail / Outlook</span></div>
-          <div class="help-step"><span class="help-num">3</span><span>Email Templates → Create New. Add these variables to the body:<br>
-            <code>{{coin_name}} {{current_price}} {{alert_reasons}} {{alert_time}} {{to_email}}</code></span></div>
-          <div class="help-step"><span class="help-num">4</span><span>Account → copy your <strong>Public Key</strong></span></div>
-          <div class="help-step"><span class="help-num">5</span><span>Paste Service ID, Template ID, and Public Key below → Save</span></div>
+          Enter your email below — alerts are sent automatically when high volatility is detected. Free, no account needed.
         </div>
 
         <div class="alert-form-group toggle-row">
@@ -195,22 +185,6 @@
         <div class="alert-form-group">
           <label class="alert-label" for="alertEmail">Your Email Address</label>
           <input type="email" id="alertEmail" class="alert-input" placeholder="you@example.com" />
-        </div>
-
-        <div class="alert-form-group">
-          <label class="alert-label" for="ejsPublicKey">EmailJS Public Key</label>
-          <input type="text" id="ejsPublicKey" class="alert-input" placeholder="user_xxxxxxxxxxxxxxxx" />
-        </div>
-
-        <div class="alert-fields-row">
-          <div class="alert-form-group">
-            <label class="alert-label" for="ejsServiceId">Service ID</label>
-            <input type="text" id="ejsServiceId" class="alert-input" placeholder="service_xxxxxxx" />
-          </div>
-          <div class="alert-form-group">
-            <label class="alert-label" for="ejsTemplateId">Template ID</label>
-            <input type="text" id="ejsTemplateId" class="alert-input" placeholder="template_xxxxxxx" />
-          </div>
         </div>
 
         <div class="alert-form-group">
