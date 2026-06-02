@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Crypto Futures AI Calculator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<!-- ─── HEADER ─── -->
+<header class="header">
+  <div class="logo">
+    <span class="logo-icon">📈</span>
+    <div>
+      <div class="logo-title">Crypto Futures AI</div>
+      <div class="logo-sub">Chronos-Bolt · CoinGecko · Real-time</div>
+    </div>
+  </div>
+  <div class="ticker" id="ticker"><span class="ticker-loading">Loading prices…</span></div>
+  <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
+     target="_blank" class="btn-hf-header">🤗 HF Space</a>
+</header>
+
+<!-- ─── MAIN ─── -->
+<main class="layout">
+
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+
+    <!-- Chart card -->
+    <div class="card chart-card">
+      <div class="chart-topbar">
+        <div class="chart-title-row">
+          <select id="coinSelect" class="coin-select"></select>
+          <div id="livePriceBox" class="live-price-box">
+            <span id="livePriceVal" class="lp-val">—</span>
+            <span id="livePriceChg" class="lp-chg">—</span>
+          </div>
+        </div>
+        <div class="tf-row">
+          <button class="tf-btn" data-days="7">7D</button>
+          <button class="tf-btn active" data-days="30">30D</button>
+          <button class="tf-btn" data-days="90">90D</button>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="priceChart"></canvas>
+        <div id="chartLoader" class="chart-loader"><div class="spin"></div><span>Fetching data…</span></div>
+      </div>
+    </div>
+
+    <!-- Technicals card -->
+    <div class="card tech-card">
+      <h3 class="card-heading">📊 Technical Indicators</h3>
+      <div class="tech-grid">
+        <div class="tech-item">
+          <div class="ti-label">RSI (14)</div>
+          <div class="ti-val" id="rsiVal">—</div>
+          <div class="ti-bar-track"><div class="ti-bar-fill" id="rsiBar"></div></div>
+          <div class="ti-sig" id="rsiSig">—</div>
+        </div>
+        <div class="tech-item">
+          <div class="ti-label">MACD (12/26/9)</div>
+          <div class="ti-val" id="macdVal">—</div>
+          <div class="ti-sig" id="macdSig">—</div>
+        </div>
+        <div class="tech-item">
+          <div class="ti-label">Bollinger Bands (20,2σ)</div>
+          <div class="ti-val" id="bbVal">—</div>
+          <div class="ti-sig" id="bbSig">—</div>
+        </div>
+        <div class="tech-item">
+          <div class="ti-label">7-Day Trend</div>
+          <div class="ti-val" id="trendVal">—</div>
+          <div class="ti-sig" id="trendSig">—</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+
+    <!-- Calculator card -->
+    <div class="card calc-card">
+      <h3 class="card-heading">⚙️ Position Setup</h3>
+
+      <div class="form-group">
+        <label>Direction</label>
+        <div class="dir-toggle">
+          <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">📈 Long</button>
+          <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">📉 Short</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="entryPrice">Entry Price (USD) <span class="hint">— 0 = live price</span></label>
+        <input type="number" id="entryPrice" value="0" min="0" step="0.01" />
+      </div>
+
+      <div class="form-group">
+        <label>Leverage — <span id="levDisplay" class="accent">10×</span></label>
+        <input type="range" id="leverage" class="range-slider" min="1" max="125" value="10"
+               oninput="document.getElementById('levDisplay').textContent=this.value+'×'" />
+        <div class="range-marks"><span>1×</span><span>25×</span><span>50×</span><span>100×</span><span>125×</span></div>
+      </div>
+
+      <div class="form-group">
+        <label for="posSize">Position Size (USD)</label>
+        <input type="number" id="posSize" value="1000" min="1" />
+      </div>
+
+      <div class="divider"><span>Risk Management</span></div>
+
+      <div class="form-group">
+        <label for="takeProfit">Take Profit (USD) <span class="hint">— 0 = use forecast</span></label>
+        <input type="number" id="takeProfit" value="0" min="0" step="0.01" />
+      </div>
+
+      <div class="form-group">
+        <label for="stopLoss">Stop Loss (USD) <span class="hint">— 0 = skip</span></label>
+        <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
+      </div>
+
+      <div class="form-group">
+        <label>Forecast Horizon — <span id="horizDisplay" class="accent">7 days</span></label>
+        <input type="range" id="horizon" class="range-slider" min="1" max="14" value="7"
+               oninput="document.getElementById('horizDisplay').textContent=this.value+' days'" />
+      </div>
+
+      <button id="analyzeBtn" class="btn-analyze" onclick="analyze()">🚀 Analyze Trade</button>
+    </div>
+
+    <!-- Results card -->
+    <div class="card results-card" id="resultsCard" style="display:none">
+      <h3 class="card-heading">📋 Trade Metrics</h3>
+      <div id="resultsBody"></div>
+    </div>
+
+    <!-- Signal card -->
+    <div class="card signal-card" id="signalCard" style="display:none">
+      <div id="signalBody"></div>
+      <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
+         target="_blank" class="btn-hf-link">🤗 Get Chronos AI Prediction on HF Spaces ↗</a>
+    </div>
+
+  </div>
+</main>
+
+<footer class="footer">
+  Powered by
+  <a href="https://huggingface.co/amazon/chronos-bolt-small" target="_blank">amazon/chronos-bolt-small</a>
+  (Apache 2.0) · Data: CoinGecko Free API · Statistical forecast via Holt's smoothing ·
+  <strong>⚠️ Not financial advice</strong>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
