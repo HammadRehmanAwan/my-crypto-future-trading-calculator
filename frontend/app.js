@@ -230,6 +230,168 @@ function fmtPct(v) { return v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed
 function badge(text, type) { return `<span class="badge badge-${type}">${text}</span>`; }
 
 // ═══════════════════════════════════════════════════════════════════
+// VOLATILITY ALERT SYSTEM
+// ═══════════════════════════════════════════════════════════════════
+
+const SENSITIVITY_CFG = {
+  conservative: { rsiLo: 20, rsiHi: 80, changeAbs: 10, bbWidth: 20, hint: 'RSI < 20 or > 80 · price ±10% in 24h · BB width > 20%' },
+  moderate:     { rsiLo: 30, rsiHi: 70, changeAbs: 5,  bbWidth: 12, hint: 'RSI < 30 or > 70 · price ±5% in 24h · BB width > 12%' },
+  sensitive:    { rsiLo: 35, rsiHi: 65, changeAbs: 3,  bbWidth: 8,  hint: 'RSI < 35 or > 65 · price ±3% in 24h · BB width > 8%' },
+};
+
+function getAlertSettings() {
+  try { return JSON.parse(localStorage.getItem('cryptoAlertSettings') || '{}'); }
+  catch { return {}; }
+}
+function persistAlertSettings(s) { localStorage.setItem('cryptoAlertSettings', JSON.stringify(s)); }
+
+function isOnCooldown(coinId) {
+  const last = parseInt(localStorage.getItem(`alertCD_${coinId}`) || '0');
+  return Date.now() - last < 2 * 60 * 60 * 1000; // 2-hour cooldown per coin
+}
+function setCooldown(coinId) {
+  localStorage.setItem(`alertCD_${coinId}`, String(Date.now()));
+}
+
+function checkVolatilityConditions(coinId, coinName, currPrice, rsi, change24h, bbWidth) {
+  const s = getAlertSettings();
+  if (!s.enabled || !s.email || !s.publicKey || !s.serviceId || !s.templateId) return;
+  const watched = s.watchCoins || [];
+  if (!watched.includes(coinId)) return;
+  if (isOnCooldown(coinId)) return;
+
+  const cfg = SENSITIVITY_CFG[s.sensitivity || 'moderate'];
+  const reasons = [];
+  if (rsi != null) {
+    if (rsi < cfg.rsiLo) reasons.push(`RSI is ${rsi.toFixed(1)} — price fell very fast, a bounce upward is likely`);
+    else if (rsi > cfg.rsiHi) reasons.push(`RSI is ${rsi.toFixed(1)} — price rose very fast, a pullback may be coming`);
+  }
+  if (change24h != null && Math.abs(change24h) >= cfg.changeAbs)
+    reasons.push(`Price moved ${change24h >= 0 ? '+' : ''}${change24h.toFixed(2)}% in the last 24 hours — high volatility`);
+  if (bbWidth != null && bbWidth >= cfg.bbWidth)
+    reasons.push(`Bollinger Band width is ${bbWidth.toFixed(1)}% — the price channel is unusually wide`);
+
+  if (reasons.length === 0) return;
+  sendVolatilityEmail(s, coinName, currPrice, reasons, coinId);
+}
+
+async function sendVolatilityEmail(s, coinName, price, reasons, coinId) {
+  if (typeof emailjs === 'undefined') {
+    showAlertStatus('❌ EmailJS library not loaded — check your internet connection.', 'error'); return;
+  }
+  try {
+    await emailjs.send(s.serviceId, s.templateId, {
+      to_email:      s.email,
+      coin_name:     coinName,
+      current_price: '$' + price.toLocaleString('en-US', { maximumFractionDigits: 2 }),
+      alert_reasons: reasons.map((r, i) => `${i + 1}. ${r}`).join('\n'),
+      alert_time:    new Date().toLocaleString(),
+    }, s.publicKey);
+    if (coinId !== '_test') setCooldown(coinId);
+    showAlertStatus(`✅ Alert email sent for ${coinName}!`, 'success');
+  } catch (e) {
+    showAlertStatus(`❌ Email failed: ${e?.text || e?.message || 'Check your EmailJS credentials.'}`, 'error');
+  }
+}
+
+function showAlertStatus(msg, type) {
+  const el = document.getElementById('alertStatus');
+  if (!el) return;
+  el.style.display = 'block';
+  el.className = `alert-status ${type}`;
+  el.textContent = msg;
+  setTimeout(() => { if (el) el.style.display = 'none'; }, 6000);
+}
+
+function runDeepVolatilityCheck(coinId, prices, rsiArr, bb) {
+  const coin = COINS[coinId];
+  if (!coin) return;
+  const curr    = prices[prices.length - 1];
+  const prev    = prices[Math.max(0, prices.length - 2)];
+  const chg24h  = (curr - prev) / prev * 100;
+  const rsi     = rsiArr[rsiArr.length - 1];
+  const bbU     = bb.upper[bb.upper.length - 1];
+  const bbL     = bb.lower[bb.lower.length - 1];
+  const bbM     = bb.mid[bb.mid.length - 1];
+  const bbWidth = bbM ? (bbU - bbL) / bbM * 100 : null;
+  checkVolatilityConditions(coinId, coin.name, curr, rsi, chg24h, bbWidth);
+}
+
+let _deepCheckTimer = null;
+function startBackgroundAlertChecks() {
+  if (_deepCheckTimer) return;
+  _deepCheckTimer = setInterval(async () => {
+    const s = getAlertSettings();
+    if (!s.enabled || !s.watchCoins?.length) return;
+    for (const coinId of s.watchCoins) {
+      try {
+        const { prices } = await fetchHistory(coinId, 30);
+        const rsiArr = calcRSI(prices);
+        const bb     = calcBollinger(prices);
+        runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
+      } catch { /* ignore per-coin errors */ }
+      await new Promise(r => setTimeout(r, 1200)); // stagger to respect rate limits
+    }
+  }, 5 * 60 * 1000); // every 5 minutes
+}
+
+// ─── Alert UI helpers (called from HTML) ───
+
+function showEmailjsHelp() {
+  const el = document.getElementById('emailjsHelp');
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function setAlertSensitivity(val) {
+  document.querySelectorAll('.thresh-btn').forEach(b => b.classList.toggle('active', b.dataset.t === val));
+  const hint = document.getElementById('threshHint');
+  if (hint) hint.textContent = SENSITIVITY_CFG[val]?.hint || '';
+}
+
+function saveAlerts() {
+  const s = {
+    enabled:    document.getElementById('alertEnabled').checked,
+    email:      document.getElementById('alertEmail').value.trim(),
+    publicKey:  document.getElementById('ejsPublicKey').value.trim(),
+    serviceId:  document.getElementById('ejsServiceId').value.trim(),
+    templateId: document.getElementById('ejsTemplateId').value.trim(),
+    sensitivity: document.querySelector('.thresh-btn.active')?.dataset?.t || 'moderate',
+    watchCoins: [...document.querySelectorAll('.watch-coin-cb:checked')].map(c => c.value),
+  };
+  persistAlertSettings(s);
+  showAlertStatus('✅ Settings saved! Monitoring ' + (s.watchCoins.length) + ' coin(s) every 5 minutes.', 'success');
+}
+
+async function testAlert() {
+  saveAlerts();
+  const s = getAlertSettings();
+  if (!s.email || !s.publicKey || !s.serviceId || !s.templateId) {
+    showAlertStatus('❌ Fill in your email and all three EmailJS fields first.', 'error'); return;
+  }
+  await sendVolatilityEmail(s, 'Bitcoin (BTC) — TEST', 65000, ['This is a test alert. Your email setup is working correctly!'], '_test');
+}
+
+function initAlertUI() {
+  const s = getAlertSettings();
+  const container = document.getElementById('watchCoins');
+  if (container) {
+    Object.entries(COINS).forEach(([id, c]) => {
+      const checked = (s.watchCoins || ['bitcoin']).includes(id);
+      const lbl = document.createElement('label');
+      lbl.className = 'watch-coin-item';
+      lbl.innerHTML = `<input type="checkbox" class="watch-coin-cb" value="${id}" ${checked ? 'checked' : ''}><span>${c.sym}</span>`;
+      container.appendChild(lbl);
+    });
+  }
+  if (s.email)      document.getElementById('alertEmail').value   = s.email;
+  if (s.publicKey)  document.getElementById('ejsPublicKey').value  = s.publicKey;
+  if (s.serviceId)  document.getElementById('ejsServiceId').value  = s.serviceId;
+  if (s.templateId) document.getElementById('ejsTemplateId').value = s.templateId;
+  if (s.enabled)    document.getElementById('alertEnabled').checked = true;
+  setAlertSensitivity(s.sensitivity || 'moderate');
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // DIRECTION TOGGLE
 // ═══════════════════════════════════════════════════════════════════
 
@@ -331,6 +493,7 @@ async function loadCoin(coinId, days) {
     const horizon  = parseInt(document.getElementById('horizon').value) || 7;
     const forecast = holtForecast(prices, horizon);
     buildChart(dates, prices, bb, forecast, days, horizon);
+    runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
   } catch (err) {
     loader.innerHTML = `<span style="color:#FF3D3D">⚠️ ${
       err.message.includes('429') ? 'Rate-limited — wait 60 s then try again.'
@@ -512,6 +675,8 @@ function init() {
   loadCoin('bitcoin', 30);
   refreshTicker();
   setInterval(refreshTicker, 60_000);
+  initAlertUI();
+  startBackgroundAlertChecks();
 }
 
 document.addEventListener('DOMContentLoaded', init);

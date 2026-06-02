@@ -8,6 +8,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
 </head>
 <body>
 
@@ -156,6 +157,85 @@
       <div id="signalBody"></div>
       <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
          target="_blank" class="btn-hf-link">🤗 Get Chronos AI Prediction on HF Spaces ↗</a>
+    </div>
+
+    <!-- Volatility Alert card -->
+    <div class="card alert-card">
+      <div class="alert-header" onclick="document.getElementById('alertBody').classList.toggle('collapsed')">
+        <div>
+          <h3 class="card-heading" style="margin-bottom:2px">🔔 Volatility Email Alerts</h3>
+          <div class="alert-subhead">Auto-email when a coin moves sharply</div>
+        </div>
+        <span class="alert-caret" id="alertCaret">▼</span>
+      </div>
+      <div class="alert-body" id="alertBody">
+
+        <div class="alert-note">
+          Uses <a href="https://www.emailjs.com" target="_blank">EmailJS</a> — free, 200 emails/month, no backend required.
+          &nbsp;<button class="link-btn" onclick="showEmailjsHelp()">How to set up →</button>
+        </div>
+
+        <div class="emailjs-help" id="emailjsHelp" style="display:none">
+          <div class="help-step"><span class="help-num">1</span><span>Go to <a href="https://www.emailjs.com" target="_blank">emailjs.com</a> → sign up free</span></div>
+          <div class="help-step"><span class="help-num">2</span><span>Email Services → Add Service → connect Gmail / Outlook</span></div>
+          <div class="help-step"><span class="help-num">3</span><span>Email Templates → Create New. Add these variables to the body:<br>
+            <code>{{coin_name}} {{current_price}} {{alert_reasons}} {{alert_time}} {{to_email}}</code></span></div>
+          <div class="help-step"><span class="help-num">4</span><span>Account → copy your <strong>Public Key</strong></span></div>
+          <div class="help-step"><span class="help-num">5</span><span>Paste Service ID, Template ID, and Public Key below → Save</span></div>
+        </div>
+
+        <div class="alert-form-group toggle-row">
+          <span class="alert-label">Enable Alerts</span>
+          <label class="switch">
+            <input type="checkbox" id="alertEnabled">
+            <span class="sw-slider"></span>
+          </label>
+        </div>
+
+        <div class="alert-form-group">
+          <label class="alert-label" for="alertEmail">Your Email Address</label>
+          <input type="email" id="alertEmail" class="alert-input" placeholder="you@example.com" />
+        </div>
+
+        <div class="alert-form-group">
+          <label class="alert-label" for="ejsPublicKey">EmailJS Public Key</label>
+          <input type="text" id="ejsPublicKey" class="alert-input" placeholder="user_xxxxxxxxxxxxxxxx" />
+        </div>
+
+        <div class="alert-fields-row">
+          <div class="alert-form-group">
+            <label class="alert-label" for="ejsServiceId">Service ID</label>
+            <input type="text" id="ejsServiceId" class="alert-input" placeholder="service_xxxxxxx" />
+          </div>
+          <div class="alert-form-group">
+            <label class="alert-label" for="ejsTemplateId">Template ID</label>
+            <input type="text" id="ejsTemplateId" class="alert-input" placeholder="template_xxxxxxx" />
+          </div>
+        </div>
+
+        <div class="alert-form-group">
+          <label class="alert-label">Alert Sensitivity</label>
+          <div class="thresh-row">
+            <button class="thresh-btn" data-t="conservative" onclick="setAlertSensitivity('conservative')">Conservative</button>
+            <button class="thresh-btn active" data-t="moderate"     onclick="setAlertSensitivity('moderate')">Moderate</button>
+            <button class="thresh-btn" data-t="sensitive"    onclick="setAlertSensitivity('sensitive')">Sensitive</button>
+          </div>
+          <div class="thresh-hint" id="threshHint">RSI &lt; 30 or &gt; 70 · price ±5% in 24h · BB width &gt; 12%</div>
+        </div>
+
+        <div class="alert-form-group">
+          <label class="alert-label">Watch These Coins <span class="hint">(checked = monitored every 5 min)</span></label>
+          <div class="watch-coins" id="watchCoins"></div>
+        </div>
+
+        <div class="alert-actions">
+          <button class="btn-save-alert" onclick="saveAlerts()">💾 Save Settings</button>
+          <button class="btn-test-alert" onclick="testAlert()">✉️ Send Test Email</button>
+        </div>
+
+        <div class="alert-status" id="alertStatus" style="display:none"></div>
+
+      </div>
     </div>
 
   </div>
