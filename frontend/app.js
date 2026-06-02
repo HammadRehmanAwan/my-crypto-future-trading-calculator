@@ -239,6 +239,21 @@ function setDir(dir) {
   document.getElementById('btnShort').classList.toggle('active', dir === 'Short');
 }
 
+function updateLeverage(val) {
+  const v = parseInt(val);
+  document.getElementById('levDisplay').textContent = v + '×';
+  let risk, hint;
+  if (v <= 3)       { risk = 'Low Risk';       hint = `${v}× leverage — profits and losses are ${v}× your capital. Good for beginners.`; }
+  else if (v <= 10) { risk = 'Moderate Risk';  hint = `${v}× leverage — a ${(100/v).toFixed(0)}% price move against you wipes your capital. Use a stop-loss.`; }
+  else if (v <= 25) { risk = 'High Risk';       hint = `${v}× leverage — only a ${(100/v).toFixed(1)}% move against you wipes your capital. Experienced traders only.`; }
+  else if (v <= 50) { risk = 'Very High Risk';  hint = `${v}× leverage — a tiny ${(100/v).toFixed(1)}% move against you wipes your capital. Extreme caution.`; }
+  else              { risk = '⚠️ Extreme Risk'; hint = `${v}× leverage — price only needs to move ${(100/v).toFixed(1)}% against you to lose everything. Not recommended for beginners.`; }
+  const badge = document.getElementById('levRiskBadge');
+  badge.textContent = risk;
+  badge.className = `lev-risk-badge ${v <= 3 ? 'lev-low' : v <= 10 ? 'lev-mod' : v <= 25 ? 'lev-high' : 'lev-extreme'}`;
+  document.getElementById('levHint').textContent = hint;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // TICKER
 // ═══════════════════════════════════════════════════════════════════
@@ -292,22 +307,26 @@ async function loadCoin(coinId, days) {
     rsiBar.style.width      = `${Math.min(100, rsiNow)}%`;
     rsiBar.style.background = rsiNow > 70 ? '#FF3D3D' : rsiNow < 30 ? '#00E887' : '#00D4FF';
     document.getElementById('rsiSig').innerHTML =
-      rsiNow > 70 ? badge('Overbought','red') : rsiNow < 30 ? badge('Oversold','green') : badge('Neutral','neutral');
+      rsiNow > 70 ? badge('Overbought — price may be due for a dip soon', 'red')
+      : rsiNow < 30 ? badge('Oversold — price may be due for a bounce up', 'green')
+      : badge('Normal range — no strong signal yet', 'neutral');
 
     document.getElementById('macdVal').textContent = macdNow.toFixed(4);
-    document.getElementById('macdSig').innerHTML   =
-      macdNow > sigNow ? badge('Bullish ↑','green') : badge('Bearish ↓','red');
+    document.getElementById('macdSig').innerHTML =
+      macdNow > sigNow ? badge('Buyers are gaining control ↑', 'green')
+      : badge('Sellers are gaining control ↓', 'red');
 
     const bbW = ((bbU - bbL) / bbM * 100).toFixed(1);
-    document.getElementById('bbVal').textContent = `Width ${bbW}%`;
-    document.getElementById('bbSig').innerHTML   =
-      curr > bbU ? badge('Above Upper — Overbought','red')
-    : curr < bbL ? badge('Below Lower — Oversold','green')
-    : badge(`Mid zone ${((curr - bbL) / (bbU - bbL) * 100).toFixed(0)}%`,'neutral');
+    document.getElementById('bbVal').textContent = `Channel width: ${bbW}%`;
+    document.getElementById('bbSig').innerHTML =
+      curr > bbU ? badge('Above upper band — possibly overpriced', 'red')
+      : curr < bbL ? badge('Below lower band — possibly underpriced', 'green')
+      : badge(`Normal price range · ${((curr - bbL) / (bbU - bbL) * 100).toFixed(0)}% of channel`, 'neutral');
 
     document.getElementById('trendVal').textContent = fmtPct(chg7d);
-    document.getElementById('trendSig').innerHTML   =
-      chg7d >= 0 ? badge('Uptrend ↑','green') : badge('Downtrend ↓','red');
+    document.getElementById('trendSig').innerHTML =
+      chg7d >= 0 ? badge('Price trended UP this week ↑', 'green')
+      : badge('Price trended DOWN this week ↓', 'red');
 
     const horizon  = parseInt(document.getElementById('horizon').value) || 7;
     const forecast = holtForecast(prices, horizon);
@@ -354,21 +373,21 @@ async function analyze() {
 
   let score = 0;
   const signals = [];
-  if (rsi < 30)       { signals.push({ t:'RSI oversold → bullish momentum',      c:'green'  }); score += 1; }
-  else if (rsi > 70)  { signals.push({ t:'RSI overbought → bearish pressure',    c:'red'    }); score -= 1; }
-  else                  signals.push({ t:`RSI neutral at ${rsi.toFixed(1)}`,      c:'neutral'});
-  if (mac > sig)      { signals.push({ t:'MACD above signal line → bullish',      c:'green'  }); score += 1; }
-  else                { signals.push({ t:'MACD below signal line → bearish',      c:'red'    }); score -= 1; }
-  if (curr < bbL)     { signals.push({ t:'Price below lower BB → potential bounce',c:'green' }); score += 1; }
-  else if (curr > bbU){ signals.push({ t:'Price above upper BB → reversal risk',  c:'red'    }); score -= 1; }
-  else                  signals.push({ t:'Price within Bollinger Bands',           c:'neutral'});
+  if (rsi < 30)       { signals.push({ t:`RSI ${rsi.toFixed(1)}: Price fell too fast — a bounce back up is likely`, c:'green' }); score += 1; }
+  else if (rsi > 70)  { signals.push({ t:`RSI ${rsi.toFixed(1)}: Price rose too fast — a pullback may be coming`, c:'red' }); score -= 1; }
+  else                  signals.push({ t:`RSI ${rsi.toFixed(1)}: Price momentum is normal — no strong signal`, c:'neutral' });
+  if (mac > sig)      { signals.push({ t:'MACD: Buying pressure is building — upward momentum', c:'green' }); score += 1; }
+  else                { signals.push({ t:'MACD: Selling pressure is building — downward momentum', c:'red' }); score -= 1; }
+  if (curr < bbL)     { signals.push({ t:'Bollinger: Price hit the bottom of its normal range — bounce often follows', c:'green' }); score += 1; }
+  else if (curr > bbU){ signals.push({ t:'Bollinger: Price hit the top of its normal range — reversal risk is high', c:'red' }); score -= 1; }
+  else                  signals.push({ t:'Bollinger: Price is comfortably within its normal trading range', c:'neutral' });
   const chgF = (fcst.median[fcst.median.length-1] - curr) / curr * 100;
-  if (chgF > 2)       { signals.push({ t:`Trend forecast +${chgF.toFixed(1)}% over ${horizon}d`, c:'green' }); score += 1; }
-  else if (chgF < -2) { signals.push({ t:`Trend forecast ${chgF.toFixed(1)}% over ${horizon}d`,  c:'red'   }); score -= 1; }
-  else                  signals.push({ t:`Trend forecast minimal (${chgF.toFixed(1)}%)`,           c:'neutral'});
-  if (m.liqDist < 5)  { signals.push({ t:`⚠️ Liquidation ${m.liqDist.toFixed(1)}% away — CRITICAL`, c:'red'   }); score -= 1; }
-  else if (m.liqDist < 10) signals.push({ t:`Liquidation ${m.liqDist.toFixed(1)}% away — moderate`, c:'yellow'});
-  else                      signals.push({ t:`Liquidation ${m.liqDist.toFixed(1)}% away — manageable`,c:'green' });
+  if (chgF > 2)       { signals.push({ t:`Forecast: Model predicts price rises +${chgF.toFixed(1)}% over ${horizon} days`, c:'green' }); score += 1; }
+  else if (chgF < -2) { signals.push({ t:`Forecast: Model predicts price falls ${chgF.toFixed(1)}% over ${horizon} days`, c:'red' }); score -= 1; }
+  else                  signals.push({ t:`Forecast: Price expected to stay roughly flat (${chgF.toFixed(1)}% change)`, c:'neutral' });
+  if (m.liqDist < 5)  { signals.push({ t:`⚠️ DANGER: Your forced-close price is only ${m.liqDist.toFixed(1)}% away — very high risk!`, c:'red' }); score -= 1; }
+  else if (m.liqDist < 10) signals.push({ t:`Caution: Your forced-close price is ${m.liqDist.toFixed(1)}% away — moderate risk`, c:'yellow' });
+  else                      signals.push({ t:`Safe buffer: Your forced-close price is ${m.liqDist.toFixed(1)}% away`, c:'green' });
 
   renderResults(m, curr, fcst, horizon, chgF);
   renderSignal(score, signals, dir);
@@ -389,17 +408,19 @@ function row(label, value, cls = '', sub = '', hl = '') {
 function renderResults(m, curr, fcst, horizon, chgF) {
   const pred    = fcst.median[fcst.median.length - 1];
   const predCls = chgF >= 0 ? 'green' : 'red';
+  const predDesc = chgF >= 0
+    ? `Model expects price to rise ${fmtPct(chgF)} over the next ${horizon} days`
+    : `Model expects price to fall ${Math.abs(chgF).toFixed(2)}% over the next ${horizon} days`;
   document.getElementById('resultsCard').style.display = 'block';
   document.getElementById('resultsBody').innerHTML = `<div class="results-grid">
-    ${row('Current Price', fmtUSD(curr), 'accent')}
-    ${row(`Trend Forecast (${horizon}d)`, fmtUSD(pred) + ` <span style="font-size:11px">${fmtPct(chgF)}</span>`, predCls)}
-    ${row('Entry Price',       fmtUSD(m.entry))}
-    ${row('Required Margin',   fmtUSD(m.margin))}
-    ${row('Contracts',         m.contracts.toFixed(6), 'accent')}
-    ${row('⚠️ Liquidation',   fmtUSD(m.liq), m.liqDist < 10 ? 'red' : '', `${m.liqDist.toFixed(2)}% from entry`, m.liqDist < 10 ? 'hl-red' : '')}
-    ${m.tp != null ? row('🎯 Take Profit', fmtUSD(m.tp), 'green', `PnL ${m.pnlTp >= 0 ? '+' : ''}${fmtUSD(m.pnlTp)} · ROE ${fmtPct(m.roeTp)}`, 'hl-green') : ''}
-    ${m.sl ? row('🛑 Stop Loss', fmtUSD(m.sl), 'red', `PnL ${fmtUSD(m.pnlSl)} · ROE ${fmtPct(m.roeSl)}`, 'hl-red') : ''}
-    ${m.rr != null ? row('Risk / Reward', `1 : ${m.rr.toFixed(2)}`, m.rr >= 2 ? 'green' : m.rr >= 1 ? 'gold' : 'red', '', m.rr >= 2 ? 'hl-green' : m.rr >= 1 ? 'hl-gold' : 'hl-red') : ''}
+    ${row('Current Market Price', fmtUSD(curr), 'accent', 'Live price of the coin right now')}
+    ${row(`Price Forecast (${horizon} days)`, fmtUSD(pred) + ` <span style="font-size:11px">${fmtPct(chgF)}</span>`, predCls, predDesc)}
+    ${row('Your Entry Price', fmtUSD(m.entry), '', 'The price at which you open this trade')}
+    ${row('Your Capital at Risk', fmtUSD(m.margin), '', `Real money you put in — your $${fmt(m.size)} trade size ÷ ${m.leverage}× leverage`)}
+    ${row('💥 Forced Close Price', fmtUSD(m.liq), m.liqDist < 10 ? 'red' : '', `${m.liqDist.toFixed(2)}% from entry — you lose all your capital if price reaches here`, m.liqDist < 10 ? 'hl-red' : '')}
+    ${m.tp != null ? row('🎯 Take Profit Target', fmtUSD(m.tp), 'green', `Your profit at this price: +${fmtUSD(m.pnlTp)} · Return on your capital: ${fmtPct(m.roeTp)}`, 'hl-green') : ''}
+    ${m.sl ? row('🛑 Stop Loss', fmtUSD(m.sl), 'red', `Max loss if triggered: ${fmtUSD(m.pnlSl)} · That is ${fmtPct(m.roeSl)} of your capital`, 'hl-red') : ''}
+    ${m.rr != null ? row('Risk / Reward Ratio', `1 : ${m.rr.toFixed(2)}`, m.rr >= 2 ? 'green' : m.rr >= 1 ? 'gold' : 'red', m.rr >= 2 ? `✅ Good — for every $1 risked you could gain $${m.rr.toFixed(2)}` : m.rr >= 1 ? 'Fair — aim for 1:2 or better for quality trades' : '❌ Poor — you risk more than your potential gain', m.rr >= 2 ? 'hl-green' : m.rr >= 1 ? 'hl-gold' : 'hl-red') : ''}
   </div>`;
 }
 
@@ -408,25 +429,53 @@ function renderResults(m, curr, fcst, horizon, chgF) {
 // ═══════════════════════════════════════════════════════════════════
 
 function renderSignal(score, signals, dir) {
-  let heading, hCls;
-  if      (score >=  3) { heading = '🟢 STRONG BULLISH'; hCls = 'green';  }
-  else if (score >=  1) { heading = '🟡 MILDLY BULLISH'; hCls = 'yellow'; }
-  else if (score <= -3) { heading = '🔴 STRONG BEARISH'; hCls = 'red';    }
-  else if (score <= -1) { heading = '🟡 MILDLY BEARISH'; hCls = 'yellow'; }
-  else                  { heading = '⚪ NEUTRAL';          hCls = 'neutral';}
+  let heading, hCls, summary, summaryEmoji;
+  if (score >= 3) {
+    heading = '🟢 STRONG BULLISH — Good time to go Long';
+    hCls = 'green';
+    summaryEmoji = '📈';
+    summary = 'Most indicators agree: conditions strongly favor the price going UP. This is a good environment for a Long trade, but always use a stop-loss.';
+  } else if (score >= 1) {
+    heading = '🟡 MILDLY BULLISH — Slight upward lean';
+    hCls = 'yellow';
+    summaryEmoji = '↗️';
+    summary = 'Conditions lean upward, but signals are not strong. If trading Long, use a smaller position size and definitely set a stop-loss.';
+  } else if (score <= -3) {
+    heading = '🔴 STRONG BEARISH — Good time to go Short';
+    hCls = 'red';
+    summaryEmoji = '📉';
+    summary = 'Most indicators agree: conditions strongly favor the price going DOWN. This is a good environment for a Short trade, but always use a stop-loss.';
+  } else if (score <= -1) {
+    heading = '🟡 MILDLY BEARISH — Slight downward lean';
+    hCls = 'yellow';
+    summaryEmoji = '↘️';
+    summary = 'Conditions lean downward. Long trades carry higher risk right now. Consider waiting for a better entry or reducing your position size.';
+  } else {
+    heading = '⚪ NEUTRAL — No clear direction';
+    hCls = 'neutral';
+    summaryEmoji = '↔️';
+    summary = 'No clear direction. The market is undecided. Best practice: wait for stronger signals before entering a trade to improve your odds.';
+  }
   const aligned = (score > 0 && dir === 'Long') || (score < 0 && dir === 'Short');
   const alignHtml = score !== 0 ? `<div class="align-msg ${aligned ? 'green' : 'red'}">${
-    aligned ? '✅ Your direction aligns with signals.' : '⚠️ Counter-trend — manage risk carefully.'
+    aligned
+      ? `✅ Your chosen direction (${dir}) matches the signals — good alignment.`
+      : `⚠️ You chose ${dir} but signals lean the other way. This is a counter-trend trade — higher risk.`
   }</div>` : '';
   document.getElementById('signalCard').style.display = 'block';
   document.getElementById('signalBody').innerHTML = `
     <div class="signal-heading ${hCls}">
       <span>${heading}</span>
-      <span class="sig-score">Score ${score > 0 ? '+' : ''}${score}</span>
+      <span class="sig-score">${score > 0 ? '+' : ''}${score} / ±5</span>
+    </div>
+    <div class="beginner-summary">
+      <span class="bs-emoji">${summaryEmoji}</span>
+      <div class="bs-text">${summary}</div>
     </div>
     ${alignHtml}
+    <div class="sig-section-title">Why? — Full Signal Breakdown</div>
     <div class="sig-list">${
-      signals.map(s => `<div class="sig-item ${s.c}"><span class="sig-dot"></span>${s.t}</div>`).join('')
+      signals.map(s => `<div class="sig-item ${s.c}"><span class="sig-dot"></span><span>${s.t}</span></div>`).join('')
     }</div>`;
 }
 

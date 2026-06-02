@@ -55,26 +55,35 @@
 
     <!-- Technicals card -->
     <div class="card tech-card">
-      <h3 class="card-heading">📊 Technical Indicators</h3>
+      <h3 class="card-heading">📊 Market Health Indicators <span class="heading-sub">— What is the market telling us?</span></h3>
       <div class="tech-grid">
         <div class="tech-item">
-          <div class="ti-label">RSI (14)</div>
+          <div class="ti-label">RSI — Overbought / Oversold</div>
+          <div class="ti-desc">Is the price rising or falling too fast?</div>
           <div class="ti-val" id="rsiVal">—</div>
           <div class="ti-bar-track"><div class="ti-bar-fill" id="rsiBar"></div></div>
+          <div class="rsi-zone-row">
+            <span class="rz green-text">← Oversold (buy)</span>
+            <span class="rz neutral-text">Neutral</span>
+            <span class="rz red-text">(sell) Overbought →</span>
+          </div>
           <div class="ti-sig" id="rsiSig">—</div>
         </div>
         <div class="tech-item">
-          <div class="ti-label">MACD (12/26/9)</div>
+          <div class="ti-label">MACD — Momentum Direction</div>
+          <div class="ti-desc">Are buyers or sellers gaining control?</div>
           <div class="ti-val" id="macdVal">—</div>
           <div class="ti-sig" id="macdSig">—</div>
         </div>
         <div class="tech-item">
-          <div class="ti-label">Bollinger Bands (20,2σ)</div>
+          <div class="ti-label">Bollinger Bands — Price Channel</div>
+          <div class="ti-desc">Is the price unusually high or low right now?</div>
           <div class="ti-val" id="bbVal">—</div>
           <div class="ti-sig" id="bbSig">—</div>
         </div>
         <div class="tech-item">
           <div class="ti-label">7-Day Trend</div>
+          <div class="ti-desc">Has the price been going up or down this week?</div>
           <div class="ti-val" id="trendVal">—</div>
           <div class="ti-sig" id="trendSig">—</div>
         </div>
@@ -90,10 +99,10 @@
       <h3 class="card-heading">⚙️ Position Setup</h3>
 
       <div class="form-group">
-        <label>Direction</label>
+        <label>Direction — Which way do you think the price will move?</label>
         <div class="dir-toggle">
-          <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">📈 Long</button>
-          <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">📉 Short</button>
+          <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">📈 Long — Price will GO UP</button>
+          <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">📉 Short — Price will GO DOWN</button>
         </div>
       </div>
 
@@ -103,31 +112,32 @@
       </div>
 
       <div class="form-group">
-        <label>Leverage — <span id="levDisplay" class="accent">10×</span></label>
+        <label>Leverage — <span id="levDisplay" class="accent">10×</span> <span class="lev-risk-badge" id="levRiskBadge">Moderate Risk</span></label>
         <input type="range" id="leverage" class="range-slider" min="1" max="125" value="10"
-               oninput="document.getElementById('levDisplay').textContent=this.value+'×'" />
+               oninput="updateLeverage(this.value)" />
         <div class="range-marks"><span>1×</span><span>25×</span><span>50×</span><span>100×</span><span>125×</span></div>
+        <div class="lev-hint" id="levHint">Multiplies both profits AND losses by 10×. A 1% price drop wipes 10% of your money.</div>
       </div>
 
       <div class="form-group">
-        <label for="posSize">Position Size (USD)</label>
+        <label for="posSize">Total Trade Size (USD) <span class="hint">— total value, not what you actually put in</span></label>
         <input type="number" id="posSize" value="1000" min="1" />
       </div>
 
       <div class="divider"><span>Risk Management</span></div>
 
       <div class="form-group">
-        <label for="takeProfit">Take Profit (USD) <span class="hint">— 0 = use forecast</span></label>
+        <label for="takeProfit">Take Profit Price (USD) <span class="hint">— price to auto-close with profit (0 = use AI forecast)</span></label>
         <input type="number" id="takeProfit" value="0" min="0" step="0.01" />
       </div>
 
       <div class="form-group">
-        <label for="stopLoss">Stop Loss (USD) <span class="hint">— 0 = skip</span></label>
+        <label for="stopLoss">Stop Loss Price (USD) <span class="hint">— price to auto-close to limit your loss (0 = skip)</span></label>
         <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
       </div>
 
       <div class="form-group">
-        <label>Forecast Horizon — <span id="horizDisplay" class="accent">7 days</span></label>
+        <label>Predict How Many Days Ahead — <span id="horizDisplay" class="accent">7 days</span></label>
         <input type="range" id="horizon" class="range-slider" min="1" max="14" value="7"
                oninput="document.getElementById('horizDisplay').textContent=this.value+' days'" />
       </div>
@@ -137,7 +147,7 @@
 
     <!-- Results card -->
     <div class="card results-card" id="resultsCard" style="display:none">
-      <h3 class="card-heading">📋 Trade Metrics</h3>
+      <h3 class="card-heading">📋 Your Trade — Explained Simply</h3>
       <div id="resultsBody"></div>
     </div>
 
