@@ -1,0 +1,54 @@
+name: Deploy to Hugging Face Spaces
+
+on:
+  push:
+    branches:
+      - claude/crypto-model-hugging-face-rSr4s
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push to Hugging Face Spaces
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config --global user.email "deploy@github.com"
+          git config --global user.name "GitHub Actions"
+          # Clone the HF Space repo and copy files
+          pip install huggingface_hub
+          python - <<'EOF'
+          import os
+          from huggingface_hub import HfApi
+
+          token = os.environ["HF_TOKEN"]
+          api = HfApi(token=token)
+
+          repo_id = "HammadRehman/crypto-futures-calculator"
+
+          # Create Space if it doesn't exist
+          api.create_repo(
+              repo_id=repo_id,
+              repo_type="space",
+              space_sdk="gradio",
+              exist_ok=True,
+              private=False,
+          )
+
+          # Upload all source files
+          api.upload_folder(
+              folder_path=".",
+              repo_id=repo_id,
+              repo_type="space",
+              commit_message="Auto-deploy from GitHub Actions",
+              ignore_patterns=[".git/*", ".github/*", "__pycache__/*", "*.pyc"],
+          )
+          print(f"Deployed to https://huggingface.co/spaces/{repo_id}")
+          EOF
