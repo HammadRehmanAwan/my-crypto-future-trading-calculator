@@ -4,6 +4,12 @@
 // CONFIG
 // ═══════════════════════════════════════════════════════════════════
 
+// EmailJS credentials — safe to expose here because allowed origins are
+// restricted to hammadrehmanawan.github.io in the EmailJS dashboard.
+const EJS_PUBLIC_KEY  = 'umm68O9D3twguzpjd';
+const EJS_SERVICE_ID  = 'service_cf3llwp';
+const EJS_TEMPLATE_ID = 'template_2544kb6';
+
 const COINS = {
   'bitcoin':      { name: 'Bitcoin (BTC)',    sym: 'BTC'  },
   'ethereum':     { name: 'Ethereum (ETH)',   sym: 'ETH'  },
@@ -255,7 +261,7 @@ function setCooldown(coinId) {
 
 function checkVolatilityConditions(coinId, coinName, currPrice, rsi, change24h, bbWidth) {
   const s = getAlertSettings();
-  if (!s.enabled || !s.email || !s.publicKey || !s.serviceId || !s.templateId) return;
+  if (!s.enabled || !s.email) return;
   const watched = s.watchCoins || [];
   if (!watched.includes(coinId)) return;
   if (isOnCooldown(coinId)) return;
@@ -280,17 +286,17 @@ async function sendVolatilityEmail(s, coinName, price, reasons, coinId) {
     showAlertStatus('❌ EmailJS library not loaded — check your internet connection.', 'error'); return;
   }
   try {
-    await emailjs.send(s.serviceId, s.templateId, {
+    await emailjs.send(EJS_SERVICE_ID, EJS_TEMPLATE_ID, {
       to_email:      s.email,
       coin_name:     coinName,
       current_price: '$' + price.toLocaleString('en-US', { maximumFractionDigits: 2 }),
       alert_reasons: reasons.map((r, i) => `${i + 1}. ${r}`).join('\n'),
       alert_time:    new Date().toLocaleString(),
-    }, s.publicKey);
+    }, EJS_PUBLIC_KEY);
     if (coinId !== '_test') setCooldown(coinId);
     showAlertStatus(`✅ Alert email sent for ${coinName}!`, 'success');
   } catch (e) {
-    showAlertStatus(`❌ Email failed: ${e?.text || e?.message || 'Check your EmailJS credentials.'}`, 'error');
+    showAlertStatus(`❌ Email failed: ${e?.text || e?.message || 'Unknown error — is your email address correct?'}`, 'error');
   }
 }
 
@@ -349,25 +355,24 @@ function setAlertSensitivity(val) {
 }
 
 function saveAlerts() {
+  const email = document.getElementById('alertEmail').value.trim();
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    showAlertStatus('❌ Please enter a valid email address.', 'error'); return;
+  }
   const s = {
-    enabled:    document.getElementById('alertEnabled').checked,
-    email:      document.getElementById('alertEmail').value.trim(),
-    publicKey:  document.getElementById('ejsPublicKey').value.trim(),
-    serviceId:  document.getElementById('ejsServiceId').value.trim(),
-    templateId: document.getElementById('ejsTemplateId').value.trim(),
+    enabled:     document.getElementById('alertEnabled').checked,
+    email,
     sensitivity: document.querySelector('.thresh-btn.active')?.dataset?.t || 'moderate',
-    watchCoins: [...document.querySelectorAll('.watch-coin-cb:checked')].map(c => c.value),
+    watchCoins:  [...document.querySelectorAll('.watch-coin-cb:checked')].map(c => c.value),
   };
   persistAlertSettings(s);
-  showAlertStatus('✅ Settings saved! Monitoring ' + (s.watchCoins.length) + ' coin(s) every 5 minutes.', 'success');
+  showAlertStatus('✅ Saved! Monitoring ' + s.watchCoins.length + ' coin(s) every 5 minutes.', 'success');
 }
 
 async function testAlert() {
   saveAlerts();
   const s = getAlertSettings();
-  if (!s.email || !s.publicKey || !s.serviceId || !s.templateId) {
-    showAlertStatus('❌ Fill in your email and all three EmailJS fields first.', 'error'); return;
-  }
+  if (!s.email) { showAlertStatus('❌ Enter your email address first.', 'error'); return; }
   await sendVolatilityEmail(s, 'Bitcoin (BTC) — TEST', 65000, ['This is a test alert. Your email setup is working correctly!'], '_test');
 }
 
@@ -383,11 +388,8 @@ function initAlertUI() {
       container.appendChild(lbl);
     });
   }
-  if (s.email)      document.getElementById('alertEmail').value   = s.email;
-  if (s.publicKey)  document.getElementById('ejsPublicKey').value  = s.publicKey;
-  if (s.serviceId)  document.getElementById('ejsServiceId').value  = s.serviceId;
-  if (s.templateId) document.getElementById('ejsTemplateId').value = s.templateId;
-  if (s.enabled)    document.getElementById('alertEnabled').checked = true;
+  if (s.email)    document.getElementById('alertEmail').value    = s.email;
+  if (s.enabled)  document.getElementById('alertEnabled').checked = true;
   setAlertSensitivity(s.sensitivity || 'moderate');
 }
 
