@@ -16,9 +16,9 @@ from datetime import timedelta
 import gradio as gr
 import torch
 
-# ──────────────────────────────────────────────────────────────────────────────
-COIN REGISTRY
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# COIN REGISTRY
+# ─────────────────────────────────────────────────────────────────────────────
 
 SUPPORTED_COINS = {
     "Bitcoin (BTC)":    "bitcoin",
@@ -38,11 +38,11 @@ SUPPORTED_COINS = {
     "Filecoin (FIL)":   "filecoin",
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-MODEL  (lazy-loaded singleton)
-Primary:  amazon/chronos-bolt-small  — 20x faster on CPU, Apache 2.0
-Fallback: amazon/chronos-t5-small   — original Chronos, also free
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL  (lazy-loaded singleton)
+# Primary:  amazon/chronos-bolt-small  — 20x faster on CPU, Apache 2.0
+# Fallback: amazon/chronos-t5-small   — original Chronos, also free
+# ─────────────────────────────────────────────────────────────────────────────
 
 _pipeline = None
 _pipeline_type = None   # "bolt" | "classic"
@@ -80,9 +80,9 @@ def load_model():
         return None, None, str(exc)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-DATA FETCHING  (CoinGecko free public API — no key required)
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA FETCHING  (CoinGecko free public API — no key required)
+# ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_ohlcv(coin_id: str, days: int = 90):
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
@@ -112,9 +112,9 @@ def fetch_current_price(coin_id: str):
         return None, None, str(exc)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-TECHNICAL INDICATORS
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# TECHNICAL INDICATORS
+# ─────────────────────────────────────────────────────────────────────────────
 
 def calc_rsi(prices: np.ndarray, period: int = 14) -> np.ndarray:
     s = pd.Series(prices)
@@ -142,9 +142,9 @@ def calc_bollinger(prices: np.ndarray, period=20, mult=2):
     return (mid + mult * std).values, mid.values, (mid - mult * std).values
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-AI PRICE PREDICTION
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# AI PRICE PREDICTION
+# ─────────────────────────────────────────────────────────────────────────────
 
 QUANTILE_LEVELS = [0.1, 0.5, 0.9]
 
@@ -183,9 +183,9 @@ def ai_forecast(prices: np.ndarray, horizon: int = 7):
         return None, str(exc)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-FUTURES MATHS
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# FUTURES MATHS
+# ─────────────────────────────────────────────────────────────────────────────
 
 def futures_metrics(
     entry: float,
@@ -197,7 +197,7 @@ def futures_metrics(
 ):
     margin    = size_usd / leverage
     contracts = size_usd / entry
-    mmr       = 0.005   # 0.5% maintenance margin rate
+    mmr       = 0.005   # 0.5% maintenance margin rate (industry standard)
 
     if direction == "Long":
         liq      = entry * (1 - 1 / leverage + mmr)
@@ -230,9 +230,9 @@ def futures_metrics(
     return res
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-CHART BUILDERS
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# CHART BUILDERS
+# ─────────────────────────────────────────────────────────────────────────────
 
 def chart_prediction(df, fcst, horizon, coin_label):
     fig = go.Figure()
@@ -307,9 +307,9 @@ def chart_technicals(df, rsi_v, macd_l, macd_s, macd_h, bb_u, bb_m, bb_l, coin_l
     return fig
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-TEXT FORMATTERS
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# TEXT FORMATTERS
+# ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_metrics(m: dict, curr_px: float, fcst, rsi_val: float, coin: str) -> str:
     pred = fcst["median"][-1] if fcst else None
@@ -421,9 +421,9 @@ def fmt_signal(rsi_val, macd_l, macd_s, px, bb_u, bb_l, direction, m, fcst) -> s
     return body
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-ORCHESTRATION
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# ORCHESTRATION
+# ─────────────────────────────────────────────────────────────────────────────
 
 def analyze(coin_label, direction, entry_px, leverage, size_usd, tp, sl, horizon):
     coin_id = SUPPORTED_COINS.get(coin_label, "bitcoin")
@@ -471,9 +471,9 @@ def refresh_price(coin_label):
     return f"{emoji} ${px:,.2f}  ({chg:+.2f}% 24h)"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-GRADIO UI
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# GRADIO UI
+# ─────────────────────────────────────────────────────────────────────────────
 
 THEME = gr.themes.Soft(
     primary_hue="cyan",
