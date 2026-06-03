@@ -224,22 +224,8 @@
 <!-- ─── DASHBOARD VIEW ─── -->
 <section class="dashboard-view" id="dashView" style="display:none">
 
-  <!-- Bot control card -->
+  <!-- Dashboard control card -->
   <div class="card bot-ctrl-card">
-    <div class="bot-ctrl-top">
-      <div>
-        <h2 class="bot-ctrl-title">🤖 AI Trading Bot</h2>
-        <p class="bot-ctrl-sub">Bot analyzes all coins every 4 hours, picks the best signals, and tracks your trades in real-time.</p>
-      </div>
-      <div class="bot-toggle-wrap">
-        <label class="bot-switch">
-          <input type="checkbox" id="botToggle" onchange="toggleBot()">
-          <span class="bot-sw-slider"></span>
-        </label>
-        <span class="bot-toggle-label" id="botToggleLabel">Start Bot</span>
-      </div>
-    </div>
-
     <div class="dash-input-row">
       <div class="capital-field">
         <span class="capital-sign">$</span>
@@ -259,17 +245,6 @@
       <div class="re-item"        id="re-aggressive">🚀 <strong>Aggressive:</strong> High leverage (8–20×). Experienced traders only.</div>
     </div>
 
-    <!-- Bot running status bar -->
-    <div class="bot-status-bar" id="botStatusBar" style="display:none">
-      <span class="bsb-dot"></span>
-      <span class="bsb-text">Bot Active</span>
-      <span class="bsb-divider">|</span>
-      <span>Next analysis in: <strong id="botCountdown">—</strong></span>
-      <span class="bsb-divider">|</span>
-      <span>Capital: <strong>$<span id="botCapitalDisplay">1000</span></strong></span>
-      <span class="bsb-divider">|</span>
-      <span>Profile: <strong id="botRiskDisplay">Balanced</strong></span>
-    </div>
   </div>
 
   <!-- Loader -->
@@ -297,42 +272,12 @@
       <h3 class="card-heading">📡 Current AI Signals — Top Opportunities</h3>
       <div id="dashSummary"></div>
     </div>
-    <div class="dash-howto">
-      <strong>Two ways to use these signals:</strong>
-      Click <strong>📄 Paper Trade</strong> to simulate and track without real money.
-      Click <strong>🔗 Open on Exchange</strong> for step-by-step instructions to place a real trade on Binance/Bybit.
-    </div>
     <div class="dash-trades-grid" id="dashTradesGrid"></div>
   </div>
 
-  <!-- Open Positions Monitor -->
-  <div class="card pos-card" id="positionsCard" style="display:none">
-    <div class="pos-card-head">
-      <h3 class="card-heading" style="margin-bottom:0">📊 Open Positions — Live Monitoring</h3>
-      <span class="pos-live-badge">● LIVE</span>
-    </div>
-    <div id="positionsBody"></div>
-  </div>
-
-  <!-- Trade History -->
-  <div class="card hist-card" id="historyCard" style="display:none">
-    <div class="hist-card-head">
-      <h3 class="card-heading" style="margin-bottom:0">📜 Trade History</h3>
-      <button class="hist-clear-btn" onclick="clearHistory()">Clear</button>
-    </div>
-    <div id="historyBody"></div>
-  </div>
-
-  <div class="dash-disclaimer">⚠️ Paper trades are simulated with real market data. Real trading requires opening positions on your own exchange. This tool is for educational purposes only — not financial advice.</div>
+  <div class="dash-disclaimer">⚠️ Signals are based on technical analysis and a statistical forecast. This tool is for educational purposes only — not financial advice.</div>
 </section>
 
-<!-- ─── EXCHANGE INSTRUCTIONS MODAL ─── -->
-<div class="modal-overlay" id="modalOverlay" onclick="closeModal()" style="display:none">
-  <div class="modal-box" onclick="event.stopPropagation()">
-    <button class="modal-close" onclick="closeModal()">✕</button>
-    <div id="modalContent"></div>
-  </div>
-</div>
 
 <footer class="footer">
   Powered by
