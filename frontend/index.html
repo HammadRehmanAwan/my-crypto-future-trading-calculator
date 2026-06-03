@@ -224,10 +224,21 @@
 <!-- ─── DASHBOARD VIEW ─── -->
 <section class="dashboard-view" id="dashView" style="display:none">
 
-  <!-- Input card -->
-  <div class="card dash-input-card">
-    <h2 class="dash-input-title">💰 How much do you want to invest in futures?</h2>
-    <p class="dash-input-sub">The AI will scan all 15 coins, find the best opportunities, and split your money across the top trades automatically.</p>
+  <!-- Bot control card -->
+  <div class="card bot-ctrl-card">
+    <div class="bot-ctrl-top">
+      <div>
+        <h2 class="bot-ctrl-title">🤖 AI Trading Bot</h2>
+        <p class="bot-ctrl-sub">Bot analyzes all coins every 4 hours, picks the best signals, and tracks your trades in real-time.</p>
+      </div>
+      <div class="bot-toggle-wrap">
+        <label class="bot-switch">
+          <input type="checkbox" id="botToggle" onchange="toggleBot()">
+          <span class="bot-sw-slider"></span>
+        </label>
+        <span class="bot-toggle-label" id="botToggleLabel">Start Bot</span>
+      </div>
+    </div>
 
     <div class="dash-input-row">
       <div class="capital-field">
@@ -239,15 +250,26 @@
         <button class="risk-btn"        data-r="moderate"     onclick="setRiskProfile('moderate')">⚖️ Balanced</button>
         <button class="risk-btn"        data-r="aggressive"   onclick="setRiskProfile('aggressive')">🚀 Aggressive</button>
       </div>
+      <button class="btn-analyze-once" id="dashBtn" onclick="runDashboard()">🔍 Analyze Now</button>
     </div>
 
     <div class="risk-explain">
-      <div class="re-item active" id="re-conservative">🛡️ <strong>Safe:</strong> Low leverage (2–5×), tight stop-losses, smaller but safer gains. Good for beginners.</div>
-      <div class="re-item"        id="re-moderate">⚖️ <strong>Balanced:</strong> Medium leverage (4–10×), moderate risk. Best of both worlds.</div>
-      <div class="re-item"        id="re-aggressive">🚀 <strong>Aggressive:</strong> High leverage (8–20×), bigger potential gains AND bigger potential losses. Experienced only.</div>
+      <div class="re-item active" id="re-conservative">🛡️ <strong>Safe:</strong> Low leverage (2–5×), tight stop-losses. Good for beginners.</div>
+      <div class="re-item"        id="re-moderate">⚖️ <strong>Balanced:</strong> Medium leverage (4–10×). Best of both worlds.</div>
+      <div class="re-item"        id="re-aggressive">🚀 <strong>Aggressive:</strong> High leverage (8–20×). Experienced traders only.</div>
     </div>
 
-    <button class="btn-dash-analyze" id="dashBtn" onclick="runDashboard()">🤖 Generate My Trade Plan</button>
+    <!-- Bot running status bar -->
+    <div class="bot-status-bar" id="botStatusBar" style="display:none">
+      <span class="bsb-dot"></span>
+      <span class="bsb-text">Bot Active</span>
+      <span class="bsb-divider">|</span>
+      <span>Next analysis in: <strong id="botCountdown">—</strong></span>
+      <span class="bsb-divider">|</span>
+      <span>Capital: <strong>$<span id="botCapitalDisplay">1000</span></strong></span>
+      <span class="bsb-divider">|</span>
+      <span>Profile: <strong id="botRiskDisplay">Balanced</strong></span>
+    </div>
   </div>
 
   <!-- Loader -->
@@ -255,41 +277,62 @@
     <div class="spin"></div>
     <div>
       <div class="dl-title">Analyzing all 15 coins…</div>
-      <div class="dl-sub">Computing RSI, MACD, Bollinger Bands + AI price forecast for each coin</div>
+      <div class="dl-sub">Computing RSI, MACD, Bollinger Bands + AI forecast for each coin</div>
     </div>
   </div>
 
-  <!-- No signal message -->
+  <!-- No signal -->
   <div class="dash-no-signal" id="dashNoSignal" style="display:none">
     <div style="font-size:40px">🤔</div>
     <h3>No strong signals right now</h3>
-    <p>Markets are calm and indicators are neutral. This is often the best time to wait. Check back in a few hours when conditions develop.</p>
+    <p>Markets are undecided. This is often the best time to wait. The bot will keep checking every 4 hours.</p>
   </div>
 
-  <!-- Error message -->
+  <!-- Error -->
   <div class="dash-error" id="dashError" style="display:none"></div>
 
-  <!-- Results -->
+  <!-- Current signals -->
   <div id="dashResults" style="display:none">
-
-    <!-- Portfolio summary -->
     <div class="card dash-summary-card">
-      <h3 class="card-heading">📊 Your Portfolio Plan at a Glance</h3>
+      <h3 class="card-heading">📡 Current AI Signals — Top Opportunities</h3>
       <div id="dashSummary"></div>
     </div>
-
-    <!-- How to use guide -->
     <div class="dash-howto">
-      <strong>How to use this plan:</strong> Open your exchange (Binance, Bybit, etc.) → Go to Futures → Search the coin → Set the leverage shown → Enter at the current price → Set your Take Profit and Stop Loss levels → Done.
+      <strong>Two ways to use these signals:</strong>
+      Click <strong>📄 Paper Trade</strong> to simulate and track without real money.
+      Click <strong>🔗 Open on Exchange</strong> for step-by-step instructions to place a real trade on Binance/Bybit.
     </div>
-
-    <!-- Trade cards -->
     <div class="dash-trades-grid" id="dashTradesGrid"></div>
-
-    <div class="dash-disclaimer">⚠️ This plan is generated by technical analysis algorithms and is for educational purposes only. Never invest more than you can afford to lose. Crypto futures carry extreme risk.</div>
   </div>
 
+  <!-- Open Positions Monitor -->
+  <div class="card pos-card" id="positionsCard" style="display:none">
+    <div class="pos-card-head">
+      <h3 class="card-heading" style="margin-bottom:0">📊 Open Positions — Live Monitoring</h3>
+      <span class="pos-live-badge">● LIVE</span>
+    </div>
+    <div id="positionsBody"></div>
+  </div>
+
+  <!-- Trade History -->
+  <div class="card hist-card" id="historyCard" style="display:none">
+    <div class="hist-card-head">
+      <h3 class="card-heading" style="margin-bottom:0">📜 Trade History</h3>
+      <button class="hist-clear-btn" onclick="clearHistory()">Clear</button>
+    </div>
+    <div id="historyBody"></div>
+  </div>
+
+  <div class="dash-disclaimer">⚠️ Paper trades are simulated with real market data. Real trading requires opening positions on your own exchange. This tool is for educational purposes only — not financial advice.</div>
 </section>
+
+<!-- ─── EXCHANGE INSTRUCTIONS MODAL ─── -->
+<div class="modal-overlay" id="modalOverlay" onclick="closeModal()" style="display:none">
+  <div class="modal-box" onclick="event.stopPropagation()">
+    <button class="modal-close" onclick="closeModal()">✕</button>
+    <div id="modalContent"></div>
+  </div>
+</div>
 
 <footer class="footer">
   Powered by

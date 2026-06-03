@@ -40,6 +40,8 @@ const state = {
   prices: null, dates: null, chart: null, cache: {},
 };
 
+let _currentPlans = [];
+
 // ═══════════════════════════════════════════════════════════════════
 // API  (60 s in-memory cache)
 // ═══════════════════════════════════════════════════════════════════
@@ -679,6 +681,22 @@ function init() {
   setInterval(refreshTicker, 60_000);
   initAlertUI();
   startBackgroundAlertChecks();
+
+  // Restore bot state across page refreshes
+  const bs = loadBotState();
+  if (bs.running) {
+    const tog = document.getElementById('botToggle');
+    if (tog) tog.checked = true;
+    if (bs.capital) document.getElementById('dashCapital').value = bs.capital;
+    if (bs.profile) setRiskProfile(bs.profile);
+    document.getElementById('botCapitalDisplay').textContent = (bs.capital || 1000).toFixed(0);
+    document.getElementById('botRiskDisplay').textContent =
+      { conservative: 'Safe', moderate: 'Balanced', aggressive: 'Aggressive' }[bs.profile] || 'Balanced';
+    startBotTimers();
+  }
+  renderBotStatus();
+  renderPositions();
+  renderHistory();
 }
 
 document.addEventListener('DOMContentLoaded', init);
@@ -769,7 +787,7 @@ async function runDashboard() {
 
     if (scored.length === 0) {
       document.getElementById('dashNoSignal').style.display = 'block';
-      btn.disabled = false; btn.textContent = '🤖 Generate My Trade Plan'; return;
+      btn.disabled = false; btn.textContent = '🔍 Analyze Now'; return;
     }
 
     const levTable = {
@@ -809,7 +827,7 @@ async function runDashboard() {
       ? '⚠️ CoinGecko rate limit hit — please wait 60 seconds and try again.'
       : `⚠️ Failed to load data: ${e.message}`;
   }
-  btn.disabled = false; btn.textContent = '🤖 Generate My Trade Plan';
+  btn.disabled = false; btn.textContent = '🔍 Analyze Now';
 }
 
 function renderDashboard(trades, capital, riskProfile) {
@@ -827,7 +845,8 @@ function renderDashboard(trades, capital, riskProfile) {
       <div class="dsi"><div class="dsi-label">Risk Profile</div><div class="dsi-val">${riskLabels[riskProfile]}</div></div>
     </div>`;
 
-  document.getElementById('dashTradesGrid').innerHTML = trades.map(t => {
+  _currentPlans = trades;
+  document.getElementById('dashTradesGrid').innerHTML = trades.map((t, i) => {
     const isLong   = t.dir === 'Long';
     const allocPct = (t.alloc / capital * 100).toFixed(0);
     const stars    = '⭐'.repeat(Math.min(5, Math.abs(t.score)));
@@ -878,8 +897,350 @@ function renderDashboard(trades, capital, riskProfile) {
         ${t.why.map(w => `<div class="tc-why-item">• ${w}</div>`).join('')}
       </div>
 
+      <div class="tc-execute">
+        <button class="tc-btn-paper"  onclick="openTrade(${i},'paper')">📄 Paper Trade</button>
+        <button class="tc-btn-manual" onclick="openTrade(${i},'manual')">🔗 Open on Exchange</button>
+      </div>
+
     </div>`;
   }).join('');
 
   document.getElementById('dashResults').style.display = 'block';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BOT — STORAGE
+// ═══════════════════════════════════════════════════════════════════
+
+const BOT_KEY  = 'cfBot_v1';
+const POS_KEY  = 'cfPos_v1';
+const HIST_KEY = 'cfHist_v1';
+
+function loadBotState()  { try { return JSON.parse(localStorage.getItem(BOT_KEY)  || '{}'); } catch { return {}; } }
+function saveBotState(s) { localStorage.setItem(BOT_KEY,  JSON.stringify(s)); }
+function loadPositions() { try { return JSON.parse(localStorage.getItem(POS_KEY)  || '[]'); } catch { return []; } }
+function savePositions(p){ localStorage.setItem(POS_KEY,  JSON.stringify(p)); }
+function loadHistory()   { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch { return []; } }
+function saveHistory(h)  { localStorage.setItem(HIST_KEY, JSON.stringify(h)); }
+
+// ═══════════════════════════════════════════════════════════════════
+// BOT — LIFECYCLE
+// ═══════════════════════════════════════════════════════════════════
+
+let _botAnalysisTimer  = null;
+let _botMonitorTimer   = null;
+let _botCountdownTimer = null;
+let _botNextRun        = null;
+
+function toggleBot() {
+  const on      = document.getElementById('botToggle').checked;
+  const capital = parseFloat(document.getElementById('dashCapital').value) || 1000;
+  const profile = document.querySelector('.risk-btn.active')?.dataset?.r || 'moderate';
+  const s = loadBotState();
+  s.running = on; s.capital = capital; s.profile = profile;
+  saveBotState(s);
+  if (on) {
+    document.getElementById('botCapitalDisplay').textContent = capital.toFixed(0);
+    document.getElementById('botRiskDisplay').textContent =
+      { conservative: 'Safe', moderate: 'Balanced', aggressive: 'Aggressive' }[profile];
+    startBotTimers();
+    runBotAnalysis();
+  } else {
+    stopBotTimers();
+  }
+  renderBotStatus();
+}
+
+function startBotTimers() {
+  stopBotTimers();
+  const interval = 4 * 60 * 60 * 1000;
+  _botNextRun = Date.now() + interval;
+  _botAnalysisTimer  = setInterval(() => { _botNextRun = Date.now() + interval; runBotAnalysis(); }, interval);
+  _botMonitorTimer   = setInterval(monitorPositions, 30_000);
+  _botCountdownTimer = setInterval(updateCountdown, 1000);
+}
+
+function stopBotTimers() {
+  clearInterval(_botAnalysisTimer);
+  clearInterval(_botMonitorTimer);
+  clearInterval(_botCountdownTimer);
+  _botAnalysisTimer = _botMonitorTimer = _botCountdownTimer = null;
+  _botNextRun = null;
+}
+
+function updateCountdown() {
+  const el = document.getElementById('botCountdown');
+  if (!el || !_botNextRun) return;
+  const ms = Math.max(0, _botNextRun - Date.now());
+  const h  = Math.floor(ms / 3_600_000);
+  const m  = Math.floor((ms % 3_600_000) / 60_000);
+  const s  = Math.floor((ms % 60_000) / 1000);
+  el.textContent = `${h}h ${m.toString().padStart(2,'0')}m ${s.toString().padStart(2,'0')}s`;
+}
+
+function renderBotStatus() {
+  const s   = loadBotState();
+  const bar = document.getElementById('botStatusBar');
+  const lbl = document.getElementById('botToggleLabel');
+  if (bar) bar.style.display = s.running ? 'flex' : 'none';
+  if (lbl) lbl.textContent = s.running ? 'Bot Running' : 'Start Bot';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BOT — AUTO ANALYSIS (runs every 4 hours when bot is on)
+// ═══════════════════════════════════════════════════════════════════
+
+async function runBotAnalysis() {
+  const s = loadBotState();
+  document.getElementById('dashCapital').value = s.capital || 1000;
+  setRiskProfile(s.profile || 'moderate');
+  await runDashboard();
+  // Auto-open paper trades for strong signals (score >= 3)
+  const positions = loadPositions();
+  const openIds   = new Set(positions.map(p => p.coinId));
+  let opened = 0;
+  for (const plan of _currentPlans) {
+    if (Math.abs(plan.score) >= 3 && !openIds.has(plan.id)) {
+      openPosition(plan, 'auto');
+      openIds.add(plan.id);
+      opened++;
+    }
+  }
+  if (opened > 0) showToast(`🤖 Bot auto-opened ${opened} paper trade${opened > 1 ? 's' : ''}`);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BOT — POSITIONS
+// ═══════════════════════════════════════════════════════════════════
+
+function openTrade(idx, mode) {
+  const plan = _currentPlans[idx];
+  if (!plan) return;
+  if (mode === 'paper') openPosition(plan, 'manual');
+  else showTradeInstructions(idx);
+}
+
+function openPosition(plan, source = 'manual') {
+  const positions = loadPositions();
+  if (positions.find(p => p.coinId === plan.id)) {
+    if (source === 'manual') showToast(`⚠️ Already tracking ${plan.sym}. Close the existing position first.`);
+    return;
+  }
+  const pos = {
+    id: Date.now() + Math.random(),
+    coinId: plan.id, sym: plan.sym, name: plan.name, dir: plan.dir,
+    entry: plan.price, size: plan.alloc, margin: plan.margin,
+    tp: plan.tp, sl: plan.sl, lev: plan.lev, openTime: Date.now(),
+  };
+  positions.push(pos);
+  savePositions(positions);
+  renderPositions();
+  document.getElementById('positionsCard').style.display = 'block';
+  if (source === 'manual')
+    showToast(`📄 Paper trade opened: ${plan.sym} ${plan.dir} @ ${fmtUSD(plan.price)}`);
+}
+
+async function monitorPositions() {
+  const positions = loadPositions();
+  if (positions.length === 0) { renderPositions(); return; }
+  try {
+    const ids       = [...new Set(positions.map(p => p.coinId))].join(',');
+    const priceData = await apiFetch(`${BASE}/simple/price?ids=${ids}&vs_currencies=usd`, `live-${ids}`, 15_000);
+    const toClose   = [];
+    positions.forEach(pos => {
+      const curr = priceData[pos.coinId]?.usd;
+      if (!curr) return;
+      if      (pos.dir === 'Long'  && curr >= pos.tp) toClose.push({ id: pos.id, reason: '🎯 Take Profit', price: curr });
+      else if (pos.dir === 'Short' && curr <= pos.tp) toClose.push({ id: pos.id, reason: '🎯 Take Profit', price: curr });
+      else if (pos.dir === 'Long'  && curr <= pos.sl) toClose.push({ id: pos.id, reason: '🛑 Stop Loss',   price: curr });
+      else if (pos.dir === 'Short' && curr >= pos.sl) toClose.push({ id: pos.id, reason: '🛑 Stop Loss',   price: curr });
+    });
+    toClose.forEach(({ id, reason, price }) => closePosition(id, reason, price));
+    renderPositions(priceData);
+  } catch (e) { console.warn('Monitor:', e.message); }
+}
+
+function closePosition(id, reason, currentPrice) {
+  const positions = loadPositions();
+  const idx = positions.findIndex(p => p.id === id);
+  if (idx < 0) return;
+  const pos       = positions[idx];
+  const contracts = pos.size / pos.entry;
+  const pnl       = pos.dir === 'Long'
+    ? contracts * (currentPrice - pos.entry)
+    : contracts * (pos.entry - currentPrice);
+  const roePct    = pnl / pos.margin * 100;
+  positions.splice(idx, 1);
+  savePositions(positions);
+  const history = loadHistory();
+  history.unshift({ ...pos, closeTime: Date.now(), closePrice: currentPrice, pnl, roePct, reason });
+  saveHistory(history);
+  renderPositions();
+  renderHistory();
+  showToast(`${reason} — ${pos.sym} closed · P&L: ${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}`);
+}
+
+async function manualClosePosition(id) {
+  const positions = loadPositions();
+  const pos = positions.find(p => p.id === id);
+  if (!pos) return;
+  try {
+    const priceData = await apiFetch(`${BASE}/simple/price?ids=${pos.coinId}&vs_currencies=usd`, `close-${pos.coinId}`, 0);
+    closePosition(id, 'Manual Close', priceData[pos.coinId]?.usd || pos.entry);
+  } catch { closePosition(id, 'Manual Close', pos.entry); }
+}
+
+function renderPositions(priceMap = {}) {
+  const positions = loadPositions();
+  const card = document.getElementById('positionsCard');
+  const body = document.getElementById('positionsBody');
+  if (!card || !body) return;
+  if (positions.length === 0) { card.style.display = 'none'; body.innerHTML = ''; return; }
+  card.style.display = 'block';
+  body.innerHTML = positions.map(pos => {
+    const curr      = priceMap[pos.coinId]?.usd || pos.entry;
+    const contracts = pos.size / pos.entry;
+    const pnl       = pos.dir === 'Long'
+      ? contracts * (curr - pos.entry)
+      : contracts * (pos.entry - curr);
+    const roePct  = pnl / pos.margin * 100;
+    const pnlCls  = pnl >= 0 ? 'pos' : 'neg';
+    const pd      = pos.entry < 1 ? 5 : pos.entry < 10 ? 3 : 2;
+    const range   = Math.abs(pos.tp - pos.sl);
+    const progress = range > 0
+      ? Math.max(0, Math.min(100, pos.dir === 'Long'
+          ? (curr - pos.sl) / range * 100
+          : (pos.sl - curr) / range * 100))
+      : 50;
+    const elapsed    = Math.floor((Date.now() - pos.openTime) / 60_000);
+    const elapsedStr = elapsed < 60 ? `${elapsed}m ago` : `${Math.floor(elapsed / 60)}h ${elapsed % 60}m ago`;
+    return `<div class="pos-row">
+      <div class="pos-main">
+        <div>
+          <span class="pos-name">${pos.sym}</span>
+          <span class="pos-dir ${pos.dir === 'Long' ? 'long' : 'short'}">${pos.dir === 'Long' ? '📈 Long' : '📉 Short'}</span>
+          <div class="pos-meta">Opened ${elapsedStr} · ${pos.lev}× leverage · ${fmtUSD(pos.size)} position</div>
+        </div>
+        <div style="text-align:right">
+          <div class="pos-pnl ${pnlCls}">${pnl >= 0 ? '+' : ''}${fmtUSD(pnl)}</div>
+          <div class="pos-meta">${roePct >= 0 ? '+' : ''}${roePct.toFixed(1)}% ROE · Live: ${fmtUSD(curr, pd)}</div>
+        </div>
+      </div>
+      <div class="pos-prices">
+        <span>Entry: <strong>${fmtUSD(pos.entry, pd)}</strong></span>
+        <span>Take Profit: <strong style="color:var(--green)">${fmtUSD(pos.tp, pd)}</strong></span>
+        <span>Stop Loss: <strong style="color:var(--red)">${fmtUSD(pos.sl, pd)}</strong></span>
+      </div>
+      <div class="pos-progress-track">
+        <div class="pos-progress-fill" style="width:${progress}%"></div>
+      </div>
+      <div class="pos-actions">
+        <button class="pos-close-btn" onclick="manualClosePosition(${pos.id})">✕ Close Position</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BOT — HISTORY
+// ═══════════════════════════════════════════════════════════════════
+
+function renderHistory() {
+  const history = loadHistory();
+  const card    = document.getElementById('historyCard');
+  const body    = document.getElementById('historyBody');
+  if (!card || !body) return;
+  if (history.length === 0) { card.style.display = 'none'; body.innerHTML = ''; return; }
+  card.style.display = 'block';
+  const wins     = history.filter(h => h.pnl > 0).length;
+  const totalPnl = history.reduce((s, h) => s + h.pnl, 0);
+  const winRate  = Math.round(wins / history.length * 100);
+  body.innerHTML = `
+    <div class="hist-summary">
+      <div class="hsi"><div class="hsi-label">Trades</div><div class="hsi-val">${history.length}</div></div>
+      <div class="hsi"><div class="hsi-label">Win Rate</div><div class="hsi-val ${winRate >= 50 ? 'green' : 'red'}">${winRate}%</div></div>
+      <div class="hsi"><div class="hsi-label">Total P&L</div><div class="hsi-val ${totalPnl >= 0 ? 'green' : 'red'}">${totalPnl >= 0 ? '+' : ''}${fmtUSD(totalPnl)}</div></div>
+    </div>
+    <table class="hist-table">
+      <thead><tr>
+        <th>Coin</th><th>Dir</th><th>Entry</th><th>Exit</th><th>P&L</th><th>ROE</th><th>Result</th>
+      </tr></thead>
+      <tbody>${history.map(h => {
+        const pd  = h.entry < 1 ? 5 : h.entry < 10 ? 3 : 2;
+        const cls = h.pnl >= 0 ? 'win' : 'loss';
+        return `<tr>
+          <td><strong>${h.sym}</strong></td>
+          <td><span class="pos-dir ${h.dir === 'Long' ? 'long' : 'short'}" style="font-size:10px">${h.dir}</span></td>
+          <td style="font-family:var(--mono)">${fmtUSD(h.entry, pd)}</td>
+          <td style="font-family:var(--mono)">${fmtUSD(h.closePrice, pd)}</td>
+          <td class="${cls}" style="font-family:var(--mono)">${h.pnl >= 0 ? '+' : ''}${fmtUSD(h.pnl)}</td>
+          <td class="${cls}">${h.roePct >= 0 ? '+' : ''}${h.roePct.toFixed(1)}%</td>
+          <td style="font-size:11px;color:var(--text-lo)">${h.reason}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>`;
+}
+
+function clearHistory() {
+  if (!confirm('Clear all trade history?')) return;
+  saveHistory([]);
+  renderHistory();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BOT — EXCHANGE MODAL
+// ═══════════════════════════════════════════════════════════════════
+
+function showTradeInstructions(idx) {
+  const t = _currentPlans[idx];
+  if (!t) return;
+  const pd     = t.price < 1 ? 5 : t.price < 10 ? 3 : 2;
+  const isLong = t.dir === 'Long';
+  document.getElementById('modalContent').innerHTML = `
+    <div class="modal-coin">${t.name}</div>
+    <div class="modal-dir">
+      ${badge(isLong ? '📈 Long' : '📉 Short', isLong ? 'green' : 'red')}
+      ${badge(t.lev + '× Leverage', 'accent')}
+    </div>
+    <div class="modal-step"><span class="modal-step-num">1</span>
+      <div>Open <strong>Binance</strong> or <strong>Bybit</strong> and navigate to <strong>Futures → USDT-M Perpetual</strong>.</div></div>
+    <div class="modal-step"><span class="modal-step-num">2</span>
+      <div>Search for <strong>${t.sym}/USDT</strong> in the contract list.</div></div>
+    <div class="modal-step"><span class="modal-step-num">3</span>
+      <div>Set leverage to <span class="modal-val">${t.lev}×</span> using the leverage button near the order panel.</div></div>
+    <div class="modal-step"><span class="modal-step-num">4</span>
+      <div>Place a <strong>${isLong ? 'Buy / Long' : 'Sell / Short'} Market Order</strong> with position size <span class="modal-val">${fmtUSD(t.alloc)}</span>.</div></div>
+    <div class="modal-step"><span class="modal-step-num">5</span>
+      <div>After entry, set <strong>Take Profit</strong> → <span class="modal-val" style="color:var(--green)">${fmtUSD(t.tp, pd)}</span> and <strong>Stop Loss</strong> → <span class="modal-val" style="color:var(--red)">${fmtUSD(t.sl, pd)}</span>.</div></div>
+    <div class="modal-links">
+      <a class="modal-link" href="https://www.binance.com/en/futures/${t.sym}USDT" target="_blank" rel="noopener">🔗 Binance Futures</a>
+      <a class="modal-link" href="https://www.bybit.com/trade/usdt/${t.sym}USDT"   target="_blank" rel="noopener">🔗 Bybit Futures</a>
+    </div>`;
+  document.getElementById('modalOverlay').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('modalOverlay').style.display = 'none';
+}
+
+// ─── Toast notification ───
+function showToast(msg) {
+  let toast = document.getElementById('_toast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = '_toast';
+    toast.style.cssText = [
+      'position:fixed', 'bottom:24px', 'right:24px', 'z-index:2000',
+      'background:var(--card)', 'border:1px solid var(--border2)',
+      'border-radius:var(--r-sm)', 'padding:12px 16px',
+      'font-size:13px', 'color:var(--text-hi)',
+      'max-width:320px', 'box-shadow:0 4px 20px rgba(0,0,0,.5)',
+      'transition:opacity .3s', 'pointer-events:none',
+    ].join(';');
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.style.opacity = '1';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
 }
