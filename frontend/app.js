@@ -883,3 +883,4 @@ function renderDashboard(trades, capital, riskProfile) {
 
   document.getElementById('dashResults').style.display = 'block';
 }
+
