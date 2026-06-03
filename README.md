@@ -2,7 +2,7 @@
 title: Crypto Futures AI Calculator
 emoji: 📈
 colorFrom: blue
-colorTo: cyan
+colorTo: indigo
 sdk: static
 pinned: false
 license: apache-2.0
