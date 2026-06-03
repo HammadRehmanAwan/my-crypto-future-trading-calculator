@@ -682,3 +682,204 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ═══════════════════════════════════════════════════════════════════
+// DASHBOARD — AI PORTFOLIO PLANNER
+// ═══════════════════════════════════════════════════════════════════
+
+function switchTab(tab) {
+  const isCalc = tab === 'calc';
+  document.getElementById('calcView').style.display = isCalc ? '' : 'none';
+  document.getElementById('dashView').style.display = isCalc ? 'none' : '';
+  document.getElementById('tabCalc').classList.toggle('active', isCalc);
+  document.getElementById('tabDash').classList.toggle('active', !isCalc);
+}
+
+function setRiskProfile(profile) {
+  document.querySelectorAll('.risk-btn').forEach(b => b.classList.toggle('active', b.dataset.r === profile));
+  document.querySelectorAll('.re-item').forEach(el => el.classList.remove('active'));
+  document.getElementById(`re-${profile}`)?.classList.add('active');
+}
+
+async function runDashboard() {
+  const capital = parseFloat(document.getElementById('dashCapital').value);
+  if (!capital || capital < 10) { alert('Please enter at least $10'); return; }
+  const riskProfile = document.querySelector('.risk-btn.active')?.dataset?.r || 'moderate';
+
+  const btn = document.getElementById('dashBtn');
+  btn.disabled = true; btn.textContent = '⏳ Analyzing…';
+  document.getElementById('dashResults').style.display    = 'none';
+  document.getElementById('dashNoSignal').style.display   = 'none';
+  document.getElementById('dashError').style.display      = 'none';
+  document.getElementById('dashLoader').style.display     = 'flex';
+
+  try {
+    const coinIds = Object.keys(COINS).join(',');
+    const url = `${BASE}/coins/markets?vs_currency=usd&ids=${coinIds}&sparkline=true&price_change_percentage=24h`;
+    const markets = await apiFetch(url, `mkts-spark`, 5 * 60_000);
+
+    const scored = markets.map(coin => {
+      const prices = coin.sparkline_in_7d?.price;
+      if (!prices || prices.length < 30) return null;
+      const curr  = coin.current_price;
+      const chg24 = coin.price_change_percentage_24h || 0;
+
+      const rsiArr              = calcRSI(prices);
+      const { macdLine, signalLine } = calcMACD(prices);
+      const bb                  = calcBollinger(prices);
+
+      const rsi = rsiArr[rsiArr.length - 1];
+      const mac = macdLine[macdLine.length - 1];
+      const sig = signalLine[signalLine.length - 1];
+      const bbU = bb.upper[bb.upper.length - 1];
+      const bbL = bb.lower[bb.lower.length - 1];
+      const bbM = bb.mid[bb.mid.length - 1];
+      const bbW = bbM ? (bbU - bbL) / bbM * 100 : 10;
+
+      let score = 0;
+      const why = [];
+
+      if      (rsi < 25) { score += 2; why.push(`RSI very oversold (${rsi.toFixed(0)}) — strong bounce likely`); }
+      else if (rsi < 35) { score += 1; why.push(`RSI oversold (${rsi.toFixed(0)}) — price may bounce up`); }
+      else if (rsi > 75) { score -= 2; why.push(`RSI very overbought (${rsi.toFixed(0)}) — sharp drop possible`); }
+      else if (rsi > 65) { score -= 1; why.push(`RSI overbought (${rsi.toFixed(0)}) — upside is limited`); }
+
+      if (mac > sig) { score += 1; why.push('Buyers are in control (MACD bullish)'); }
+      else           { score -= 1; why.push('Sellers are in control (MACD bearish)'); }
+
+      if      (curr < bbL) { score += 1; why.push('Price hit the bottom of its normal range — bounce expected'); }
+      else if (curr > bbU) { score -= 1; why.push('Price hit the top of its normal range — pullback expected'); }
+
+      if      (chg24 >  2) { score += 1; why.push(`Up ${chg24.toFixed(1)}% today — strong upward momentum`); }
+      else if (chg24 < -2) { score -= 1; why.push(`Down ${Math.abs(chg24).toFixed(1)}% today — selling pressure`); }
+
+      const fcst    = holtForecast(prices, 7);
+      const fcstChg = (fcst.median[6] - curr) / curr * 100;
+      if      (fcstChg >  3) { score += 1; why.push(`AI model forecasts +${fcstChg.toFixed(1)}% over 7 days`); }
+      else if (fcstChg < -3) { score -= 1; why.push(`AI model forecasts ${fcstChg.toFixed(1)}% over 7 days`); }
+
+      return { id: coin.id, sym: coin.symbol.toUpperCase(),
+               name: `${coin.name} (${coin.symbol.toUpperCase()})`,
+               price: curr, chg24, score, bbW, fcstChg, why: why.slice(0, 3) };
+    }).filter(c => c && Math.abs(c.score) >= 2)
+      .sort((a, b) => Math.abs(b.score) - Math.abs(a.score))
+      .slice(0, 4);
+
+    document.getElementById('dashLoader').style.display = 'none';
+
+    if (scored.length === 0) {
+      document.getElementById('dashNoSignal').style.display = 'block';
+      btn.disabled = false; btn.textContent = '🤖 Generate My Trade Plan'; return;
+    }
+
+    const levTable = {
+      conservative: { hi: 2,  mid: 3,  lo: 5  },
+      moderate:     { hi: 4,  mid: 6,  lo: 10 },
+      aggressive:   { hi: 8,  mid: 12, lo: 20 },
+    };
+    const tpPcts = { conservative: 0.04,  moderate: 0.07, aggressive: 0.12 };
+    const slPcts = { conservative: 0.025, moderate: 0.04, aggressive: 0.07 };
+    const totalScore = scored.reduce((s, c) => s + Math.abs(c.score), 0);
+
+    const trades = scored.map(coin => {
+      const dir  = coin.score > 0 ? 'Long' : 'Short';
+      const alloc = Math.max(50, Math.round((Math.abs(coin.score) / totalScore) * capital));
+      const lvl   = levTable[riskProfile];
+      const lev   = coin.bbW > 15 ? lvl.hi : coin.bbW > 8 ? lvl.mid : lvl.lo;
+      const margin     = alloc / lev;
+      const contracts  = alloc / coin.price;
+      const tp = dir === 'Long' ? coin.price * (1 + tpPcts[riskProfile]) : coin.price * (1 - tpPcts[riskProfile]);
+      const sl = dir === 'Long' ? coin.price * (1 - slPcts[riskProfile]) : coin.price * (1 + slPcts[riskProfile]);
+      const pnlTp = contracts * (dir === 'Long' ? tp - coin.price : coin.price - tp);
+      const pnlSl = contracts * (dir === 'Long' ? sl - coin.price : coin.price - sl);
+      return { ...coin, dir, alloc, lev, margin, tp, sl, pnlTp, pnlSl };
+    });
+
+    // Normalize allocations to exactly equal capital
+    const allocSum = trades.reduce((s, t) => s + t.alloc, 0);
+    trades.forEach(t => { t.alloc = Math.round(t.alloc / allocSum * capital); });
+
+    renderDashboard(trades, capital, riskProfile);
+
+  } catch (e) {
+    document.getElementById('dashLoader').style.display = 'none';
+    const errEl = document.getElementById('dashError');
+    errEl.style.display = 'block';
+    errEl.textContent = e.message.includes('429')
+      ? '⚠️ CoinGecko rate limit hit — please wait 60 seconds and try again.'
+      : `⚠️ Failed to load data: ${e.message}`;
+  }
+  btn.disabled = false; btn.textContent = '🤖 Generate My Trade Plan';
+}
+
+function renderDashboard(trades, capital, riskProfile) {
+  const totalPnlTp  = trades.reduce((s, t) => s + t.pnlTp, 0);
+  const totalPnlSl  = trades.reduce((s, t) => s + t.pnlSl, 0);
+  const roePct      = totalPnlTp / capital * 100;
+  const riskLabels  = { conservative: '🛡️ Safe', moderate: '⚖️ Balanced', aggressive: '🚀 Aggressive' };
+
+  document.getElementById('dashSummary').innerHTML = `
+    <div class="dash-sum-grid">
+      <div class="dsi"><div class="dsi-label">Your Capital</div><div class="dsi-val accent">${fmtUSD(capital)}</div></div>
+      <div class="dsi"><div class="dsi-label">Trades</div><div class="dsi-val">${trades.length} coins</div></div>
+      <div class="dsi"><div class="dsi-label">If All Targets Hit</div><div class="dsi-val green">+${fmtUSD(totalPnlTp)} (+${roePct.toFixed(1)}%)</div></div>
+      <div class="dsi"><div class="dsi-label">If All Stops Hit</div><div class="dsi-val red">${fmtUSD(totalPnlSl)}</div></div>
+      <div class="dsi"><div class="dsi-label">Risk Profile</div><div class="dsi-val">${riskLabels[riskProfile]}</div></div>
+    </div>`;
+
+  document.getElementById('dashTradesGrid').innerHTML = trades.map(t => {
+    const isLong   = t.dir === 'Long';
+    const allocPct = (t.alloc / capital * 100).toFixed(0);
+    const stars    = '⭐'.repeat(Math.min(5, Math.abs(t.score)));
+    const tpDist   = (Math.abs(t.tp - t.price) / t.price * 100).toFixed(1);
+    const slDist   = (Math.abs(t.sl - t.price) / t.price * 100).toFixed(1);
+    const pd       = t.price < 1 ? 5 : t.price < 10 ? 3 : 2;
+
+    return `<div class="trade-card ${isLong ? 'tc-long' : 'tc-short'}">
+
+      <div class="tc-head">
+        <span class="tc-dir ${isLong ? 'long' : 'short'}">${isLong ? '📈 LONG' : '📉 SHORT'}</span>
+        <span class="tc-name">${t.name}</span>
+        <span class="tc-stars" title="Signal strength: ${Math.abs(t.score)}/6">${stars}</span>
+      </div>
+
+      <div class="tc-alloc-row">
+        <span class="tc-alloc-amt">${fmtUSD(t.alloc)}</span>
+        <span class="tc-alloc-pct">${allocPct}% of your capital</span>
+        <span class="tc-lev-badge">${t.lev}× leverage</span>
+      </div>
+      <div class="tc-margin-note">Your money at risk: ${fmtUSD(t.margin)} · Position controls: ${fmtUSD(t.alloc)} worth</div>
+
+      <div class="tc-prices-grid">
+        <div class="tcp">
+          <div class="tcp-label">Enter at</div>
+          <div class="tcp-val accent">${fmtUSD(t.price, pd)}</div>
+          <div class="tcp-sub">Current price</div>
+        </div>
+        <div class="tcp">
+          <div class="tcp-label">🎯 Take Profit</div>
+          <div class="tcp-val green">${fmtUSD(t.tp, pd)}</div>
+          <div class="tcp-sub">+${tpDist}% from entry</div>
+        </div>
+        <div class="tcp">
+          <div class="tcp-label">🛑 Stop Loss</div>
+          <div class="tcp-val red">${fmtUSD(t.sl, pd)}</div>
+          <div class="tcp-sub">-${slDist}% from entry</div>
+        </div>
+      </div>
+
+      <div class="tc-outcome-row">
+        <div class="tc-outcome good">✅ Target hit → <strong>+${fmtUSD(t.pnlTp)} profit</strong></div>
+        <div class="tc-outcome bad">❌ Stop hit → <strong>${fmtUSD(t.pnlSl)} loss</strong></div>
+      </div>
+
+      <div class="tc-why">
+        <div class="tc-why-title">📌 Why this trade:</div>
+        ${t.why.map(w => `<div class="tc-why-item">• ${w}</div>`).join('')}
+      </div>
+
+    </div>`;
+  }).join('');
+
+  document.getElementById('dashResults').style.display = 'block';
+}
