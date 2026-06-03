@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Crypto Futures AI Calculator</title>
+  <title>FutureX — AI Crypto Futures</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
@@ -15,10 +15,20 @@
 <!-- ─── HEADER ─── -->
 <header class="header">
   <div class="logo">
-    <span class="logo-icon">📈</span>
+    <svg class="logo-mark" width="38" height="38" viewBox="0 0 38 38" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="38" height="38" rx="9" fill="url(#fx-grad)"/>
+      <polyline points="7,28 15,19 21,23 31,11" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="31" cy="11" r="2.5" fill="white"/>
+      <defs>
+        <linearGradient id="fx-grad" x1="0" y1="38" x2="38" y2="0">
+          <stop offset="0%" stop-color="#0062AA"/>
+          <stop offset="100%" stop-color="#00D4FF"/>
+        </linearGradient>
+      </defs>
+    </svg>
     <div>
-      <div class="logo-title">Crypto Futures AI</div>
-      <div class="logo-sub">Chronos-Bolt · CoinGecko · Real-time</div>
+      <div class="logo-title">FutureX</div>
+      <div class="logo-sub">Real-time · AI Forecast · 15 Coins</div>
     </div>
   </div>
   <div class="ticker" id="ticker"><span class="ticker-loading">Loading prices…</span></div>

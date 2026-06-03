@@ -1,5 +1,5 @@
 ---
-title: Crypto Futures AI Calculator
+title: FutureX — AI Crypto Futures
 emoji: 📈
 colorFrom: blue
 colorTo: indigo
@@ -8,7 +8,7 @@ pinned: false
 license: apache-2.0
 ---
 
-# 📈 Crypto Futures AI Calculator
+# FutureX — AI Crypto Futures Calculator
 
 An AI-powered cryptocurrency futures trading calculator using real-time market data and statistical forecasting.
 
