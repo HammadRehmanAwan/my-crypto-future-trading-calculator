@@ -670,6 +670,7 @@ input, select, button { font-family: inherit; }
 }
 .dash-no-signal h3 { color: var(--text-hi); margin: 12px 0 8px; }
 .dash-no-signal p  { font-size: 13px; max-width: 400px; margin: 0 auto; line-height: 1.6; }
+.no-signal-icon    { font-size: 32px; color: var(--text-lo); line-height: 1; }
 
 .dash-error {
   background: var(--red-d); border: 1px solid rgba(255,61,61,.3);

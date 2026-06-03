@@ -283,7 +283,7 @@ function checkVolatilityConditions(coinId, coinName, currPrice, rsi, change24h, 
 
 async function sendVolatilityEmail(s, coinName, price, reasons, coinId) {
   if (typeof emailjs === 'undefined') {
-    showAlertStatus('❌ EmailJS library not loaded — check your internet connection.', 'error'); return;
+    showAlertStatus('EmailJS library not loaded — check your internet connection.', 'error'); return;
   }
   try {
     await emailjs.send(EJS_SERVICE_ID, EJS_TEMPLATE_ID, {
@@ -294,9 +294,9 @@ async function sendVolatilityEmail(s, coinName, price, reasons, coinId) {
       alert_time:    new Date().toLocaleString(),
     }, EJS_PUBLIC_KEY);
     if (coinId !== '_test') setCooldown(coinId);
-    showAlertStatus(`✅ Alert email sent for ${coinName}!`, 'success');
+    showAlertStatus(`Alert email sent for ${coinName}!`, 'success');
   } catch (e) {
-    showAlertStatus(`❌ Email failed: ${e?.text || e?.message || 'Unknown error — is your email address correct?'}`, 'error');
+    showAlertStatus(`Email failed: ${e?.text || e?.message || 'Unknown error — is your email address correct?'}`, 'error');
   }
 }
 
@@ -357,7 +357,7 @@ function setAlertSensitivity(val) {
 function saveAlerts() {
   const email = document.getElementById('alertEmail').value.trim();
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    showAlertStatus('❌ Please enter a valid email address.', 'error'); return;
+    showAlertStatus('Please enter a valid email address.', 'error'); return;
   }
   const s = {
     enabled:     document.getElementById('alertEnabled').checked,
@@ -366,13 +366,13 @@ function saveAlerts() {
     watchCoins:  [...document.querySelectorAll('.watch-coin-cb:checked')].map(c => c.value),
   };
   persistAlertSettings(s);
-  showAlertStatus('✅ Saved! Monitoring ' + s.watchCoins.length + ' coin(s) every 5 minutes.', 'success');
+  showAlertStatus('Saved. Monitoring ' + s.watchCoins.length + ' coin(s) every 5 minutes.', 'success');
 }
 
 async function testAlert() {
   saveAlerts();
   const s = getAlertSettings();
-  if (!s.email) { showAlertStatus('❌ Enter your email address first.', 'error'); return; }
+  if (!s.email) { showAlertStatus('Enter your email address first.', 'error'); return; }
   await sendVolatilityEmail(s, 'Bitcoin (BTC) — TEST', 65000, ['This is a test alert. Your email setup is working correctly!'], '_test');
 }
 
@@ -411,7 +411,7 @@ function updateLeverage(val) {
   else if (v <= 10) { risk = 'Moderate Risk';  hint = `${v}× leverage — a ${(100/v).toFixed(0)}% price move against you wipes your capital. Use a stop-loss.`; }
   else if (v <= 25) { risk = 'High Risk';       hint = `${v}× leverage — only a ${(100/v).toFixed(1)}% move against you wipes your capital. Experienced traders only.`; }
   else if (v <= 50) { risk = 'Very High Risk';  hint = `${v}× leverage — a tiny ${(100/v).toFixed(1)}% move against you wipes your capital. Extreme caution.`; }
-  else              { risk = '⚠️ Extreme Risk'; hint = `${v}× leverage — price only needs to move ${(100/v).toFixed(1)}% against you to lose everything. Not recommended for beginners.`; }
+  else              { risk = 'Extreme Risk'; hint = `${v}× leverage — price only needs to move ${(100/v).toFixed(1)}% against you to lose everything. Not recommended for beginners.`; }
   const badge = document.getElementById('levRiskBadge');
   badge.textContent = risk;
   badge.className = `lev-risk-badge ${v <= 3 ? 'lev-low' : v <= 10 ? 'lev-mod' : v <= 25 ? 'lev-high' : 'lev-extreme'}`;
@@ -497,7 +497,7 @@ async function loadCoin(coinId, days) {
     buildChart(dates, prices, bb, forecast, days, horizon);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
   } catch (err) {
-    loader.innerHTML = `<span style="color:#FF3D3D">⚠️ ${
+    loader.innerHTML = `<span style="color:#FF3D3D">${
       err.message.includes('429') ? 'Rate-limited — wait 60 s then try again.'
       : `Load failed: ${err.message}`
     }</span>`;
@@ -512,7 +512,7 @@ async function loadCoin(coinId, days) {
 
 async function analyze() {
   const btn = document.getElementById('analyzeBtn');
-  btn.disabled = true; btn.textContent = '⏳ Analyzing…';
+  btn.disabled = true; btn.textContent = 'Analyzing…';
   const coinId = document.getElementById('coinSelect').value;
   if (!state.prices || state.coin !== coinId) { state.coin = coinId; await loadCoin(coinId, state.days); }
   const prices  = state.prices;
@@ -550,13 +550,13 @@ async function analyze() {
   if (chgF > 2)       { signals.push({ t:`Forecast: Model predicts price rises +${chgF.toFixed(1)}% over ${horizon} days`, c:'green' }); score += 1; }
   else if (chgF < -2) { signals.push({ t:`Forecast: Model predicts price falls ${chgF.toFixed(1)}% over ${horizon} days`, c:'red' }); score -= 1; }
   else                  signals.push({ t:`Forecast: Price expected to stay roughly flat (${chgF.toFixed(1)}% change)`, c:'neutral' });
-  if (m.liqDist < 5)  { signals.push({ t:`⚠️ DANGER: Your forced-close price is only ${m.liqDist.toFixed(1)}% away — very high risk!`, c:'red' }); score -= 1; }
+  if (m.liqDist < 5)  { signals.push({ t:`DANGER: Your forced-close price is only ${m.liqDist.toFixed(1)}% away — very high risk!`, c:'red' }); score -= 1; }
   else if (m.liqDist < 10) signals.push({ t:`Caution: Your forced-close price is ${m.liqDist.toFixed(1)}% away — moderate risk`, c:'yellow' });
   else                      signals.push({ t:`Safe buffer: Your forced-close price is ${m.liqDist.toFixed(1)}% away`, c:'green' });
 
   renderResults(m, curr, fcst, horizon, chgF);
   renderSignal(score, signals, dir);
-  btn.disabled = false; btn.textContent = '🚀 Analyze Trade';
+  btn.disabled = false; btn.textContent = 'Analyze Trade';
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -582,10 +582,10 @@ function renderResults(m, curr, fcst, horizon, chgF) {
     ${row(`Price Forecast (${horizon} days)`, fmtUSD(pred) + ` <span style="font-size:11px">${fmtPct(chgF)}</span>`, predCls, predDesc)}
     ${row('Your Entry Price', fmtUSD(m.entry), '', 'The price at which you open this trade')}
     ${row('Your Capital at Risk', fmtUSD(m.margin), '', `Real money you put in — your $${fmt(m.size)} trade size ÷ ${m.leverage}× leverage`)}
-    ${row('💥 Forced Close Price', fmtUSD(m.liq), m.liqDist < 10 ? 'red' : '', `${m.liqDist.toFixed(2)}% from entry — you lose all your capital if price reaches here`, m.liqDist < 10 ? 'hl-red' : '')}
-    ${m.tp != null ? row('🎯 Take Profit Target', fmtUSD(m.tp), 'green', `Your profit at this price: +${fmtUSD(m.pnlTp)} · Return on your capital: ${fmtPct(m.roeTp)}`, 'hl-green') : ''}
-    ${m.sl ? row('🛑 Stop Loss', fmtUSD(m.sl), 'red', `Max loss if triggered: ${fmtUSD(m.pnlSl)} · That is ${fmtPct(m.roeSl)} of your capital`, 'hl-red') : ''}
-    ${m.rr != null ? row('Risk / Reward Ratio', `1 : ${m.rr.toFixed(2)}`, m.rr >= 2 ? 'green' : m.rr >= 1 ? 'gold' : 'red', m.rr >= 2 ? `✅ Good — for every $1 risked you could gain $${m.rr.toFixed(2)}` : m.rr >= 1 ? 'Fair — aim for 1:2 or better for quality trades' : '❌ Poor — you risk more than your potential gain', m.rr >= 2 ? 'hl-green' : m.rr >= 1 ? 'hl-gold' : 'hl-red') : ''}
+    ${row('Forced Close Price', fmtUSD(m.liq), m.liqDist < 10 ? 'red' : '', `${m.liqDist.toFixed(2)}% from entry — you lose all your capital if price reaches here`, m.liqDist < 10 ? 'hl-red' : '')}
+    ${m.tp != null ? row('Take Profit Target', fmtUSD(m.tp), 'green', `Your profit at this price: +${fmtUSD(m.pnlTp)} · Return on your capital: ${fmtPct(m.roeTp)}`, 'hl-green') : ''}
+    ${m.sl ? row('Stop Loss', fmtUSD(m.sl), 'red', `Max loss if triggered: ${fmtUSD(m.pnlSl)} · That is ${fmtPct(m.roeSl)} of your capital`, 'hl-red') : ''}
+    ${m.rr != null ? row('Risk / Reward Ratio', `1 : ${m.rr.toFixed(2)}`, m.rr >= 2 ? 'green' : m.rr >= 1 ? 'gold' : 'red', m.rr >= 2 ? `Good — for every $1 risked you could gain $${m.rr.toFixed(2)}` : m.rr >= 1 ? 'Fair — aim for 1:2 or better for quality trades' : 'Poor — you risk more than your potential gain', m.rr >= 2 ? 'hl-green' : m.rr >= 1 ? 'hl-gold' : 'hl-red') : ''}
   </div>`;
 }
 
@@ -596,36 +596,36 @@ function renderResults(m, curr, fcst, horizon, chgF) {
 function renderSignal(score, signals, dir) {
   let heading, hCls, summary, summaryEmoji;
   if (score >= 3) {
-    heading = '🟢 STRONG BULLISH — Good time to go Long';
+    heading = 'Strong Bullish — Good time to go Long';
     hCls = 'green';
-    summaryEmoji = '📈';
+    summaryEmoji = '▲';
     summary = 'Most indicators agree: conditions strongly favor the price going UP. This is a good environment for a Long trade, but always use a stop-loss.';
   } else if (score >= 1) {
-    heading = '🟡 MILDLY BULLISH — Slight upward lean';
+    heading = 'Mild Bullish — Slight upward lean';
     hCls = 'yellow';
-    summaryEmoji = '↗️';
+    summaryEmoji = '↑';
     summary = 'Conditions lean upward, but signals are not strong. If trading Long, use a smaller position size and definitely set a stop-loss.';
   } else if (score <= -3) {
-    heading = '🔴 STRONG BEARISH — Good time to go Short';
+    heading = 'Strong Bearish — Good time to go Short';
     hCls = 'red';
-    summaryEmoji = '📉';
+    summaryEmoji = '▼';
     summary = 'Most indicators agree: conditions strongly favor the price going DOWN. This is a good environment for a Short trade, but always use a stop-loss.';
   } else if (score <= -1) {
-    heading = '🟡 MILDLY BEARISH — Slight downward lean';
+    heading = 'Mild Bearish — Slight downward lean';
     hCls = 'yellow';
-    summaryEmoji = '↘️';
+    summaryEmoji = '↓';
     summary = 'Conditions lean downward. Long trades carry higher risk right now. Consider waiting for a better entry or reducing your position size.';
   } else {
-    heading = '⚪ NEUTRAL — No clear direction';
+    heading = 'Neutral — No clear direction';
     hCls = 'neutral';
-    summaryEmoji = '↔️';
+    summaryEmoji = '—';
     summary = 'No clear direction. The market is undecided. Best practice: wait for stronger signals before entering a trade to improve your odds.';
   }
   const aligned = (score > 0 && dir === 'Long') || (score < 0 && dir === 'Short');
   const alignHtml = score !== 0 ? `<div class="align-msg ${aligned ? 'green' : 'red'}">${
     aligned
-      ? `✅ Your chosen direction (${dir}) matches the signals — good alignment.`
-      : `⚠️ You chose ${dir} but signals lean the other way. This is a counter-trend trade — higher risk.`
+      ? `Your chosen direction (${dir}) matches the signals — good alignment.`
+      : `You chose ${dir} but signals lean the other way. This is a counter-trend trade — higher risk.`
   }</div>` : '';
   document.getElementById('signalCard').style.display = 'block';
   document.getElementById('signalBody').innerHTML = `
@@ -707,7 +707,7 @@ async function runDashboard() {
   const riskProfile = document.querySelector('.risk-btn.active')?.dataset?.r || 'moderate';
 
   const btn = document.getElementById('dashBtn');
-  btn.disabled = true; btn.textContent = '⏳ Analyzing…';
+  btn.disabled = true; btn.textContent = 'Analyzing…';
   document.getElementById('dashResults').style.display    = 'none';
   document.getElementById('dashNoSignal').style.display   = 'none';
   document.getElementById('dashError').style.display      = 'none';
@@ -769,7 +769,7 @@ async function runDashboard() {
 
     if (scored.length === 0) {
       document.getElementById('dashNoSignal').style.display = 'block';
-      btn.disabled = false; btn.textContent = '🔍 Analyze Now'; return;
+      btn.disabled = false; btn.textContent = 'Analyze Now'; return;
     }
 
     const levTable = {
@@ -806,17 +806,17 @@ async function runDashboard() {
     const errEl = document.getElementById('dashError');
     errEl.style.display = 'block';
     errEl.textContent = e.message.includes('429')
-      ? '⚠️ CoinGecko rate limit hit — please wait 60 seconds and try again.'
-      : `⚠️ Failed to load data: ${e.message}`;
+      ? 'CoinGecko rate limit hit — please wait 60 seconds and try again.'
+      : `Failed to load data: ${e.message}`;
   }
-  btn.disabled = false; btn.textContent = '🔍 Analyze Now';
+  btn.disabled = false; btn.textContent = 'Analyze Now';
 }
 
 function renderDashboard(trades, capital, riskProfile) {
   const totalPnlTp  = trades.reduce((s, t) => s + t.pnlTp, 0);
   const totalPnlSl  = trades.reduce((s, t) => s + t.pnlSl, 0);
   const roePct      = totalPnlTp / capital * 100;
-  const riskLabels  = { conservative: '🛡️ Safe', moderate: '⚖️ Balanced', aggressive: '🚀 Aggressive' };
+  const riskLabels  = { conservative: 'Safe', moderate: 'Balanced', aggressive: 'Aggressive' };
 
   document.getElementById('dashSummary').innerHTML = `
     <div class="dash-sum-grid">
@@ -830,7 +830,7 @@ function renderDashboard(trades, capital, riskProfile) {
   document.getElementById('dashTradesGrid').innerHTML = trades.map(t => {
     const isLong   = t.dir === 'Long';
     const allocPct = (t.alloc / capital * 100).toFixed(0);
-    const stars    = '⭐'.repeat(Math.min(5, Math.abs(t.score)));
+    const stars    = '◆'.repeat(Math.min(5, Math.abs(t.score)));
     const tpDist   = (Math.abs(t.tp - t.price) / t.price * 100).toFixed(1);
     const slDist   = (Math.abs(t.sl - t.price) / t.price * 100).toFixed(1);
     const pd       = t.price < 1 ? 5 : t.price < 10 ? 3 : 2;
@@ -838,7 +838,7 @@ function renderDashboard(trades, capital, riskProfile) {
     return `<div class="trade-card ${isLong ? 'tc-long' : 'tc-short'}">
 
       <div class="tc-head">
-        <span class="tc-dir ${isLong ? 'long' : 'short'}">${isLong ? '📈 LONG' : '📉 SHORT'}</span>
+        <span class="tc-dir ${isLong ? 'long' : 'short'}">${isLong ? '▲ LONG' : '▼ SHORT'}</span>
         <span class="tc-name">${t.name}</span>
         <span class="tc-stars" title="Signal strength: ${Math.abs(t.score)}/6">${stars}</span>
       </div>
@@ -857,24 +857,24 @@ function renderDashboard(trades, capital, riskProfile) {
           <div class="tcp-sub">Current price</div>
         </div>
         <div class="tcp">
-          <div class="tcp-label">🎯 Take Profit</div>
+          <div class="tcp-label">Take Profit</div>
           <div class="tcp-val green">${fmtUSD(t.tp, pd)}</div>
           <div class="tcp-sub">+${tpDist}% from entry</div>
         </div>
         <div class="tcp">
-          <div class="tcp-label">🛑 Stop Loss</div>
+          <div class="tcp-label">Stop Loss</div>
           <div class="tcp-val red">${fmtUSD(t.sl, pd)}</div>
           <div class="tcp-sub">-${slDist}% from entry</div>
         </div>
       </div>
 
       <div class="tc-outcome-row">
-        <div class="tc-outcome good">✅ Target hit → <strong>+${fmtUSD(t.pnlTp)} profit</strong></div>
-        <div class="tc-outcome bad">❌ Stop hit → <strong>${fmtUSD(t.pnlSl)} loss</strong></div>
+        <div class="tc-outcome good">Target hit → <strong>+${fmtUSD(t.pnlTp)} profit</strong></div>
+        <div class="tc-outcome bad">Stop hit → <strong>${fmtUSD(t.pnlSl)} loss</strong></div>
       </div>
 
       <div class="tc-why">
-        <div class="tc-why-title">📌 Why this trade:</div>
+        <div class="tc-why-title">Why this trade:</div>
         ${t.why.map(w => `<div class="tc-why-item">• ${w}</div>`).join('')}
       </div>
 
