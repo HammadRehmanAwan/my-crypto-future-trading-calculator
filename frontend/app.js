@@ -35,9 +35,14 @@ const BASE = 'https://api.coingecko.com/api/v3';
 // STATE
 // ═══════════════════════════════════════════════════════════════════
 
+const CRYPTOCOMPARE_NEWS = 'https://min-api.cryptocompare.com/data/v2/news/';
+const FINBERT_URL        = 'https://api-inference.huggingface.co/models/ProsusAI/finbert';
+const SENT_TTL           = 5 * 60_000; // 5-minute cache for sentiment data
+
 const state = {
   coin: 'bitcoin', days: 30, direction: 'Long',
   prices: null, dates: null, chart: null, cache: {},
+  sentiment: null,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -67,6 +72,208 @@ async function fetchHistory(coinId, days) {
 async function fetchTicker(ids) {
   const url = `${BASE}/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_24hr_change=true`;
   return apiFetch(url, `tick-${ids.join(',')}`, 30_000);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SENTIMENT  APIS
+// ═══════════════════════════════════════════════════════════════════
+
+async function fetchFearGreed() {
+  return apiFetch('https://api.alternative.me/fng/?limit=7', 'fg', SENT_TTL);
+}
+
+async function fetchCoinCommunity(coinId) {
+  const url = `${BASE}/coins/${coinId}?localization=false&tickers=false&market_data=false&community_data=true&developer_data=false`;
+  return apiFetch(url, `comm-${coinId}`, SENT_TTL);
+}
+
+async function fetchCryptoNews(sym) {
+  const url = `${CRYPTOCOMPARE_NEWS}?lang=EN&categories=${sym},Crypto&sortOrder=latest&limit=5`;
+  return apiFetch(url, `news-${sym}`, SENT_TTL);
+}
+
+async function classifyFinBERT(headlines) {
+  const res = await fetch(FINBERT_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ inputs: headlines }),
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  return data?.error ? null : data;
+}
+
+function parseFinBERT(data) {
+  if (!Array.isArray(data)) return null;
+  // Batch → [[{label,score},...], ...], single → [{label,score},...]
+  const results = Array.isArray(data[0]) ? data : [data];
+  let pos = 0, neg = 0, neu = 0, count = 0;
+  for (const r of results) {
+    if (!Array.isArray(r)) continue;
+    r.forEach(({ label, score }) => {
+      if (label === 'positive') pos += score;
+      else if (label === 'negative') neg += score;
+      else neu += score;
+    });
+    count++;
+  }
+  return count ? { positive: pos / count, negative: neg / count, neutral: neu / count } : null;
+}
+
+let _sentGen = 0;
+
+async function loadSentiment(coinId) {
+  const gen = ++_sentGen;
+  const sym = COINS[coinId]?.sym || 'BTC';
+  state.sentiment = null;
+  renderSentimentCard(null);
+
+  const [fgRes, commRes, newsRes] = await Promise.allSettled([
+    fetchFearGreed(),
+    fetchCoinCommunity(coinId),
+    fetchCryptoNews(sym),
+  ]);
+
+  const fgData    = fgRes.status   === 'fulfilled' ? fgRes.value?.data      : null;
+  const commData  = commRes.status === 'fulfilled' ? commRes.value           : null;
+  const newsItems = newsRes.status === 'fulfilled' ? (newsRes.value?.Data || []).slice(0, 5) : [];
+
+  let finbert = null;
+  if (newsItems.length) {
+    const headlines = newsItems.map(n => n.title).filter(Boolean);
+    finbert = await classifyFinBERT(headlines).catch(() => null);
+  }
+
+  if (gen !== _sentGen) return; // stale — newer coin was selected
+
+  state.sentiment = {
+    fg:        fgData,
+    community: commData ? {
+      up:   commData.sentiment_votes_up_percentage,
+      down: commData.sentiment_votes_down_percentage,
+    } : null,
+    finbert: parseFinBERT(finbert),
+    headlines: newsItems.map(n => n.title),
+  };
+
+  renderSentimentCard(state.sentiment);
+}
+
+// ─── Render Sentiment Card ───────────────────────────────────────────
+
+function renderSentimentCard(data) {
+  const card = document.getElementById('sentimentCard');
+  if (!card) return;
+
+  if (!data) {
+    card.innerHTML = `<h3 class="card-heading">Market Sentiment <span class="heading-sub">— Loading…</span></h3>
+      <div class="sent-loading"><div class="spin"></div><span>Fetching fear &amp; greed, news and community data…</span></div>`;
+    return;
+  }
+
+  // ── Fear & Greed ──
+  let fgHtml;
+  if (data.fg?.length) {
+    const cur    = parseInt(data.fg[0].value);
+    const label  = data.fg[0].value_classification;
+    const prev   = data.fg[1] ? parseInt(data.fg[1].value) : null;
+    const diff   = prev != null ? cur - prev : 0;
+    const trend  = prev != null ? (diff > 0 ? `↑ ${diff} from yesterday` : diff < 0 ? `↓ ${Math.abs(diff)} from yesterday` : 'Unchanged from yesterday') : '';
+    const fillC  = cur <= 44 ? '#FF3D3D' : cur <= 55 ? '#F7C948' : '#00E887';
+    const valCls = cur <= 44 ? 'red' : cur <= 55 ? 'gold' : 'green';
+    const hist   = [...data.fg].reverse();
+
+    const sparkBars = hist.map(d => {
+      const v = parseInt(d.value);
+      const h = Math.max(4, Math.round(v / 100 * 36));
+      const c = v <= 44 ? '#FF3D3D' : v <= 55 ? '#F7C948' : '#00E887';
+      return `<div class="fgs-bar" style="height:${h}px;background:${c}" title="${d.value_classification}: ${v}"></div>`;
+    }).join('');
+
+    const sigText = cur <= 24 ? 'Extreme fear — historically strong buy signal (contrarian)'
+      : cur <= 44 ? 'Market fearful — prices may be undervalued'
+      : cur <= 55 ? 'Neutral — no contrarian signal'
+      : cur <= 74 ? 'Market greedy — consider taking profits'
+      : 'Extreme greed — corrections often follow (contrarian sell)';
+    const sigCls = cur <= 44 ? 'green' : cur <= 55 ? 'neutral' : 'red';
+
+    fgHtml = `<div class="sent-section-label">Fear & Greed <span class="sent-src">alternative.me</span></div>
+      <div class="fg-main-row">
+        <div class="fg-val-block">
+          <div class="fg-number ${valCls}">${cur}</div>
+          <div class="fg-class ${valCls}">${label}</div>
+        </div>
+        <div class="fg-spark-wrap">
+          <div class="fg-spark">${sparkBars}</div>
+          <div class="fg-trend">${trend}</div>
+        </div>
+      </div>
+      <div class="fg-gauge-track"><div class="fg-gauge-fill" style="width:${cur}%;background:${fillC}"></div></div>
+      <div class="fg-gauge-labels"><span>Extreme Fear</span><span>Neutral</span><span>Extreme Greed</span></div>
+      ${badge(sigText, sigCls)}`;
+  } else {
+    fgHtml = `<div class="sent-section-label">Fear & Greed</div><div class="sent-unavail">Unavailable</div>`;
+  }
+
+  // ── Community Sentiment ──
+  let commHtml;
+  if (data.community?.up != null) {
+    const up  = data.community.up.toFixed(1);
+    const dn  = data.community.down.toFixed(1);
+    const cls = data.community.up > 60 ? 'green' : data.community.down > 60 ? 'red' : 'neutral';
+    const sigText = data.community.up > 70  ? `${up}% bullish — strong positive sentiment`
+      : data.community.up > 55  ? `${up}% bullish — mild positive lean`
+      : data.community.down > 70 ? `${dn}% bearish — strong negative sentiment`
+      : data.community.down > 55 ? `${dn}% bearish — mild negative lean`
+      : `${up}% vs ${dn}% — community is split`;
+
+    commHtml = `<div class="sent-section-label">Community <span class="sent-src">CoinGecko votes</span></div>
+      <div class="comm-bar-row">
+        <span class="comm-side green">Bull</span>
+        <div class="comm-track"><div class="comm-fill green" style="width:${up}%"></div></div>
+        <span class="comm-pct green">${up}%</span>
+      </div>
+      <div class="comm-bar-row">
+        <span class="comm-side red">Bear</span>
+        <div class="comm-track"><div class="comm-fill red" style="width:${dn}%"></div></div>
+        <span class="comm-pct red">${dn}%</span>
+      </div>
+      ${badge(sigText, cls)}`;
+  } else {
+    commHtml = `<div class="sent-section-label">Community</div><div class="sent-unavail">Unavailable</div>`;
+  }
+
+  // ── FinBERT News Sentiment ──
+  let fbHtml;
+  if (data.finbert) {
+    const pos = (data.finbert.positive * 100).toFixed(0);
+    const neu = (data.finbert.neutral  * 100).toFixed(0);
+    const neg = (data.finbert.negative * 100).toFixed(0);
+    const cls = data.finbert.positive > 0.55 ? 'green' : data.finbert.negative > 0.55 ? 'red' : 'neutral';
+    const overall = data.finbert.positive > 0.55 ? 'Positive' : data.finbert.negative > 0.55 ? 'Negative' : 'Neutral';
+    const headlineHtml = data.headlines.length ? data.headlines.slice(0, 3)
+      .map(h => `<div class="fb-headline">• ${h.length > 90 ? h.slice(0, 87) + '…' : h}</div>`).join('') : '';
+
+    fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI · ${data.headlines.length} headlines</span></div>
+      <div class="fb-bars">
+        <div class="fb-row"><span class="fb-lbl green">Positive</span><div class="fb-track"><div class="fb-fill green" style="width:${pos}%"></div></div><span class="fb-pct">${pos}%</span></div>
+        <div class="fb-row"><span class="fb-lbl neutral-text">Neutral</span><div class="fb-track"><div class="fb-fill neutral" style="width:${neu}%"></div></div><span class="fb-pct">${neu}%</span></div>
+        <div class="fb-row"><span class="fb-lbl red">Negative</span><div class="fb-track"><div class="fb-fill red" style="width:${neg}%"></div></div><span class="fb-pct">${neg}%</span></div>
+      </div>
+      ${badge(`Overall ${overall} — ${pos}% positive, ${neg}% negative across recent headlines`, cls)}
+      ${headlineHtml ? `<div class="fb-headlines">${headlineHtml}</div>` : ''}`;
+  } else {
+    fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
+      <div class="sent-unavail">Model loading or rate-limited — try again in a moment</div>`;
+  }
+
+  card.innerHTML = `
+    <h3 class="card-heading">Market Sentiment <span class="heading-sub">— News · Community · Fear & Greed</span></h3>
+    <div class="sent-top-grid">
+      <div class="sent-block">${fgHtml}</div>
+      <div class="sent-block">${commHtml}</div>
+    </div>
+    <div class="sent-block sent-block-full">${fbHtml}</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -496,6 +703,7 @@ async function loadCoin(coinId, days) {
     const forecast = holtForecast(prices, horizon);
     buildChart(dates, prices, bb, forecast, days, horizon);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
+    loadSentiment(coinId).catch(e => console.warn('Sentiment:', e.message));
   } catch (err) {
     loader.innerHTML = `<span style="color:#FF3D3D">${
       err.message.includes('429') ? 'Rate-limited — wait 60 s then try again.'
@@ -553,6 +761,31 @@ async function analyze() {
   if (m.liqDist < 5)  { signals.push({ t:`DANGER: Your forced-close price is only ${m.liqDist.toFixed(1)}% away — very high risk!`, c:'red' }); score -= 1; }
   else if (m.liqDist < 10) signals.push({ t:`Caution: Your forced-close price is ${m.liqDist.toFixed(1)}% away — moderate risk`, c:'yellow' });
   else                      signals.push({ t:`Safe buffer: Your forced-close price is ${m.liqDist.toFixed(1)}% away`, c:'green' });
+
+  // Sentiment signals (from pre-loaded state.sentiment)
+  if (state.sentiment?.fg?.length) {
+    const fgV = parseInt(state.sentiment.fg[0].value);
+    const fgL = state.sentiment.fg[0].value_classification;
+    if      (fgV <= 24) { signals.push({ t:`Fear & Greed ${fgV} (${fgL}) — historically a strong buying opportunity`, c:'green' }); score += 1; }
+    else if (fgV <= 44) { signals.push({ t:`Fear & Greed ${fgV} (${fgL}) — market fearful, mild contrarian bullish lean`, c:'green' }); }
+    else if (fgV >= 75) { signals.push({ t:`Fear & Greed ${fgV} (${fgL}) — extreme greed often precedes corrections`, c:'red' }); score -= 1; }
+    else if (fgV >= 56) { signals.push({ t:`Fear & Greed ${fgV} (${fgL}) — market greedy, mild contrarian bearish lean`, c:'red' }); }
+    else                  signals.push({ t:`Fear & Greed ${fgV} (${fgL}) — no strong contrarian signal`, c:'neutral' });
+  }
+  if (state.sentiment?.community?.up != null) {
+    const up = state.sentiment.community.up;
+    if      (up > 70) { signals.push({ t:`Community: ${up.toFixed(0)}% bullish votes — strong positive sentiment`, c:'green' }); score += 1; }
+    else if (up > 55) { signals.push({ t:`Community: ${up.toFixed(0)}% bullish — mild positive lean`, c:'green' }); }
+    else if (up < 30) { signals.push({ t:`Community: ${(100-up).toFixed(0)}% bearish votes — strong negative sentiment`, c:'red' }); score -= 1; }
+    else if (up < 45) { signals.push({ t:`Community: ${(100-up).toFixed(0)}% bearish — mild negative lean`, c:'red' }); }
+    else                signals.push({ t:`Community: ${up.toFixed(0)}% bullish vs ${(100-up).toFixed(0)}% bearish — split`, c:'neutral' });
+  }
+  if (state.sentiment?.finbert) {
+    const fb = state.sentiment.finbert;
+    if      (fb.positive > 0.6) { signals.push({ t:`News (FinBERT AI): ${(fb.positive*100).toFixed(0)}% of headlines positive — bullish news flow`, c:'green' }); score += 1; }
+    else if (fb.negative > 0.6) { signals.push({ t:`News (FinBERT AI): ${(fb.negative*100).toFixed(0)}% of headlines negative — bearish news flow`, c:'red' }); score -= 1; }
+    else                          signals.push({ t:`News (FinBERT AI): Mixed headlines — no strong directional signal`, c:'neutral' });
+  }
 
   renderResults(m, curr, fcst, horizon, chgF);
   renderSignal(score, signals, dir);
@@ -631,7 +864,7 @@ function renderSignal(score, signals, dir) {
   document.getElementById('signalBody').innerHTML = `
     <div class="signal-heading ${hCls}">
       <span>${heading}</span>
-      <span class="sig-score">${score > 0 ? '+' : ''}${score} / ±5</span>
+      <span class="sig-score">${score > 0 ? '+' : ''}${score} / ±8</span>
     </div>
     <div class="beginner-summary">
       <span class="bs-emoji">${summaryEmoji}</span>
