@@ -93,14 +93,22 @@ async function fetchCryptoNews(sym) {
 }
 
 async function classifyFinBERT(headlines) {
-  const res = await fetch(FINBERT_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ inputs: headlines }),
-  });
-  if (!res.ok) return null;
-  const data = await res.json();
-  return data?.error ? null : data;
+  const ctrl  = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 12_000); // abort after 12 s
+  try {
+    const res = await fetch(FINBERT_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ inputs: headlines }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data?.error ? null : data;
+  } catch {
+    return null;
+  }
 }
 
 function parseFinBERT(data) {
@@ -128,23 +136,15 @@ async function loadSentiment(coinId) {
   state.sentiment = null;
   renderSentimentCard(null);
 
-  const [fgRes, commRes, newsRes] = await Promise.allSettled([
+  // ── Phase 1: fast APIs (renders quickly) ──────────────────────────
+  const [fgRes, commRes] = await Promise.allSettled([
     fetchFearGreed(),
     fetchCoinCommunity(coinId),
-    fetchCryptoNews(sym),
   ]);
+  if (gen !== _sentGen) return;
 
-  const fgData    = fgRes.status   === 'fulfilled' ? fgRes.value?.data      : null;
-  const commData  = commRes.status === 'fulfilled' ? commRes.value           : null;
-  const newsItems = newsRes.status === 'fulfilled' ? (newsRes.value?.Data || []).slice(0, 5) : [];
-
-  let finbert = null;
-  if (newsItems.length) {
-    const headlines = newsItems.map(n => n.title).filter(Boolean);
-    finbert = await classifyFinBERT(headlines).catch(() => null);
-  }
-
-  if (gen !== _sentGen) return; // stale — newer coin was selected
+  const fgData   = fgRes.status  === 'fulfilled' ? fgRes.value?.data : null;
+  const commData = commRes.status === 'fulfilled' ? commRes.value     : null;
 
   state.sentiment = {
     fg:        fgData,
@@ -152,11 +152,33 @@ async function loadSentiment(coinId) {
       up:   commData.sentiment_votes_up_percentage,
       down: commData.sentiment_votes_down_percentage,
     } : null,
-    finbert: parseFinBERT(finbert),
-    headlines: newsItems.map(n => n.title),
+    finbert:   null,
+    headlines: [],
+    finbertLoading: true,
   };
+  try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
 
-  renderSentimentCard(state.sentiment);
+  // ── Phase 2: slow FinBERT (updates card when ready) ───────────────
+  let newsItems = [];
+  try {
+    const newsRes = await fetchCryptoNews(sym);
+    newsItems = (newsRes?.Data || []).slice(0, 5);
+  } catch { /* ignore */ }
+
+  let finbert = null;
+  if (newsItems.length) {
+    finbert = await classifyFinBERT(newsItems.map(n => n.title).filter(Boolean)).catch(() => null);
+  }
+
+  if (gen !== _sentGen) return;
+
+  state.sentiment = {
+    ...state.sentiment,
+    finbert:        parseFinBERT(finbert),
+    headlines:      newsItems.map(n => n.title),
+    finbertLoading: false,
+  };
+  try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
 }
 
 // ─── Render Sentiment Card ───────────────────────────────────────────
@@ -262,9 +284,12 @@ function renderSentimentCard(data) {
       </div>
       ${badge(`Overall ${overall} — ${pos}% positive, ${neg}% negative across recent headlines`, cls)}
       ${headlineHtml ? `<div class="fb-headlines">${headlineHtml}</div>` : ''}`;
+  } else if (data.finbertLoading) {
+    fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
+      <div class="sent-loading" style="padding:6px 0"><div class="spin" style="width:14px;height:14px;border-width:2px"></div><span>Fetching headlines and running AI analysis…</span></div>`;
   } else {
     fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
-      <div class="sent-unavail">Model loading or rate-limited — try again in a moment</div>`;
+      <div class="sent-unavail">Model warming up — reload the page in 20 seconds to try again</div>`;
   }
 
   card.innerHTML = `
