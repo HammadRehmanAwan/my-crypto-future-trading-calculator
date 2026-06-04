@@ -17,13 +17,9 @@
 <header class="header">
   <div class="logo">
     <svg class="logo-mark" width="42" height="42" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <!-- top face — cyan -->
       <polygon points="20,2 36,11 20,20 4,11" fill="url(#lm-top)"/>
-      <!-- left face — deep blue -->
       <polygon points="4,11 20,20 20,38 4,29" fill="url(#lm-left)"/>
-      <!-- right face — neon purple -->
       <polygon points="36,11 36,29 20,38 20,20" fill="url(#lm-right)"/>
-      <!-- edge highlights -->
       <polygon points="20,2 36,11 20,20 4,11" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="0.7"/>
       <line x1="20" y1="20" x2="20" y2="38" stroke="rgba(255,255,255,0.2)" stroke-width="0.7"/>
       <line x1="4"  y1="29" x2="20" y2="38" stroke="rgba(255,255,255,0.15)" stroke-width="0.7"/>
@@ -50,13 +46,13 @@
   </div>
   <div class="ticker" id="ticker"><span class="ticker-loading">Loading prices…</span></div>
   <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
-     target="_blank" class="btn-hf-header">🤗 HF Space</a>
+     target="_blank" class="btn-hf-header">HF Space</a>
 </header>
 
 <!-- ─── PAGE TABS ─── -->
 <nav class="page-tabs">
-  <button class="page-tab active" id="tabCalc" onclick="switchTab('calc')">⚙️ Calculator</button>
-  <button class="page-tab" id="tabDash" onclick="switchTab('dash')">🎯 AI Portfolio Dashboard</button>
+  <button class="page-tab active" id="tabCalc" onclick="switchTab('calc')">Calculator</button>
+  <button class="page-tab" id="tabDash" onclick="switchTab('dash')">Portfolio Dashboard</button>
 </nav>
 
 <!-- ─── MAIN ─── -->
@@ -87,9 +83,15 @@
       </div>
     </div>
 
+    <!-- Sentiment card -->
+    <div class="card sentiment-card" id="sentimentCard">
+      <h3 class="card-heading">Market Sentiment <span class="heading-sub">— Loading…</span></h3>
+      <div class="sent-loading"><div class="spin"></div><span>Fetching fear &amp; greed, news and community data…</span></div>
+    </div>
+
     <!-- Technicals card -->
     <div class="card tech-card">
-      <h3 class="card-heading">📊 Market Health Indicators <span class="heading-sub">— What is the market telling us?</span></h3>
+      <h3 class="card-heading">Market Indicators <span class="heading-sub">— What is the market telling us?</span></h3>
       <div class="tech-grid">
         <div class="tech-item">
           <div class="ti-label">RSI — Overbought / Oversold</div>
@@ -97,9 +99,9 @@
           <div class="ti-val" id="rsiVal">—</div>
           <div class="ti-bar-track"><div class="ti-bar-fill" id="rsiBar"></div></div>
           <div class="rsi-zone-row">
-            <span class="rz green-text">← Oversold (buy)</span>
+            <span class="rz green-text">← Oversold</span>
             <span class="rz neutral-text">Neutral</span>
-            <span class="rz red-text">(sell) Overbought →</span>
+            <span class="rz red-text">Overbought →</span>
           </div>
           <div class="ti-sig" id="rsiSig">—</div>
         </div>
@@ -130,13 +132,13 @@
 
     <!-- Calculator card -->
     <div class="card calc-card">
-      <h3 class="card-heading">⚙️ Position Setup</h3>
+      <h3 class="card-heading">Position Setup</h3>
 
       <div class="form-group">
         <label>Direction — Which way do you think the price will move?</label>
         <div class="dir-toggle">
-          <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">📈 Long — Price will GO UP</button>
-          <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">📉 Short — Price will GO DOWN</button>
+          <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">▲ Long — Price will rise</button>
+          <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">▼ Short — Price will fall</button>
         </div>
       </div>
 
@@ -176,12 +178,12 @@
                oninput="document.getElementById('horizDisplay').textContent=this.value+' days'" />
       </div>
 
-      <button id="analyzeBtn" class="btn-analyze" onclick="analyze()">🚀 Analyze Trade</button>
+      <button id="analyzeBtn" class="btn-analyze" onclick="analyze()">Analyze Trade</button>
     </div>
 
     <!-- Results card -->
     <div class="card results-card" id="resultsCard" style="display:none">
-      <h3 class="card-heading">📋 Your Trade — Explained Simply</h3>
+      <h3 class="card-heading">Trade Summary</h3>
       <div id="resultsBody"></div>
     </div>
 
@@ -189,14 +191,14 @@
     <div class="card signal-card" id="signalCard" style="display:none">
       <div id="signalBody"></div>
       <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
-         target="_blank" class="btn-hf-link">🤗 Get Chronos AI Prediction on HF Spaces ↗</a>
+         target="_blank" class="btn-hf-link">Get AI Prediction on HF Spaces ↗</a>
     </div>
 
     <!-- Volatility Alert card -->
     <div class="card alert-card">
       <div class="alert-header" onclick="document.getElementById('alertBody').classList.toggle('collapsed')">
         <div>
-          <h3 class="card-heading" style="margin-bottom:2px">🔔 Volatility Email Alerts</h3>
+          <h3 class="card-heading" style="margin-bottom:2px">Volatility Alerts</h3>
           <div class="alert-subhead">Auto-email when a coin moves sharply</div>
         </div>
         <span class="alert-caret" id="alertCaret">▼</span>
@@ -236,8 +238,8 @@
         </div>
 
         <div class="alert-actions">
-          <button class="btn-save-alert" onclick="saveAlerts()">💾 Save Settings</button>
-          <button class="btn-test-alert" onclick="testAlert()">✉️ Send Test Email</button>
+          <button class="btn-save-alert" onclick="saveAlerts()">Save Settings</button>
+          <button class="btn-test-alert" onclick="testAlert()">Send Test Email</button>
         </div>
 
         <div class="alert-status" id="alertStatus" style="display:none"></div>
@@ -259,17 +261,17 @@
         <input type="number" id="dashCapital" value="1000" min="10" placeholder="1000" />
       </div>
       <div class="risk-profile">
-        <button class="risk-btn active" data-r="conservative" onclick="setRiskProfile('conservative')">🛡️ Safe</button>
-        <button class="risk-btn"        data-r="moderate"     onclick="setRiskProfile('moderate')">⚖️ Balanced</button>
-        <button class="risk-btn"        data-r="aggressive"   onclick="setRiskProfile('aggressive')">🚀 Aggressive</button>
+        <button class="risk-btn active" data-r="conservative" onclick="setRiskProfile('conservative')">Safe</button>
+        <button class="risk-btn"        data-r="moderate"     onclick="setRiskProfile('moderate')">Balanced</button>
+        <button class="risk-btn"        data-r="aggressive"   onclick="setRiskProfile('aggressive')">Aggressive</button>
       </div>
-      <button class="btn-analyze-once" id="dashBtn" onclick="runDashboard()">🔍 Analyze Now</button>
+      <button class="btn-analyze-once" id="dashBtn" onclick="runDashboard()">Analyze Now</button>
     </div>
 
     <div class="risk-explain">
-      <div class="re-item active" id="re-conservative">🛡️ <strong>Safe:</strong> Low leverage (2–5×), tight stop-losses. Good for beginners.</div>
-      <div class="re-item"        id="re-moderate">⚖️ <strong>Balanced:</strong> Medium leverage (4–10×). Best of both worlds.</div>
-      <div class="re-item"        id="re-aggressive">🚀 <strong>Aggressive:</strong> High leverage (8–20×). Experienced traders only.</div>
+      <div class="re-item active" id="re-conservative"><strong>Safe:</strong> Low leverage (2–5×), tight stop-losses. Good for beginners.</div>
+      <div class="re-item"        id="re-moderate"><strong>Balanced:</strong> Medium leverage (4–10×). Best of both worlds.</div>
+      <div class="re-item"        id="re-aggressive"><strong>Aggressive:</strong> High leverage (8–20×). Experienced traders only.</div>
     </div>
 
   </div>
@@ -285,9 +287,9 @@
 
   <!-- No signal -->
   <div class="dash-no-signal" id="dashNoSignal" style="display:none">
-    <div style="font-size:40px">🤔</div>
+    <div class="no-signal-icon">—</div>
     <h3>No strong signals right now</h3>
-    <p>Markets are undecided. This is often the best time to wait. The bot will keep checking every 4 hours.</p>
+    <p>Markets are undecided. This is often the best time to wait.</p>
   </div>
 
   <!-- Error -->
@@ -296,21 +298,20 @@
   <!-- Current signals -->
   <div id="dashResults" style="display:none">
     <div class="card dash-summary-card">
-      <h3 class="card-heading">📡 Current AI Signals — Top Opportunities</h3>
+      <h3 class="card-heading">Top Signals — AI Analysis</h3>
       <div id="dashSummary"></div>
     </div>
     <div class="dash-trades-grid" id="dashTradesGrid"></div>
   </div>
 
-  <div class="dash-disclaimer">⚠️ Signals are based on technical analysis and a statistical forecast. This tool is for educational purposes only — not financial advice.</div>
+  <div class="dash-disclaimer">Signals are based on technical analysis and statistical forecasting. For educational purposes only — not financial advice.</div>
 </section>
-
 
 <footer class="footer">
   Powered by
   <a href="https://huggingface.co/amazon/chronos-bolt-small" target="_blank">amazon/chronos-bolt-small</a>
   (Apache 2.0) · Data: CoinGecko Free API · Statistical forecast via Holt's smoothing ·
-  <strong>⚠️ Not financial advice</strong>
+  <strong>Not financial advice</strong>
 </footer>
 
 <script src="app.js"></script>
