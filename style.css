@@ -670,6 +670,7 @@ input, select, button { font-family: inherit; }
 }
 .dash-no-signal h3 { color: var(--text-hi); margin: 12px 0 8px; }
 .dash-no-signal p  { font-size: 13px; max-width: 400px; margin: 0 auto; line-height: 1.6; }
+.no-signal-icon    { font-size: 32px; color: var(--text-lo); line-height: 1; }
 
 .dash-error {
   background: var(--red-d); border: 1px solid rgba(255,61,61,.3);
@@ -806,3 +807,101 @@ input, select, button { font-family: inherit; }
 .btn-analyze-once:hover   { opacity: .9; }
 .btn-analyze-once:active  { transform: scale(.98); }
 .btn-analyze-once:disabled { opacity: .5; cursor: default; }
+
+/* ─── SENTIMENT CARD ─── */
+.sentiment-card { padding: 18px 20px; }
+
+.sent-loading {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--text-lo); font-size: 13px; padding: 12px 0;
+}
+
+.sent-unavail { font-size: 12px; color: var(--text-lo); padding: 6px 0; }
+
+.sent-section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-lo);
+  margin-bottom: 8px;
+}
+.sent-src {
+  font-weight: 400; text-transform: none; letter-spacing: 0;
+  color: var(--border2); margin-left: 4px;
+}
+
+/* Top two-column grid: F&G + Community */
+.sent-top-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+  margin-bottom: 16px;
+}
+@media (max-width: 520px) {
+  .sent-top-grid { grid-template-columns: 1fr; }
+}
+
+.sent-block { }
+.sent-block-full {
+  border-top: 1px solid var(--border); padding-top: 14px;
+}
+
+/* Fear & Greed */
+.fg-main-row {
+  display: flex; align-items: flex-end; gap: 12px; margin-bottom: 10px;
+}
+.fg-val-block { flex-shrink: 0; }
+.fg-number {
+  font-size: 36px; font-weight: 800; line-height: 1;
+  font-family: 'JetBrains Mono', monospace;
+}
+.fg-class { font-size: 11px; font-weight: 600; margin-top: 2px; }
+.fg-spark-wrap { flex: 1; min-width: 0; }
+.fg-spark {
+  display: flex; align-items: flex-end; gap: 3px; height: 36px;
+  margin-bottom: 4px;
+}
+.fgs-bar { flex: 1; border-radius: 2px 2px 0 0; min-height: 4px; }
+.fg-trend { font-size: 11px; color: var(--text-lo); }
+
+.fg-gauge-track {
+  height: 5px; background: var(--border); border-radius: 3px;
+  margin: 8px 0 4px; overflow: hidden;
+}
+.fg-gauge-fill { height: 100%; border-radius: 3px; transition: width .5s; }
+.fg-gauge-labels {
+  display: flex; justify-content: space-between;
+  font-size: 9px; color: var(--border2); margin-bottom: 8px;
+}
+
+/* Community bars */
+.comm-bar-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+}
+.comm-side { font-size: 10px; font-weight: 700; width: 28px; flex-shrink: 0; }
+.comm-track {
+  flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
+}
+.comm-fill { height: 100%; border-radius: 3px; transition: width .5s; }
+.comm-fill.green { background: #00E887; }
+.comm-fill.red   { background: #FF3D3D; }
+.comm-pct { font-size: 11px; width: 36px; text-align: right; flex-shrink: 0; }
+
+/* FinBERT bars */
+.fb-bars { margin-bottom: 8px; }
+.fb-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 5px;
+}
+.fb-lbl { font-size: 10px; font-weight: 600; width: 52px; flex-shrink: 0; }
+.fb-track {
+  flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
+}
+.fb-fill { height: 100%; border-radius: 3px; transition: width .6s; }
+.fb-fill.green   { background: #00E887; }
+.fb-fill.neutral { background: #F7C948; }
+.fb-fill.red     { background: #FF3D3D; }
+.fb-pct { font-size: 11px; width: 30px; text-align: right; flex-shrink: 0; }
+
+.fb-headlines {
+  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+}
+.fb-headline {
+  font-size: 11px; color: var(--text-lo); line-height: 1.5;
+  padding: 2px 0;
+}
