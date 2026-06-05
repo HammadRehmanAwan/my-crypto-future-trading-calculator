@@ -94,12 +94,15 @@ async function fetchCryptoNews(sym) {
 
 async function classifyFinBERT(headlines) {
   const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12_000);
+  // 60 s — HuggingFace free tier can take ~20–40 s to warm the model;
+  // wait_for_model:true tells the API to block until it's ready instead of
+  // immediately returning {"error":"Model is currently loading"}.
+  const timer = setTimeout(() => ctrl.abort(), 60_000);
   try {
     const res = await fetch(FINBERT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputs: headlines }),
+      body: JSON.stringify({ inputs: headlines, options: { wait_for_model: true } }),
       signal: ctrl.signal,
     });
     clearTimeout(timer);
@@ -302,7 +305,7 @@ function renderSentimentCard(data) {
       ${headlineHtml ? `<div class="fb-headlines">${headlineHtml}</div>` : ''}`;
   } else if (data.finbertLoading) {
     fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
-      <div class="sent-loading" style="padding:6px 0"><div class="spin" style="width:14px;height:14px;border-width:2px"></div><span>Fetching headlines and running AI analysis…</span></div>`;
+      <div class="sent-loading" style="padding:6px 0"><div class="spin" style="width:14px;height:14px;border-width:2px"></div><span>Loading AI model — first load takes ~20 s, please wait…</span></div>`;
   } else {
     fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
       <div class="sent-unavail">Model warming up — reload the page in 20 seconds to try again</div>`;
@@ -434,6 +437,7 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
   });
   const allDates = [...dDates, ...fDates];
   const labels = allDates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+  // Full, human-readable dates for the tooltip title (e.g. "Mon, Jun 5 2026")
   const fullLabels = allDates.map(d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }));
   const pad  = arr => [...arr.slice(-n), ...new Array(horizon).fill(null)];
   const fpad = arr => [...new Array(n).fill(null), ...arr];
@@ -492,7 +496,7 @@ function fmtPct(v) { return v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed
 function badge(text, type) { return `<span class="badge badge-${type}">${text}</span>`; }
 
 // ═══════════════════════════════════════════════════════════════════
-// FRESHNESS INDICATOR
+// FRESHNESS INDICATOR  ("last updated X ago")
 // ═══════════════════════════════════════════════════════════════════
 
 function updateFreshness() {
@@ -619,6 +623,11 @@ function startBackgroundAlertChecks() {
 
 // ─── Alert UI helpers ───
 
+function showEmailjsHelp() {
+  const el = document.getElementById('emailjsHelp');
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
 function setAlertSensitivity(val) {
   document.querySelectorAll('.thresh-btn').forEach(b => b.classList.toggle('active', b.dataset.t === val));
   const hint = document.getElementById('threshHint');
@@ -633,6 +642,7 @@ function saveAlerts() {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showAlertStatus('Please enter a valid email address.', 'error'); return;
   }
+  // GDPR: require explicit consent before storing an email address
   if (email && !consent) {
     showAlertStatus('Please tick the consent box before we store your email address.', 'error'); return;
   }
@@ -816,14 +826,17 @@ async function loadCoin(coinId, days) {
     buildChart(dates, prices, bb, forecast, days, horizon);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
 
+    // Freshness indicator
     state.lastUpdated = Date.now();
     updateFreshness();
 
+    // Auto-fill entry price with live price (unless the user typed their own)
     const entryEl = document.getElementById('entryPrice');
     if (entryEl && !entryEl.dataset.userSet) entryEl.value = curr.toFixed(2);
 
     loadSentiment(coinId).catch(e => console.warn('Sentiment:', e.message));
 
+    // Auto-run the full analysis once on first successful load
     if (!state._autoRan) { state._autoRan = true; analyze(); }
 
   } catch (err) {
@@ -1010,6 +1023,7 @@ function selectCoin(coinId) {
 // ═══════════════════════════════════════════════════════════════════
 
 function init() {
+  // Show disclaimer banner on first visit
   if (!localStorage.getItem('disclaimerSeen')) {
     const banner = document.getElementById('disclaimerBanner');
     if (banner) banner.style.display = 'flex';
@@ -1031,6 +1045,7 @@ function init() {
     });
   });
 
+  // Pre-populate defaults so the calculator is usable immediately
   document.getElementById('posSize').value = '1000';
   document.getElementById('leverage').value = '10';
   updateLeverage(10);
@@ -1038,7 +1053,7 @@ function init() {
   loadCoin('bitcoin', 30);
   refreshTicker();
   setInterval(refreshTicker, 60_000);
-  setInterval(updateFreshness, 1000);
+  setInterval(updateFreshness, 1000); // tick the "updated X ago" label
   initAlertUI();
   startBackgroundAlertChecks();
 }
