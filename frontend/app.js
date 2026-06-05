@@ -32,22 +32,10 @@ const TICKER_IDS = ['bitcoin','ethereum','binancecoin','solana','ripple','cardan
 const BASE = 'https://api.coingecko.com/api/v3';
 
 // ─── FIREBASE CONFIG ────────────────────────────────────────────────
-// 1. Go to https://console.firebase.google.com and create a project.
-// 2. Authentication → Sign-in method → enable Google.
-// 3. Firestore Database → Create database (start in production mode).
-// 4. Firestore → Rules → paste:
-//      match /users/{uid}/{doc=**} { allow read, write: if request.auth.uid == uid; }
-// 5. Project Settings → Your apps → Add web app → copy the config below.
-// 6. Authentication → Settings → Authorized domains → add hammadrehmanawan.github.io
-const FIREBASE_CONFIG = {
-  apiKey:            'AIzaSyAj-kciCa5GpvOl-i6cE99nXtbIDeT1eQo',
-  authDomain:        'futurex-9f2c6.firebaseapp.com',
-  projectId:         'futurex-9f2c6',
-  storageBucket:     'futurex-9f2c6.firebasestorage.app',
-  messagingSenderId: '76081464641',
-  appId:             '1:76081464641:web:5d0716491dd91dffc24dc0',
-  measurementId:     'G-0WLTV3GHL9',
-};
+// Credentials are served from the backend so they never appear in source.
+// Set BACKEND_URL to wherever app.py is deployed (Render, HuggingFace, etc.)
+// and add the seven FIREBASE_* environment variables on that server.
+const BACKEND_URL = ''; // e.g. 'https://my-app.onrender.com'
 // ────────────────────────────────────────────────────────────────────
 
 let _db   = null;
@@ -1103,15 +1091,28 @@ function init() {
 // FIREBASE AUTH + FIRESTORE
 // ═══════════════════════════════════════════════════════════════════
 
-function initFirebase() {
+async function initFirebase() {
   if (typeof firebase === 'undefined') return;
-  if (FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') {
-    // Config not yet filled in — show a disabled sign-in button
+  if (!BACKEND_URL) {
+    // Backend URL not configured — show a disabled sign-in button
+    renderAuthUI(null, /* disabled */ true);
+    return;
+  }
+  let config;
+  try {
+    const res = await fetch(`${BACKEND_URL}/firebase-config`);
+    config = await res.json();
+  } catch (e) {
+    console.warn('Could not fetch Firebase config:', e.message);
+    renderAuthUI(null, /* disabled */ true);
+    return;
+  }
+  if (!config?.apiKey) {
     renderAuthUI(null, /* disabled */ true);
     return;
   }
   try {
-    firebase.initializeApp(FIREBASE_CONFIG);
+    firebase.initializeApp(config);
     _auth = firebase.auth();
     _db   = firebase.firestore();
 
