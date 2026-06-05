@@ -7,6 +7,7 @@ All models are 100% free and open-source (Apache 2.0)
 import warnings
 warnings.filterwarnings("ignore")
 
+import os
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -549,5 +550,33 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 ⚠️ *For educational purposes only. Crypto trading carries significant risk. Not financial advice.*
     """)
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://hammadrehmanawan.github.io"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
+@app.get("/firebase-config")
+def get_firebase_config():
+    return JSONResponse({
+        "apiKey":            os.environ.get("FIREBASE_API_KEY", ""),
+        "authDomain":        os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId":         os.environ.get("FIREBASE_PROJECT_ID", ""),
+        "storageBucket":     os.environ.get("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.environ.get("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId":             os.environ.get("FIREBASE_APP_ID", ""),
+        "measurementId":     os.environ.get("FIREBASE_MEASUREMENT_ID", ""),
+    })
+
+app = gr.mount_gradio_app(app, demo, path="/")
+
 if __name__ == "__main__":
-    demo.launch()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)
