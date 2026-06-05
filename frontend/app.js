@@ -42,7 +42,7 @@ const SENT_TTL           = 5 * 60_000;
 const state = {
   coin: 'bitcoin', days: 30, direction: 'Long',
   prices: null, dates: null, chart: null, cache: {},
-  sentiment: null,
+  sentiment: null, lastUpdated: null, _autoRan: false,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -434,16 +434,17 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
   });
   const allDates = [...dDates, ...fDates];
   const labels = allDates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+  const fullLabels = allDates.map(d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }));
   const pad  = arr => [...arr.slice(-n), ...new Array(horizon).fill(null)];
   const fpad = arr => [...new Array(n).fill(null), ...arr];
   const datasets = [
-    { label: 'Price', data: pad(dPrices), borderColor: '#00D4FF', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.3, order: 1 },
+    { label: 'Price', data: pad(dPrices), borderColor: '#00D4FF', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0.3, order: 1 },
     { label: 'BB Upper', data: pad(bb.upper), borderColor: 'rgba(100,116,139,0.45)', backgroundColor: 'transparent', borderWidth: 1, borderDash: [4,3], pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'BB Mid', data: pad(bb.mid), borderColor: 'rgba(100,116,139,0.25)', backgroundColor: 'transparent', borderWidth: 1, pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'BB Lower', data: pad(bb.lower), borderColor: 'rgba(100,116,139,0.45)', backgroundColor: 'rgba(100,116,139,0.06)', fill: '-1', borderWidth: 1, borderDash: [4,3], pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'Forecast CI High', data: fpad(forecast.high), borderColor: 'rgba(255,184,0,0.2)', backgroundColor: 'rgba(255,184,0,0.08)', fill: '+1', borderWidth: 1, pointRadius: 0, tension: 0.2, order: 4 },
     { label: 'Forecast CI Low',  data: fpad(forecast.low),  borderColor: 'rgba(255,184,0,0.2)', backgroundColor: 'transparent', borderWidth: 1, pointRadius: 0, tension: 0.2, order: 4 },
-    { label: 'Forecast (Trend)', data: fpad(forecast.median), borderColor: '#FFB800', backgroundColor: 'transparent', borderWidth: 2, borderDash: [6,3], pointRadius: 4, pointBackgroundColor: '#FFB800', tension: 0.2, order: 2 },
+    { label: 'Forecast (Trend)', data: fpad(forecast.median), borderColor: '#FFB800', backgroundColor: 'transparent', borderWidth: 2, borderDash: [6,3], pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#FFB800', tension: 0.2, order: 2 },
   ];
   const ctx = document.getElementById('priceChart').getContext('2d');
   state.chart = new Chart(ctx, {
@@ -458,7 +459,14 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
         tooltip: {
           backgroundColor: '#0F1828', borderColor: '#1A2540', borderWidth: 1,
           titleColor: '#00D4FF', bodyColor: '#CBD5E1', padding: 10,
+          displayColors: true, usePointStyle: true,
           callbacks: {
+            title: items => {
+              if (!items.length) return '';
+              const idx = items[0].dataIndex;
+              const isForecast = idx >= n;
+              return `${fullLabels[idx]}${isForecast ? '  ·  forecast' : ''}`;
+            },
             label: ctx => ctx.parsed.y == null ? null : ` ${ctx.dataset.label}: $${fmt(ctx.parsed.y)}`,
           },
         },
@@ -482,6 +490,26 @@ function fmt(v, d = 2) {
 function fmtUSD(v, d = 2) { return v == null ? '—' : `$${fmt(v, d)}`; }
 function fmtPct(v) { return v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`; }
 function badge(text, type) { return `<span class="badge badge-${type}">${text}</span>`; }
+
+// ═══════════════════════════════════════════════════════════════════
+// FRESHNESS INDICATOR
+// ═══════════════════════════════════════════════════════════════════
+
+function updateFreshness() {
+  const el = document.getElementById('freshness');
+  if (!el) return;
+  if (!state.lastUpdated) { el.textContent = ''; return; }
+  const secs = Math.round((Date.now() - state.lastUpdated) / 1000);
+  let txt;
+  if (secs < 5)        txt = 'Updated just now';
+  else if (secs < 60)  txt = `Updated ${secs}s ago`;
+  else {
+    const mins = Math.floor(secs / 60);
+    txt = `Updated ${mins}m ${secs % 60}s ago`;
+  }
+  el.innerHTML = `<span class="fresh-dot"></span>${txt}`;
+  el.className = 'freshness' + (secs > 120 ? ' stale' : '');
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // VOLATILITY ALERT SYSTEM
@@ -591,11 +619,6 @@ function startBackgroundAlertChecks() {
 
 // ─── Alert UI helpers ───
 
-function showEmailjsHelp() {
-  const el = document.getElementById('emailjsHelp');
-  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
-}
-
 function setAlertSensitivity(val) {
   document.querySelectorAll('.thresh-btn').forEach(b => b.classList.toggle('active', b.dataset.t === val));
   const hint = document.getElementById('threshHint');
@@ -603,13 +626,21 @@ function setAlertSensitivity(val) {
 }
 
 function saveAlerts() {
-  const email = document.getElementById('alertEmail').value.trim();
+  const email   = document.getElementById('alertEmail').value.trim();
+  const enabled = document.getElementById('alertEnabled').checked;
+  const consent = document.getElementById('gdprConsent')?.checked;
+
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showAlertStatus('Please enter a valid email address.', 'error'); return;
   }
+  if (email && !consent) {
+    showAlertStatus('Please tick the consent box before we store your email address.', 'error'); return;
+  }
   const s = {
-    enabled:     document.getElementById('alertEnabled').checked,
+    enabled,
     email,
+    consent: !!consent,
+    consentAt: consent ? new Date().toISOString() : null,
     sensitivity: document.querySelector('.thresh-btn.active')?.dataset?.t || 'moderate',
     watchCoins:  [...document.querySelectorAll('.watch-coin-cb:checked')].map(c => c.value),
   };
@@ -618,10 +649,23 @@ function saveAlerts() {
 }
 
 async function testAlert() {
+  const email   = document.getElementById('alertEmail').value.trim();
+  const consent = document.getElementById('gdprConsent')?.checked;
+  if (!email) { showAlertStatus('Enter your email address first.', 'error'); return; }
+  if (!consent) { showAlertStatus('Please tick the consent box before we send to your email.', 'error'); return; }
   saveAlerts();
   const s = getAlertSettings();
-  if (!s.email) { showAlertStatus('Enter your email address first.', 'error'); return; }
+  if (!s.email) return;
   await sendVolatilityEmail(s, 'Bitcoin (BTC) — TEST', 65000, ['This is a test alert. Your email setup is working correctly!'], '_test');
+}
+
+function forgetAlertData() {
+  localStorage.removeItem('cryptoAlertSettings');
+  document.getElementById('alertEmail').value = '';
+  document.getElementById('alertEnabled').checked = false;
+  const cb = document.getElementById('gdprConsent');
+  if (cb) cb.checked = false;
+  showAlertStatus('Your stored email and alert settings have been deleted from this browser.', 'success');
 }
 
 function initAlertUI() {
@@ -638,6 +682,8 @@ function initAlertUI() {
   }
   if (s.email)    document.getElementById('alertEmail').value    = s.email;
   if (s.enabled)  document.getElementById('alertEnabled').checked = true;
+  const cb = document.getElementById('gdprConsent');
+  if (cb && s.consent) cb.checked = true;
   setAlertSensitivity(s.sensitivity || 'moderate');
 }
 
@@ -688,8 +734,33 @@ async function refreshTicker() {
 // LOAD COIN
 // ═══════════════════════════════════════════════════════════════════
 
+function showLoadError(coinId, days, message) {
+  const wrap = document.querySelector('.chart-wrap');
+  const loader = document.getElementById('chartLoader');
+  if (loader) loader.classList.remove('visible');
+  let banner = document.getElementById('loadErrorBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'loadErrorBanner';
+    banner.className = 'load-error';
+    wrap.appendChild(banner);
+  }
+  banner.innerHTML = `
+    <div class="le-icon">!</div>
+    <div class="le-text">${message}</div>
+    <button class="le-retry" id="loadRetryBtn">Retry</button>`;
+  banner.style.display = 'flex';
+  document.getElementById('loadRetryBtn').onclick = () => loadCoin(coinId, days);
+}
+
+function clearLoadError() {
+  const banner = document.getElementById('loadErrorBanner');
+  if (banner) banner.style.display = 'none';
+}
+
 async function loadCoin(coinId, days) {
   const loader = document.getElementById('chartLoader');
+  clearLoadError();
   loader.classList.add('visible');
   try {
     const { dates, prices } = await fetchHistory(coinId, days);
@@ -745,20 +816,21 @@ async function loadCoin(coinId, days) {
     buildChart(dates, prices, bb, forecast, days, horizon);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
 
-    // Auto-fill entry price with live price
+    state.lastUpdated = Date.now();
+    updateFreshness();
+
     const entryEl = document.getElementById('entryPrice');
-    if (!entryEl.dataset.userSet) entryEl.value = curr.toFixed(2);
+    if (entryEl && !entryEl.dataset.userSet) entryEl.value = curr.toFixed(2);
 
     loadSentiment(coinId).catch(e => console.warn('Sentiment:', e.message));
 
-    // Auto-run analysis on first load
     if (!state._autoRan) { state._autoRan = true; analyze(); }
 
   } catch (err) {
-    loader.innerHTML = `<span style="color:#FF3D3D">${
-      err.message.includes('429') ? 'Rate-limited — wait 60 s then try again.'
-      : `Load failed: ${err.message}`
-    }</span>`;
+    const msg = err.message.includes('429')
+      ? 'CoinGecko is rate-limiting free requests right now. Please wait ~60 seconds, then retry.'
+      : `Couldn't load market data (${err.message}). Check your connection and retry.`;
+    showLoadError(coinId, days, msg);
     return;
   }
   loader.classList.remove('visible');
@@ -773,6 +845,7 @@ async function analyze() {
   btn.disabled = true; btn.textContent = 'Analyzing…';
   const coinId = document.getElementById('coinSelect').value;
   if (!state.prices || state.coin !== coinId) { state.coin = coinId; await loadCoin(coinId, state.days); }
+  if (!state.prices) { btn.disabled = false; btn.textContent = 'Analyze Trade'; return; }
   const prices  = state.prices;
   const curr    = prices[prices.length - 1];
   const entry   = parseFloat(document.getElementById('entryPrice').value)  || curr;
@@ -937,7 +1010,6 @@ function selectCoin(coinId) {
 // ═══════════════════════════════════════════════════════════════════
 
 function init() {
-  // Show disclaimer banner on first visit
   if (!localStorage.getItem('disclaimerSeen')) {
     const banner = document.getElementById('disclaimerBanner');
     if (banner) banner.style.display = 'flex';
@@ -959,7 +1031,6 @@ function init() {
     });
   });
 
-  // Pre-populate defaults
   document.getElementById('posSize').value = '1000';
   document.getElementById('leverage').value = '10';
   updateLeverage(10);
@@ -967,6 +1038,7 @@ function init() {
   loadCoin('bitcoin', 30);
   refreshTicker();
   setInterval(refreshTicker, 60_000);
+  setInterval(updateFreshness, 1000);
   initAlertUI();
   startBackgroundAlertChecks();
 }
