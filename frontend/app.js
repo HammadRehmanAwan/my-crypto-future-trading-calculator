@@ -94,12 +94,15 @@ async function fetchCryptoNews(sym) {
 
 async function classifyFinBERT(headlines) {
   const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12_000);
+  // 60 s — HuggingFace free tier can take ~20–40 s to warm the model;
+  // wait_for_model:true tells the API to block until it's ready instead of
+  // immediately returning {"error":"Model is currently loading"}.
+  const timer = setTimeout(() => ctrl.abort(), 60_000);
   try {
     const res = await fetch(FINBERT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputs: headlines }),
+      body: JSON.stringify({ inputs: headlines, options: { wait_for_model: true } }),
       signal: ctrl.signal,
     });
     clearTimeout(timer);
@@ -302,7 +305,7 @@ function renderSentimentCard(data) {
       ${headlineHtml ? `<div class="fb-headlines">${headlineHtml}</div>` : ''}`;
   } else if (data.finbertLoading) {
     fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
-      <div class="sent-loading" style="padding:6px 0"><div class="spin" style="width:14px;height:14px;border-width:2px"></div><span>Fetching headlines and running AI analysis…</span></div>`;
+      <div class="sent-loading" style="padding:6px 0"><div class="spin" style="width:14px;height:14px;border-width:2px"></div><span>Loading AI model — first load takes ~20 s, please wait…</span></div>`;
   } else {
     fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
       <div class="sent-unavail">Model warming up — reload the page in 20 seconds to try again</div>`;
