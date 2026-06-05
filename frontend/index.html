@@ -22,6 +22,10 @@
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <!-- Firebase compat SDK (v10) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -65,6 +69,7 @@
     </div>
   </div>
   <div class="ticker" id="ticker"><span class="ticker-loading">Loading prices&hellip;</span></div>
+  <div id="authBar" class="auth-bar"></div>
   <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
      target="_blank" class="btn-hf-header">HF Space</a>
 </header>
@@ -227,7 +232,7 @@
       <div class="alert-body" id="alertBody">
 
         <div class="alert-note">
-          Enter your email below — alerts are sent automatically when high volatility is detected. Free, no account needed.
+          Enter your email below — alerts are sent automatically when high volatility is detected. <strong style="color:var(--accent)">Sign in with Google</strong> (top-right) to sync your settings across all your devices.
         </div>
 
         <div class="alert-form-group toggle-row">
