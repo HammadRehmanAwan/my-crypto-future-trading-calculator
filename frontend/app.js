@@ -37,12 +37,12 @@ const BASE = 'https://api.coingecko.com/api/v3';
 
 const CRYPTOCOMPARE_NEWS = 'https://min-api.cryptocompare.com/data/v2/news/';
 const FINBERT_URL        = 'https://api-inference.huggingface.co/models/ProsusAI/finbert';
-const SENT_TTL           = 5 * 60_000; // 5-minute cache for sentiment data
+const SENT_TTL           = 5 * 60_000;
 
 const state = {
   coin: 'bitcoin', days: 30, direction: 'Long',
   prices: null, dates: null, chart: null, cache: {},
-  sentiment: null,
+  sentiment: null, lastUpdated: null, _autoRan: false,
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -94,7 +94,7 @@ async function fetchCryptoNews(sym) {
 
 async function classifyFinBERT(headlines) {
   const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12_000); // abort after 12 s
+  const timer = setTimeout(() => ctrl.abort(), 12_000);
   try {
     const res = await fetch(FINBERT_URL, {
       method: 'POST',
@@ -113,7 +113,6 @@ async function classifyFinBERT(headlines) {
 
 function parseFinBERT(data) {
   if (!Array.isArray(data)) return null;
-  // Batch → [[{label,score},...], ...], single → [{label,score},...]
   const results = Array.isArray(data[0]) ? data : [data];
   let pos = 0, neg = 0, neu = 0, count = 0;
   for (const r of results) {
@@ -136,7 +135,6 @@ async function loadSentiment(coinId) {
   state.sentiment = null;
   renderSentimentCard(null);
 
-  // ── Phase 1: fast APIs (renders quickly) ──────────────────────────
   const [fgRes, commRes] = await Promise.allSettled([
     fetchFearGreed(),
     fetchCoinCommunity(coinId),
@@ -158,7 +156,6 @@ async function loadSentiment(coinId) {
   };
   try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
 
-  // ── Phase 2: slow FinBERT (updates card when ready) ───────────────
   let newsItems = [];
   try {
     const newsRes = await fetchCryptoNews(sym);
@@ -202,7 +199,6 @@ function renderSentimentCard(data) {
     const diff   = prev != null ? cur - prev : 0;
     const trend  = prev != null ? (diff > 0 ? `↑ ${diff} from yesterday` : diff < 0 ? `↓ ${Math.abs(diff)} from yesterday` : 'Unchanged from yesterday') : '';
     const fillC  = cur <= 44 ? '#FF3D3D' : cur <= 55 ? '#F7C948' : '#00E887';
-    const valCls = cur <= 44 ? 'red' : cur <= 55 ? 'gold' : 'green';
     const hist   = [...data.fg].reverse();
 
     const sigText = cur <= 24 ? 'Extreme fear — historically strong buy signal (contrarian)'
@@ -212,12 +208,13 @@ function renderSentimentCard(data) {
       : 'Extreme greed — corrections often follow (contrarian sell)';
     const sigCls = cur <= 44 ? 'green' : cur <= 55 ? 'neutral' : 'red';
 
-    // Arc gauge geometry: semicircle from left (180°) to right (0°) through top
+    // Arc gauge: semicircle left→top→right, value fills from left
     const gR = 60;
     const arcEndDeg = 180 - (cur / 100 * 180);
     const arcEndRad = arcEndDeg * Math.PI / 180;
     const arcEx = (80 + gR * Math.cos(arcEndRad)).toFixed(1);
     const arcEy = (80 - gR * Math.sin(arcEndRad)).toFixed(1);
+    const largeArc = cur > 50 ? 1 : 0;
 
     const sparkBars = hist.map(d => {
       const v = parseInt(d.value);
@@ -226,7 +223,7 @@ function renderSentimentCard(data) {
       return `<div class="fgs-bar" style="height:${h}px;background:${c}" title="${d.value_classification}: ${v}"></div>`;
     }).join('');
 
-    fgHtml = `<div class="sent-section-label">Fear & Greed <span class="sent-src">alternative.me</span></div>
+    fgHtml = `<div class="sent-section-label">Fear &amp; Greed <span class="sent-src">alternative.me</span></div>
       <div class="fg-arc-outer">
         <svg viewBox="0 0 160 92" xmlns="http://www.w3.org/2000/svg" class="fg-arc-svg">
           <defs>
@@ -237,12 +234,14 @@ function renderSentimentCard(data) {
             </linearGradient>
           </defs>
           <path d="M 20 80 A 60 60 0 0 0 140 80" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round" opacity="0.18"/>
-          ${cur > 0 ? `<path d="M 20 80 A 60 60 0 0 0 ${arcEx} ${arcEy}" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round"/>` : ''}
-          ${cur > 0 ? `<circle cx="${arcEx}" cy="${arcEy}" r="4.5" fill="${fillC}" stroke="#0F1828" stroke-width="1.5"/>` : ''}
-          <circle cx="20" cy="80" r="3.5" fill="#FF3D3D" opacity="0.35"/>
-          <circle cx="140" cy="80" r="3.5" fill="#00E887" opacity="0.35"/>
-          <text x="80" y="67" text-anchor="middle" font-size="30" font-weight="800" fill="${fillC}" font-family="JetBrains Mono,monospace">${cur}</text>
+          ${cur > 0 ? `<path d="M 20 80 A 60 60 0 ${largeArc} 0 ${arcEx} ${arcEy}" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round"/>` : ''}
+          ${cur > 0 ? `<circle cx="${arcEx}" cy="${arcEy}" r="5" fill="${fillC}" stroke="#0F1828" stroke-width="2"/>` : ''}
+          <circle cx="20" cy="80" r="3.5" fill="#FF3D3D" opacity="0.4"/>
+          <circle cx="140" cy="80" r="3.5" fill="#00E887" opacity="0.4"/>
+          <text x="80" y="66" text-anchor="middle" font-size="30" font-weight="800" fill="${fillC}" font-family="JetBrains Mono,monospace">${cur}</text>
           <text x="80" y="79" text-anchor="middle" font-size="10" font-weight="700" fill="${fillC}" letter-spacing="0.06em" font-family="Inter,sans-serif">${label.toUpperCase()}</text>
+          <text x="22" y="89" text-anchor="start" font-size="8" fill="#FF3D3D" opacity="0.6" font-family="Inter,sans-serif">Fear</text>
+          <text x="138" y="89" text-anchor="end" font-size="8" fill="#00E887" opacity="0.6" font-family="Inter,sans-serif">Greed</text>
         </svg>
       </div>
       <div class="fg-bottom-row">
@@ -251,7 +250,7 @@ function renderSentimentCard(data) {
       </div>
       ${badge(sigText, sigCls)}`;
   } else {
-    fgHtml = `<div class="sent-section-label">Fear & Greed</div><div class="sent-unavail">Unavailable</div>`;
+    fgHtml = `<div class="sent-section-label">Fear &amp; Greed</div><div class="sent-unavail">Unavailable</div>`;
   }
 
   // ── Community Sentiment ──
@@ -310,7 +309,7 @@ function renderSentimentCard(data) {
   }
 
   card.innerHTML = `
-    <h3 class="card-heading">Market Sentiment <span class="heading-sub">— News · Community · Fear & Greed</span></h3>
+    <h3 class="card-heading">Market Sentiment <span class="heading-sub">— News · Community · Fear &amp; Greed</span></h3>
     <div class="sent-top-grid">
       <div class="sent-block">${fgHtml}</div>
       <div class="sent-block">${commHtml}</div>
@@ -435,16 +434,18 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
   });
   const allDates = [...dDates, ...fDates];
   const labels = allDates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+  // Full, human-readable dates for the tooltip title (e.g. "Mon, Jun 5 2026")
+  const fullLabels = allDates.map(d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }));
   const pad  = arr => [...arr.slice(-n), ...new Array(horizon).fill(null)];
   const fpad = arr => [...new Array(n).fill(null), ...arr];
   const datasets = [
-    { label: 'Price', data: pad(dPrices), borderColor: '#00D4FF', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.3, order: 1 },
+    { label: 'Price', data: pad(dPrices), borderColor: '#00D4FF', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0.3, order: 1 },
     { label: 'BB Upper', data: pad(bb.upper), borderColor: 'rgba(100,116,139,0.45)', backgroundColor: 'transparent', borderWidth: 1, borderDash: [4,3], pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'BB Mid', data: pad(bb.mid), borderColor: 'rgba(100,116,139,0.25)', backgroundColor: 'transparent', borderWidth: 1, pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'BB Lower', data: pad(bb.lower), borderColor: 'rgba(100,116,139,0.45)', backgroundColor: 'rgba(100,116,139,0.06)', fill: '-1', borderWidth: 1, borderDash: [4,3], pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'Forecast CI High', data: fpad(forecast.high), borderColor: 'rgba(255,184,0,0.2)', backgroundColor: 'rgba(255,184,0,0.08)', fill: '+1', borderWidth: 1, pointRadius: 0, tension: 0.2, order: 4 },
     { label: 'Forecast CI Low',  data: fpad(forecast.low),  borderColor: 'rgba(255,184,0,0.2)', backgroundColor: 'transparent', borderWidth: 1, pointRadius: 0, tension: 0.2, order: 4 },
-    { label: 'Forecast (Trend)', data: fpad(forecast.median), borderColor: '#FFB800', backgroundColor: 'transparent', borderWidth: 2, borderDash: [6,3], pointRadius: 4, pointBackgroundColor: '#FFB800', tension: 0.2, order: 2 },
+    { label: 'Forecast (Trend)', data: fpad(forecast.median), borderColor: '#FFB800', backgroundColor: 'transparent', borderWidth: 2, borderDash: [6,3], pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#FFB800', tension: 0.2, order: 2 },
   ];
   const ctx = document.getElementById('priceChart').getContext('2d');
   state.chart = new Chart(ctx, {
@@ -459,7 +460,14 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
         tooltip: {
           backgroundColor: '#0F1828', borderColor: '#1A2540', borderWidth: 1,
           titleColor: '#00D4FF', bodyColor: '#CBD5E1', padding: 10,
+          displayColors: true, usePointStyle: true,
           callbacks: {
+            title: items => {
+              if (!items.length) return '';
+              const idx = items[0].dataIndex;
+              const isForecast = idx >= n;
+              return `${fullLabels[idx]}${isForecast ? '  ·  forecast' : ''}`;
+            },
             label: ctx => ctx.parsed.y == null ? null : ` ${ctx.dataset.label}: $${fmt(ctx.parsed.y)}`,
           },
         },
@@ -485,6 +493,26 @@ function fmtPct(v) { return v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed
 function badge(text, type) { return `<span class="badge badge-${type}">${text}</span>`; }
 
 // ═══════════════════════════════════════════════════════════════════
+// FRESHNESS INDICATOR  ("last updated X ago")
+// ═══════════════════════════════════════════════════════════════════
+
+function updateFreshness() {
+  const el = document.getElementById('freshness');
+  if (!el) return;
+  if (!state.lastUpdated) { el.textContent = ''; return; }
+  const secs = Math.round((Date.now() - state.lastUpdated) / 1000);
+  let txt;
+  if (secs < 5)        txt = 'Updated just now';
+  else if (secs < 60)  txt = `Updated ${secs}s ago`;
+  else {
+    const mins = Math.floor(secs / 60);
+    txt = `Updated ${mins}m ${secs % 60}s ago`;
+  }
+  el.innerHTML = `<span class="fresh-dot"></span>${txt}`;
+  el.className = 'freshness' + (secs > 120 ? ' stale' : '');
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // VOLATILITY ALERT SYSTEM
 // ═══════════════════════════════════════════════════════════════════
 
@@ -502,7 +530,7 @@ function persistAlertSettings(s) { localStorage.setItem('cryptoAlertSettings', J
 
 function isOnCooldown(coinId) {
   const last = parseInt(localStorage.getItem(`alertCD_${coinId}`) || '0');
-  return Date.now() - last < 2 * 60 * 60 * 1000; // 2-hour cooldown per coin
+  return Date.now() - last < 2 * 60 * 60 * 1000;
 }
 function setCooldown(coinId) {
   localStorage.setItem(`alertCD_${coinId}`, String(Date.now()));
@@ -585,12 +613,12 @@ function startBackgroundAlertChecks() {
         const bb     = calcBollinger(prices);
         runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
       } catch { /* ignore per-coin errors */ }
-      await new Promise(r => setTimeout(r, 1200)); // stagger to respect rate limits
+      await new Promise(r => setTimeout(r, 1200));
     }
-  }, 5 * 60 * 1000); // every 5 minutes
+  }, 5 * 60 * 1000);
 }
 
-// ─── Alert UI helpers (called from HTML) ───
+// ─── Alert UI helpers ───
 
 function showEmailjsHelp() {
   const el = document.getElementById('emailjsHelp');
@@ -604,13 +632,22 @@ function setAlertSensitivity(val) {
 }
 
 function saveAlerts() {
-  const email = document.getElementById('alertEmail').value.trim();
+  const email   = document.getElementById('alertEmail').value.trim();
+  const enabled = document.getElementById('alertEnabled').checked;
+  const consent = document.getElementById('gdprConsent')?.checked;
+
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showAlertStatus('Please enter a valid email address.', 'error'); return;
   }
+  // GDPR: require explicit consent before storing an email address
+  if (email && !consent) {
+    showAlertStatus('Please tick the consent box before we store your email address.', 'error'); return;
+  }
   const s = {
-    enabled:     document.getElementById('alertEnabled').checked,
+    enabled,
     email,
+    consent: !!consent,
+    consentAt: consent ? new Date().toISOString() : null,
     sensitivity: document.querySelector('.thresh-btn.active')?.dataset?.t || 'moderate',
     watchCoins:  [...document.querySelectorAll('.watch-coin-cb:checked')].map(c => c.value),
   };
@@ -619,10 +656,23 @@ function saveAlerts() {
 }
 
 async function testAlert() {
+  const email   = document.getElementById('alertEmail').value.trim();
+  const consent = document.getElementById('gdprConsent')?.checked;
+  if (!email) { showAlertStatus('Enter your email address first.', 'error'); return; }
+  if (!consent) { showAlertStatus('Please tick the consent box before we send to your email.', 'error'); return; }
   saveAlerts();
   const s = getAlertSettings();
-  if (!s.email) { showAlertStatus('Enter your email address first.', 'error'); return; }
+  if (!s.email) return;
   await sendVolatilityEmail(s, 'Bitcoin (BTC) — TEST', 65000, ['This is a test alert. Your email setup is working correctly!'], '_test');
+}
+
+function forgetAlertData() {
+  localStorage.removeItem('cryptoAlertSettings');
+  document.getElementById('alertEmail').value = '';
+  document.getElementById('alertEnabled').checked = false;
+  const cb = document.getElementById('gdprConsent');
+  if (cb) cb.checked = false;
+  showAlertStatus('Your stored email and alert settings have been deleted from this browser.', 'success');
 }
 
 function initAlertUI() {
@@ -639,6 +689,8 @@ function initAlertUI() {
   }
   if (s.email)    document.getElementById('alertEmail').value    = s.email;
   if (s.enabled)  document.getElementById('alertEnabled').checked = true;
+  const cb = document.getElementById('gdprConsent');
+  if (cb && s.consent) cb.checked = true;
   setAlertSensitivity(s.sensitivity || 'moderate');
 }
 
@@ -689,8 +741,33 @@ async function refreshTicker() {
 // LOAD COIN
 // ═══════════════════════════════════════════════════════════════════
 
+function showLoadError(coinId, days, message) {
+  const wrap = document.querySelector('.chart-wrap');
+  const loader = document.getElementById('chartLoader');
+  if (loader) loader.classList.remove('visible');
+  let banner = document.getElementById('loadErrorBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'loadErrorBanner';
+    banner.className = 'load-error';
+    wrap.appendChild(banner);
+  }
+  banner.innerHTML = `
+    <div class="le-icon">!</div>
+    <div class="le-text">${message}</div>
+    <button class="le-retry" id="loadRetryBtn">Retry</button>`;
+  banner.style.display = 'flex';
+  document.getElementById('loadRetryBtn').onclick = () => loadCoin(coinId, days);
+}
+
+function clearLoadError() {
+  const banner = document.getElementById('loadErrorBanner');
+  if (banner) banner.style.display = 'none';
+}
+
 async function loadCoin(coinId, days) {
   const loader = document.getElementById('chartLoader');
+  clearLoadError();
   loader.classList.add('visible');
   try {
     const { dates, prices } = await fetchHistory(coinId, days);
@@ -745,12 +822,25 @@ async function loadCoin(coinId, days) {
     const forecast = holtForecast(prices, horizon);
     buildChart(dates, prices, bb, forecast, days, horizon);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
+
+    // Freshness indicator
+    state.lastUpdated = Date.now();
+    updateFreshness();
+
+    // Auto-fill entry price with live price (unless the user typed their own)
+    const entryEl = document.getElementById('entryPrice');
+    if (entryEl && !entryEl.dataset.userSet) entryEl.value = curr.toFixed(2);
+
     loadSentiment(coinId).catch(e => console.warn('Sentiment:', e.message));
+
+    // Auto-run the full analysis once on first successful load
+    if (!state._autoRan) { state._autoRan = true; analyze(); }
+
   } catch (err) {
-    loader.innerHTML = `<span style="color:#FF3D3D">${
-      err.message.includes('429') ? 'Rate-limited — wait 60 s then try again.'
-      : `Load failed: ${err.message}`
-    }</span>`;
+    const msg = err.message.includes('429')
+      ? 'CoinGecko is rate-limiting free requests right now. Please wait ~60 seconds, then retry.'
+      : `Couldn't load market data (${err.message}). Check your connection and retry.`;
+    showLoadError(coinId, days, msg);
     return;
   }
   loader.classList.remove('visible');
@@ -765,6 +855,7 @@ async function analyze() {
   btn.disabled = true; btn.textContent = 'Analyzing…';
   const coinId = document.getElementById('coinSelect').value;
   if (!state.prices || state.coin !== coinId) { state.coin = coinId; await loadCoin(coinId, state.days); }
+  if (!state.prices) { btn.disabled = false; btn.textContent = 'Analyze Trade'; return; }
   const prices  = state.prices;
   const curr    = prices[prices.length - 1];
   const entry   = parseFloat(document.getElementById('entryPrice').value)  || curr;
@@ -804,7 +895,6 @@ async function analyze() {
   else if (m.liqDist < 10) signals.push({ t:`Caution: Your forced-close price is ${m.liqDist.toFixed(1)}% away — moderate risk`, c:'yellow' });
   else                      signals.push({ t:`Safe buffer: Your forced-close price is ${m.liqDist.toFixed(1)}% away`, c:'green' });
 
-  // Sentiment signals (from pre-loaded state.sentiment)
   if (state.sentiment?.fg?.length) {
     const fgV = parseInt(state.sentiment.fg[0].value);
     const fgL = state.sentiment.fg[0].value_classification;
@@ -872,28 +962,23 @@ function renderSignal(score, signals, dir) {
   let heading, hCls, summary, summaryEmoji;
   if (score >= 3) {
     heading = 'Strong Bullish — Good time to go Long';
-    hCls = 'green';
-    summaryEmoji = '▲';
+    hCls = 'green'; summaryEmoji = '▲';
     summary = 'Most indicators agree: conditions strongly favor the price going UP. This is a good environment for a Long trade, but always use a stop-loss.';
   } else if (score >= 1) {
     heading = 'Mild Bullish — Slight upward lean';
-    hCls = 'yellow';
-    summaryEmoji = '↑';
+    hCls = 'yellow'; summaryEmoji = '↑';
     summary = 'Conditions lean upward, but signals are not strong. If trading Long, use a smaller position size and definitely set a stop-loss.';
   } else if (score <= -3) {
     heading = 'Strong Bearish — Good time to go Short';
-    hCls = 'red';
-    summaryEmoji = '▼';
+    hCls = 'red'; summaryEmoji = '▼';
     summary = 'Most indicators agree: conditions strongly favor the price going DOWN. This is a good environment for a Short trade, but always use a stop-loss.';
   } else if (score <= -1) {
     heading = 'Mild Bearish — Slight downward lean';
-    hCls = 'yellow';
-    summaryEmoji = '↓';
+    hCls = 'yellow'; summaryEmoji = '↓';
     summary = 'Conditions lean downward. Long trades carry higher risk right now. Consider waiting for a better entry or reducing your position size.';
   } else {
     heading = 'Neutral — No clear direction';
-    hCls = 'neutral';
-    summaryEmoji = '—';
+    hCls = 'neutral'; summaryEmoji = '—';
     summary = 'No clear direction. The market is undecided. Best practice: wait for stronger signals before entering a trade to improve your odds.';
   }
   const aligned = (score > 0 && dir === 'Long') || (score < 0 && dir === 'Short');
@@ -920,12 +1005,13 @@ function renderSignal(score, signals, dir) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// COIN SELECTOR  (from ticker)
+// COIN SELECTOR
 // ═══════════════════════════════════════════════════════════════════
 
 function selectCoin(coinId) {
   state.coin = coinId;
   document.getElementById('coinSelect').value = coinId;
+  state._autoRan = false;
   loadCoin(coinId, state.days);
 }
 
@@ -934,13 +1020,19 @@ function selectCoin(coinId) {
 // ═══════════════════════════════════════════════════════════════════
 
 function init() {
+  // Show disclaimer banner on first visit
+  if (!localStorage.getItem('disclaimerSeen')) {
+    const banner = document.getElementById('disclaimerBanner');
+    if (banner) banner.style.display = 'flex';
+  }
+
   const sel = document.getElementById('coinSelect');
   Object.entries(COINS).forEach(([id, c]) => {
     const opt = document.createElement('option');
     opt.value = id; opt.textContent = c.name;
     sel.appendChild(opt);
   });
-  sel.addEventListener('change', e => { state.coin = e.target.value; loadCoin(e.target.value, state.days); });
+  sel.addEventListener('change', e => { state.coin = e.target.value; state._autoRan = false; loadCoin(e.target.value, state.days); });
   document.querySelectorAll('.tf-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
@@ -949,11 +1041,24 @@ function init() {
       loadCoin(state.coin, state.days);
     });
   });
+
+  // Pre-populate defaults so the calculator is usable immediately
+  document.getElementById('posSize').value = '1000';
+  document.getElementById('leverage').value = '10';
+  updateLeverage(10);
+
   loadCoin('bitcoin', 30);
   refreshTicker();
   setInterval(refreshTicker, 60_000);
+  setInterval(updateFreshness, 1000); // tick the "updated X ago" label
   initAlertUI();
   startBackgroundAlertChecks();
+}
+
+function dismissDisclaimer() {
+  localStorage.setItem('disclaimerSeen', '1');
+  const banner = document.getElementById('disclaimerBanner');
+  if (banner) banner.style.display = 'none';
 }
 
 document.addEventListener('DOMContentLoaded', init);
@@ -1070,7 +1175,6 @@ async function runDashboard() {
       return { ...coin, dir, alloc, lev, margin, tp, sl, pnlTp, pnlSl };
     });
 
-    // Normalize allocations to exactly equal capital
     const allocSum = trades.reduce((s, t) => s + t.alloc, 0);
     trades.forEach(t => { t.alloc = Math.round(t.alloc / allocSum * capital); });
 
@@ -1158,4 +1262,3 @@ function renderDashboard(trades, capital, riskProfile) {
 
   document.getElementById('dashResults').style.display = 'block';
 }
-

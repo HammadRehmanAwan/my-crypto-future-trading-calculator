@@ -43,6 +43,29 @@ a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 input, select, button { font-family: inherit; }
 
+/* ─── DISCLAIMER BANNER ─── */
+.disclaimer-banner {
+  display: none;
+  position: fixed; top: 0; left: 0; right: 0; z-index: 9999;
+  background: #0a1525;
+  border-bottom: 2px solid var(--gold);
+  padding: 12px 20px;
+  align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.disc-text {
+  flex: 1; font-size: 12px; color: var(--text); line-height: 1.5;
+  min-width: 200px;
+}
+.disc-text strong { color: var(--gold); }
+.disc-btn {
+  flex-shrink: 0;
+  padding: 7px 18px;
+  background: var(--gold); border: none; border-radius: 20px;
+  color: #000; font-size: 12px; font-weight: 700;
+  cursor: pointer;
+}
+.disc-btn:hover { opacity: .85; }
+
 /* ─── HEADER ─── */
 .header {
   position: sticky; top: 0; z-index: 100;
@@ -126,7 +149,7 @@ input, select, button { font-family: inherit; }
   display: flex; justify-content: space-between; align-items: flex-start;
   margin-bottom: 14px; gap: 12px; flex-wrap: wrap;
 }
-.chart-title-row { display: flex; align-items: center; gap: 12px; }
+.chart-title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 
 .coin-select {
   background: var(--bg2);
@@ -154,6 +177,22 @@ input, select, button { font-family: inherit; }
 }
 .lp-chg.green { background: var(--green-d); color: var(--green); }
 .lp-chg.red   { background: var(--red-d);   color: var(--red); }
+
+/* ─── FRESHNESS INDICATOR ─── */
+.freshness {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: 11px; color: var(--text-lo);
+  white-space: nowrap;
+}
+.fresh-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  animation: fresh-pulse 2s ease-in-out infinite;
+}
+.freshness.stale { color: var(--gold); }
+.freshness.stale .fresh-dot { background: var(--gold); box-shadow: 0 0 6px var(--gold); animation: none; }
+@keyframes fresh-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
 .tf-row { display: flex; gap: 5px; }
 .tf-btn {
@@ -184,6 +223,32 @@ input, select, button { font-family: inherit; }
   color: var(--text-lo); font-size: 13px;
 }
 .chart-loader.visible { display: flex; }
+
+/* ─── LOAD ERROR BANNER (CoinGecko failures) ─── */
+.load-error {
+  display: none;
+  position: absolute; inset: 0;
+  flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  background: rgba(8,12,20,0.92);
+  border: 1px solid rgba(255,61,61,.3);
+  border-radius: var(--r-sm);
+  padding: 20px; text-align: center;
+}
+.le-icon {
+  width: 38px; height: 38px; border-radius: 50%;
+  background: var(--red-d); color: var(--red);
+  border: 1px solid rgba(255,61,61,.4);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 800;
+}
+.le-text { font-size: 13px; color: var(--text); max-width: 360px; line-height: 1.5; }
+.le-retry {
+  padding: 8px 22px;
+  background: var(--accent); border: none; border-radius: 20px;
+  color: #001018; font-size: 13px; font-weight: 700; cursor: pointer;
+  transition: opacity .2s;
+}
+.le-retry:hover { opacity: .85; }
 
 .spin {
   width: 20px; height: 20px;
@@ -557,6 +622,23 @@ input, select, button { font-family: inherit; }
 }
 .watch-coin-item input { display: none; }
 
+/* GDPR consent row */
+.gdpr-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--r-sm); margin-bottom: 10px;
+}
+.gdpr-row input[type=checkbox] { margin-top: 2px; flex-shrink: 0; accent-color: var(--accent); }
+.gdpr-row label { font-size: 11px; color: var(--text-lo); line-height: 1.5; cursor: pointer; }
+.gdpr-row label a { color: var(--accent); }
+.btn-forget {
+  background: none; border: none; color: var(--text-lo);
+  font-size: 11px; cursor: pointer; padding: 0; margin-top: 8px;
+  text-decoration: underline;
+}
+.btn-forget:hover { color: var(--red); }
+
 .alert-actions { display: flex; gap: 8px; margin-top: 12px; }
 .btn-save-alert {
   flex: 1; padding: 8px;
@@ -580,12 +662,14 @@ input, select, button { font-family: inherit; }
 .alert-status.success { background: var(--green-d); color: var(--green); border: 1px solid rgba(0,232,135,.3); }
 .alert-status.error   { background: var(--red-d);   color: var(--red);   border: 1px solid rgba(255,61,61,.3); }
 
-/* ─── PAGE TABS ─── */
+/* ─── PAGE TABS (sticky) ─── */
 .page-tabs {
+  position: sticky; top: 54px; z-index: 90;
   display: flex; gap: 0;
   background: var(--card);
   border-bottom: 1px solid var(--border);
   padding: 0 20px;
+  backdrop-filter: blur(10px);
 }
 .page-tab {
   padding: 12px 24px;
@@ -845,9 +929,9 @@ input, select, button { font-family: inherit; }
 /* Fear & Greed arc gauge */
 .fg-arc-outer {
   display: flex; justify-content: center;
-  margin: 2px 0 2px;
+  margin: 2px 0 4px;
 }
-.fg-arc-svg { width: 100%; height: auto; overflow: visible; }
+.fg-arc-svg { width: 100%; max-width: 180px; height: auto; overflow: visible; }
 .fg-bottom-row {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 8px;
   margin-top: 2px; margin-bottom: 8px;
@@ -855,7 +939,7 @@ input, select, button { font-family: inherit; }
 .fg-spark {
   display: flex; align-items: flex-end; gap: 2px; height: 28px; flex: 1;
 }
-.fgs-bar { flex: 1; border-radius: 2px 2px 0 0; min-height: 4px; }
+.fgs-bar { flex: 1; border-radius: 2px 2px 0 0; min-height: 4px; transition: height .3s; }
 .fg-trend { font-size: 11px; color: var(--text-lo); white-space: nowrap; }
 
 /* Community bars */
