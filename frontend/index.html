@@ -4,17 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FutureX — AI Crypto Futures Calculator</title>
-  <meta name="description" content="Real-time Bitcoin and crypto futures calculator with AI price forecasting, Fear &amp; Greed Index, FinBERT news sentiment, and volatility alerts." />
+  <meta name="description" content="Real-time Bitcoin and crypto futures calculator with AI price forecasting, Fear & Greed Index, FinBERT news sentiment, and volatility alerts." />
 
   <!-- OG / Social sharing -->
   <meta property="og:title" content="FutureX — AI Crypto Futures Calculator" />
-  <meta property="og:description" content="Real-time crypto futures calculator: live prices, AI 7-day forecast, Fear &amp; Greed gauge, FinBERT news sentiment, and volatility email alerts for 15 coins." />
+  <meta property="og:description" content="Real-time crypto futures calculator: live prices, AI 7-day forecast, Fear & Greed gauge, FinBERT news sentiment, and volatility email alerts for 15 coins." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/" />
   <meta property="og:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/frontend/og-preview.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="FutureX — AI Crypto Futures Calculator" />
-  <meta name="twitter:description" content="Real-time crypto futures calculator with AI forecasting &amp; sentiment analysis." />
+  <meta name="twitter:description" content="Real-time crypto futures calculator with AI forecasting & sentiment analysis." />
 
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -22,6 +22,10 @@
   <link rel="stylesheet" href="style.css" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <!-- Firebase compat SDK (v10) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -65,6 +69,7 @@
     </div>
   </div>
   <div class="ticker" id="ticker"><span class="ticker-loading">Loading prices&hellip;</span></div>
+  <div id="authBar" class="auth-bar"></div>
   <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
      target="_blank" class="btn-hf-header">HF Space</a>
 </header>
@@ -227,7 +232,7 @@
       <div class="alert-body" id="alertBody">
 
         <div class="alert-note">
-          Enter your email below &mdash; alerts are sent automatically when high volatility is detected. Free, no account needed.
+          Enter your email below — alerts are sent automatically when high volatility is detected. <strong style="color:var(--accent)">Sign in with Google</strong> (top-right) to sync your settings across all your devices.
         </div>
 
         <div class="alert-form-group toggle-row">
@@ -284,6 +289,7 @@
 <!-- ─── DASHBOARD VIEW ─── -->
 <section class="dashboard-view" id="dashView" style="display:none">
 
+  <!-- Dashboard control card -->
   <div class="card bot-ctrl-card">
     <div class="dash-input-row">
       <div class="capital-field">
@@ -303,8 +309,10 @@
       <div class="re-item"        id="re-moderate"><strong>Balanced:</strong> Medium leverage (4&ndash;10&times;). Best of both worlds.</div>
       <div class="re-item"        id="re-aggressive"><strong>Aggressive:</strong> High leverage (8&ndash;20&times;). Experienced traders only.</div>
     </div>
+
   </div>
 
+  <!-- Loader -->
   <div class="dash-loader" id="dashLoader" style="display:none">
     <div class="spin"></div>
     <div>
@@ -313,14 +321,17 @@
     </div>
   </div>
 
+  <!-- No signal -->
   <div class="dash-no-signal" id="dashNoSignal" style="display:none">
     <div class="no-signal-icon">&mdash;</div>
     <h3>No strong signals right now</h3>
     <p>Markets are undecided. This is often the best time to wait.</p>
   </div>
 
+  <!-- Error -->
   <div class="dash-error" id="dashError" style="display:none"></div>
 
+  <!-- Results -->
   <div id="dashResults" style="display:none">
     <div class="card dash-summary-card">
       <h3 class="card-heading">Top Signals &mdash; AI Analysis</h3>
