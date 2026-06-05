@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FutureX — AI Crypto Futures Calculator</title>
+  <meta name="description" content="Real-time Bitcoin and crypto futures calculator with AI price forecasting, Fear & Greed Index, FinBERT news sentiment, and volatility alerts." />
+
+  <!-- OG / Social sharing -->
+  <meta property="og:title" content="FutureX — AI Crypto Futures Calculator" />
+  <meta property="og:description" content="Real-time crypto futures calculator: live prices, AI 7-day forecast, Fear & Greed gauge, FinBERT news sentiment, and volatility email alerts for 15 coins." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/" />
+  <meta property="og:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/frontend/og-preview.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="FutureX — AI Crypto Futures Calculator" />
+  <meta name="twitter:description" content="Real-time crypto futures calculator with AI forecasting & sentiment analysis." />
+
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+</head>
+<body>
+
+<!-- ─── DISCLAIMER BANNER (shown on first visit) ─── -->
+<div class="disclaimer-banner" id="disclaimerBanner">
+  <div class="disc-text">
+    <strong>Not Financial Advice.</strong> FutureX is an educational tool only. Crypto futures trading involves substantial risk — you can lose your entire investment. Past performance does not predict future results. Always do your own research.
+  </div>
+  <button class="disc-btn" onclick="dismissDisclaimer()">I Understand</button>
+</div>
+
+<!-- ─── HEADER ─── -->
+<header class="header">
+  <div class="logo">
+    <svg class="logo-mark" width="42" height="42" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="20,2 36,11 20,20 4,11" fill="url(#lm-top)"/>
+      <polygon points="4,11 20,20 20,38 4,29" fill="url(#lm-left)"/>
+      <polygon points="36,11 36,29 20,38 20,20" fill="url(#lm-right)"/>
+      <polygon points="20,2 36,11 20,20 4,11" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="0.7"/>
+      <line x1="20" y1="20" x2="20" y2="38" stroke="rgba(255,255,255,0.2)" stroke-width="0.7"/>
+      <line x1="4"  y1="29" x2="20" y2="38" stroke="rgba(255,255,255,0.15)" stroke-width="0.7"/>
+      <line x1="36" y1="29" x2="20" y2="38" stroke="rgba(255,255,255,0.15)" stroke-width="0.7"/>
+      <defs>
+        <linearGradient id="lm-top" x1="4" y1="2" x2="36" y2="20" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#BFFFFF"/>
+          <stop offset="100%" stop-color="#00D4FF"/>
+        </linearGradient>
+        <linearGradient id="lm-left" x1="4" y1="11" x2="20" y2="38" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#0088DD"/>
+          <stop offset="100%" stop-color="#003388"/>
+        </linearGradient>
+        <linearGradient id="lm-right" x1="36" y1="11" x2="20" y2="38" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stop-color="#C084FC"/>
+          <stop offset="100%" stop-color="#7C3AED"/>
+        </linearGradient>
+      </defs>
+    </svg>
+    <div>
+      <div class="logo-title">FutureX</div>
+      <div class="logo-sub">Real-time &middot; AI Forecast &middot; 15 Coins</div>
+    </div>
+  </div>
+  <div class="ticker" id="ticker"><span class="ticker-loading">Loading prices&hellip;</span></div>
+  <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
+     target="_blank" class="btn-hf-header">HF Space</a>
+</header>
+
+<!-- ─── PAGE TABS (sticky) ─── -->
+<nav class="page-tabs">
+  <button class="page-tab active" id="tabCalc" onclick="switchTab('calc')">Calculator</button>
+  <button class="page-tab" id="tabDash" onclick="switchTab('dash')">Portfolio Dashboard</button>
+</nav>
+
+<!-- ─── MAIN ─── -->
+<main class="layout" id="calcView">
+
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+
+    <!-- Chart card -->
+    <div class="card chart-card">
+      <div class="chart-topbar">
+        <div class="chart-title-row">
+          <select id="coinSelect" class="coin-select"></select>
+          <div id="livePriceBox" class="live-price-box">
+            <span id="livePriceVal" class="lp-val">&mdash;</span>
+            <span id="livePriceChg" class="lp-chg">&mdash;</span>
+          </div>
+        </div>
+        <div class="tf-row">
+          <button class="tf-btn" data-days="7">7D</button>
+          <button class="tf-btn active" data-days="30">30D</button>
+          <button class="tf-btn" data-days="90">90D</button>
+        </div>
+      </div>
+      <div class="chart-wrap">
+        <canvas id="priceChart"></canvas>
+        <div id="chartLoader" class="chart-loader"><div class="spin"></div><span>Fetching data&hellip;</span></div>
+      </div>
+    </div>
+
+    <!-- Sentiment card -->
+    <div class="card sentiment-card" id="sentimentCard">
+      <h3 class="card-heading">Market Sentiment <span class="heading-sub">&mdash; Loading&hellip;</span></h3>
+      <div class="sent-loading"><div class="spin"></div><span>Fetching fear &amp; greed, news and community data&hellip;</span></div>
+    </div>
+
+    <!-- Technicals card -->
+    <div class="card tech-card">
+      <h3 class="card-heading">Market Indicators <span class="heading-sub">&mdash; What is the market telling us?</span></h3>
+      <div class="tech-grid">
+        <div class="tech-item">
+          <div class="ti-label">RSI &mdash; Overbought / Oversold</div>
+          <div class="ti-desc">Is the price rising or falling too fast?</div>
+          <div class="ti-val" id="rsiVal">&mdash;</div>
+          <div class="ti-bar-track"><div class="ti-bar-fill" id="rsiBar"></div></div>
+          <div class="rsi-zone-row">
+            <span class="rz green-text">&larr; Oversold</span>
+            <span class="rz neutral-text">Neutral</span>
+            <span class="rz red-text">Overbought &rarr;</span>
+          </div>
+          <div class="ti-sig" id="rsiSig">&mdash;</div>
+        </div>
+        <div class="tech-item">
+          <div class="ti-label">MACD &mdash; Momentum Direction</div>
+          <div class="ti-desc">Are buyers or sellers gaining control?</div>
+          <div class="ti-val" id="macdVal">&mdash;</div>
+          <div class="ti-sig" id="macdSig">&mdash;</div>
+        </div>
+        <div class="tech-item">
+          <div class="ti-label">Bollinger Bands &mdash; Price Channel</div>
+          <div class="ti-desc">Is the price unusually high or low right now?</div>
+          <div class="ti-val" id="bbVal">&mdash;</div>
+          <div class="ti-sig" id="bbSig">&mdash;</div>
+        </div>
+        <div class="tech-item">
+          <div class="ti-label">7-Day Trend</div>
+          <div class="ti-desc">Has the price been going up or down this week?</div>
+          <div class="ti-val" id="trendVal">&mdash;</div>
+          <div class="ti-sig" id="trendSig">&mdash;</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel">
+
+    <!-- Calculator card -->
+    <div class="card calc-card">
+      <h3 class="card-heading">Position Setup</h3>
+
+      <div class="form-group">
+        <label>Direction &mdash; Which way do you think the price will move?</label>
+        <div class="dir-toggle">
+          <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">&#9650; Long &mdash; Price will rise</button>
+          <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">&#9660; Short &mdash; Price will fall</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="entryPrice">Entry Price (USD) <span class="hint">&mdash; 0 = live price</span></label>
+        <input type="number" id="entryPrice" value="0" min="0" step="0.01" oninput="this.dataset.userSet='1'" />
+      </div>
+
+      <div class="form-group">
+        <label>Leverage &mdash; <span id="levDisplay" class="accent">10&times;</span> <span class="lev-risk-badge" id="levRiskBadge">Moderate Risk</span></label>
+        <input type="range" id="leverage" class="range-slider" min="1" max="125" value="10"
+               oninput="updateLeverage(this.value)" />
+        <div class="range-marks"><span>1&times;</span><span>25&times;</span><span>50&times;</span><span>100&times;</span><span>125&times;</span></div>
+        <div class="lev-hint" id="levHint">Multiplies both profits AND losses by 10&times;. A 1% price drop wipes 10% of your money.</div>
+      </div>
+
+      <div class="form-group">
+        <label for="posSize">Total Trade Size (USD) <span class="hint">&mdash; total value, not what you actually put in</span></label>
+        <input type="number" id="posSize" value="1000" min="1" />
+      </div>
+
+      <div class="divider"><span>Risk Management</span></div>
+
+      <div class="form-group">
+        <label for="takeProfit">Take Profit Price (USD) <span class="hint">&mdash; price to auto-close with profit (0 = use AI forecast)</span></label>
+        <input type="number" id="takeProfit" value="0" min="0" step="0.01" />
+      </div>
+
+      <div class="form-group">
+        <label for="stopLoss">Stop Loss Price (USD) <span class="hint">&mdash; price to auto-close to limit your loss (0 = skip)</span></label>
+        <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
+      </div>
+
+      <div class="form-group">
+        <label>Predict How Many Days Ahead &mdash; <span id="horizDisplay" class="accent">7 days</span></label>
+        <input type="range" id="horizon" class="range-slider" min="1" max="14" value="7"
+               oninput="document.getElementById('horizDisplay').textContent=this.value+' days'" />
+      </div>
+
+      <button id="analyzeBtn" class="btn-analyze" onclick="analyze()">Analyze Trade</button>
+    </div>
+
+    <!-- Results card -->
+    <div class="card results-card" id="resultsCard" style="display:none">
+      <h3 class="card-heading">Trade Summary</h3>
+      <div id="resultsBody"></div>
+    </div>
+
+    <!-- Signal card -->
+    <div class="card signal-card" id="signalCard" style="display:none">
+      <div id="signalBody"></div>
+      <a href="https://huggingface.co/spaces/HammadRehman/crypto-futures-calculator"
+         target="_blank" class="btn-hf-link">Get AI Prediction on HF Spaces &nearr;</a>
+    </div>
+
+    <!-- Volatility Alert card -->
+    <div class="card alert-card">
+      <div class="alert-header" onclick="document.getElementById('alertBody').classList.toggle('collapsed')">
+        <div>
+          <h3 class="card-heading" style="margin-bottom:2px">Volatility Alerts</h3>
+          <div class="alert-subhead">Auto-email when a coin moves sharply</div>
+        </div>
+        <span class="alert-caret" id="alertCaret">&#9660;</span>
+      </div>
+      <div class="alert-body" id="alertBody">
+
+        <div class="alert-note">
+          Enter your email below &mdash; alerts are sent automatically when high volatility is detected. Free, no account needed.
+        </div>
+
+        <div class="alert-form-group toggle-row">
+          <span class="alert-label">Enable Alerts</span>
+          <label class="switch">
+            <input type="checkbox" id="alertEnabled">
+            <span class="sw-slider"></span>
+          </label>
+        </div>
+
+        <div class="alert-form-group">
+          <label class="alert-label" for="alertEmail">Your Email Address</label>
+          <input type="email" id="alertEmail" class="alert-input" placeholder="you@example.com" />
+        </div>
+
+        <!-- GDPR consent -->
+        <div class="gdpr-row">
+          <input type="checkbox" id="gdprConsent" />
+          <label for="gdprConsent">
+            I consent to my email address being stored locally in this browser and used solely to send volatility alert emails. No data is shared with third parties. You can delete it at any time by clearing your browser storage.
+          </label>
+        </div>
+
+        <div class="alert-form-group">
+          <label class="alert-label">Alert Sensitivity</label>
+          <div class="thresh-row">
+            <button class="thresh-btn" data-t="conservative" onclick="setAlertSensitivity('conservative')">Conservative</button>
+            <button class="thresh-btn active" data-t="moderate"     onclick="setAlertSensitivity('moderate')">Moderate</button>
+            <button class="thresh-btn" data-t="sensitive"    onclick="setAlertSensitivity('sensitive')">Sensitive</button>
+          </div>
+          <div class="thresh-hint" id="threshHint">RSI &lt; 30 or &gt; 70 &middot; price &plusmn;5% in 24h &middot; BB width &gt; 12%</div>
+        </div>
+
+        <div class="alert-form-group">
+          <label class="alert-label">Watch These Coins <span class="hint">(checked = monitored every 5 min)</span></label>
+          <div class="watch-coins" id="watchCoins"></div>
+        </div>
+
+        <div class="alert-actions">
+          <button class="btn-save-alert" onclick="saveAlerts()">Save Settings</button>
+          <button class="btn-test-alert" onclick="testAlert()">Send Test Email</button>
+        </div>
+
+        <div class="alert-status" id="alertStatus" style="display:none"></div>
+
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<!-- ─── DASHBOARD VIEW ─── -->
+<section class="dashboard-view" id="dashView" style="display:none">
+
+  <!-- Dashboard control card -->
+  <div class="card bot-ctrl-card">
+    <div class="dash-input-row">
+      <div class="capital-field">
+        <span class="capital-sign">$</span>
+        <input type="number" id="dashCapital" value="1000" min="10" placeholder="1000" />
+      </div>
+      <div class="risk-profile">
+        <button class="risk-btn active" data-r="conservative" onclick="setRiskProfile('conservative')">Safe</button>
+        <button class="risk-btn"        data-r="moderate"     onclick="setRiskProfile('moderate')">Balanced</button>
+        <button class="risk-btn"        data-r="aggressive"   onclick="setRiskProfile('aggressive')">Aggressive</button>
+      </div>
+      <button class="btn-analyze-once" id="dashBtn" onclick="runDashboard()">Analyze Now</button>
+    </div>
+
+    <div class="risk-explain">
+      <div class="re-item active" id="re-conservative"><strong>Safe:</strong> Low leverage (2&ndash;5&times;), tight stop-losses. Good for beginners.</div>
+      <div class="re-item"        id="re-moderate"><strong>Balanced:</strong> Medium leverage (4&ndash;10&times;). Best of both worlds.</div>
+      <div class="re-item"        id="re-aggressive"><strong>Aggressive:</strong> High leverage (8&ndash;20&times;). Experienced traders only.</div>
+    </div>
+
+  </div>
+
+  <!-- Loader -->
+  <div class="dash-loader" id="dashLoader" style="display:none">
+    <div class="spin"></div>
+    <div>
+      <div class="dl-title">Analyzing all 15 coins&hellip;</div>
+      <div class="dl-sub">Computing RSI, MACD, Bollinger Bands + AI forecast for each coin</div>
+    </div>
+  </div>
+
+  <!-- No signal -->
+  <div class="dash-no-signal" id="dashNoSignal" style="display:none">
+    <div class="no-signal-icon">&mdash;</div>
+    <h3>No strong signals right now</h3>
+    <p>Markets are undecided. This is often the best time to wait.</p>
+  </div>
+
+  <!-- Error -->
+  <div class="dash-error" id="dashError" style="display:none"></div>
+
+  <!-- Results -->
+  <div id="dashResults" style="display:none">
+    <div class="card dash-summary-card">
+      <h3 class="card-heading">Top Signals &mdash; AI Analysis</h3>
+      <div id="dashSummary"></div>
+    </div>
+    <div class="dash-trades-grid" id="dashTradesGrid"></div>
+  </div>
+
+  <div class="dash-disclaimer">Signals are based on technical analysis and statistical forecasting. For educational purposes only &mdash; not financial advice.</div>
+</section>
+
+<footer class="footer">
+  Powered by
+  <a href="https://huggingface.co/amazon/chronos-bolt-small" target="_blank">amazon/chronos-bolt-small</a>
+  (Apache 2.0) &middot; Data: CoinGecko Free API &middot; Statistical forecast via Holt&rsquo;s smoothing &middot;
+  <strong>Not financial advice</strong> &middot;
+  <a href="#" onclick="document.getElementById('disclaimerBanner').style.display='flex';return false;">Disclaimer</a>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
