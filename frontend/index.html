@@ -4,17 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>FutureX — AI Crypto Futures Calculator</title>
-  <meta name="description" content="Real-time Bitcoin and crypto futures calculator with AI price forecasting, Fear & Greed Index, FinBERT news sentiment, and volatility alerts." />
+  <meta name="description" content="Real-time Bitcoin and crypto futures calculator with AI price forecasting, Fear &amp; Greed Index, FinBERT news sentiment, and volatility alerts." />
 
   <!-- OG / Social sharing -->
   <meta property="og:title" content="FutureX — AI Crypto Futures Calculator" />
-  <meta property="og:description" content="Real-time crypto futures calculator: live prices, AI 7-day forecast, Fear & Greed gauge, FinBERT news sentiment, and volatility email alerts for 15 coins." />
+  <meta property="og:description" content="Real-time crypto futures calculator: live prices, AI 7-day forecast, Fear &amp; Greed gauge, FinBERT news sentiment, and volatility email alerts for 15 coins." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/" />
   <meta property="og:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/frontend/og-preview.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="FutureX — AI Crypto Futures Calculator" />
-  <meta name="twitter:description" content="Real-time crypto futures calculator with AI forecasting & sentiment analysis." />
+  <meta name="twitter:description" content="Real-time crypto futures calculator with AI forecasting &amp; sentiment analysis." />
 
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -90,6 +90,7 @@
             <span id="livePriceVal" class="lp-val">&mdash;</span>
             <span id="livePriceChg" class="lp-chg">&mdash;</span>
           </div>
+          <span id="freshness" class="freshness"></span>
         </div>
         <div class="tf-row">
           <button class="tf-btn" data-days="7">7D</button>
@@ -246,7 +247,7 @@
         <div class="gdpr-row">
           <input type="checkbox" id="gdprConsent" />
           <label for="gdprConsent">
-            I consent to my email address being stored locally in this browser and used solely to send volatility alert emails. No data is shared with third parties. You can delete it at any time by clearing your browser storage.
+            I consent to my email address being stored locally in this browser and used solely to send volatility alert emails. No data is shared with third parties beyond the email delivery service (EmailJS). See our <a href="privacy.html" target="_blank">Privacy Notice</a>. You can delete your data at any time.
           </label>
         </div>
 
@@ -270,6 +271,8 @@
           <button class="btn-test-alert" onclick="testAlert()">Send Test Email</button>
         </div>
 
+        <button class="btn-forget" onclick="forgetAlertData()">Delete my stored email &amp; settings</button>
+
         <div class="alert-status" id="alertStatus" style="display:none"></div>
 
       </div>
@@ -281,7 +284,6 @@
 <!-- ─── DASHBOARD VIEW ─── -->
 <section class="dashboard-view" id="dashView" style="display:none">
 
-  <!-- Dashboard control card -->
   <div class="card bot-ctrl-card">
     <div class="dash-input-row">
       <div class="capital-field">
@@ -301,10 +303,8 @@
       <div class="re-item"        id="re-moderate"><strong>Balanced:</strong> Medium leverage (4&ndash;10&times;). Best of both worlds.</div>
       <div class="re-item"        id="re-aggressive"><strong>Aggressive:</strong> High leverage (8&ndash;20&times;). Experienced traders only.</div>
     </div>
-
   </div>
 
-  <!-- Loader -->
   <div class="dash-loader" id="dashLoader" style="display:none">
     <div class="spin"></div>
     <div>
@@ -313,17 +313,14 @@
     </div>
   </div>
 
-  <!-- No signal -->
   <div class="dash-no-signal" id="dashNoSignal" style="display:none">
     <div class="no-signal-icon">&mdash;</div>
     <h3>No strong signals right now</h3>
     <p>Markets are undecided. This is often the best time to wait.</p>
   </div>
 
-  <!-- Error -->
   <div class="dash-error" id="dashError" style="display:none"></div>
 
-  <!-- Results -->
   <div id="dashResults" style="display:none">
     <div class="card dash-summary-card">
       <h3 class="card-heading">Top Signals &mdash; AI Analysis</h3>
@@ -340,6 +337,7 @@
   <a href="https://huggingface.co/amazon/chronos-bolt-small" target="_blank">amazon/chronos-bolt-small</a>
   (Apache 2.0) &middot; Data: CoinGecko Free API &middot; Statistical forecast via Holt&rsquo;s smoothing &middot;
   <strong>Not financial advice</strong> &middot;
+  <a href="privacy.html">Privacy</a> &middot;
   <a href="#" onclick="document.getElementById('disclaimerBanner').style.display='flex';return false;">Disclaimer</a>
 </footer>
 
