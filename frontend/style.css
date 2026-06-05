@@ -842,33 +842,21 @@ input, select, button { font-family: inherit; }
   border-top: 1px solid var(--border); padding-top: 14px;
 }
 
-/* Fear & Greed */
-.fg-main-row {
-  display: flex; align-items: flex-end; gap: 12px; margin-bottom: 10px;
+/* Fear & Greed arc gauge */
+.fg-arc-outer {
+  display: flex; justify-content: center;
+  margin: 2px 0 2px;
 }
-.fg-val-block { flex-shrink: 0; }
-.fg-number {
-  font-size: 36px; font-weight: 800; line-height: 1;
-  font-family: 'JetBrains Mono', monospace;
+.fg-arc-svg { width: 100%; height: auto; overflow: visible; }
+.fg-bottom-row {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 8px;
+  margin-top: 2px; margin-bottom: 8px;
 }
-.fg-class { font-size: 11px; font-weight: 600; margin-top: 2px; }
-.fg-spark-wrap { flex: 1; min-width: 0; }
 .fg-spark {
-  display: flex; align-items: flex-end; gap: 3px; height: 36px;
-  margin-bottom: 4px;
+  display: flex; align-items: flex-end; gap: 2px; height: 28px; flex: 1;
 }
 .fgs-bar { flex: 1; border-radius: 2px 2px 0 0; min-height: 4px; }
-.fg-trend { font-size: 11px; color: var(--text-lo); }
-
-.fg-gauge-track {
-  height: 5px; background: var(--border); border-radius: 3px;
-  margin: 8px 0 4px; overflow: hidden;
-}
-.fg-gauge-fill { height: 100%; border-radius: 3px; transition: width .5s; }
-.fg-gauge-labels {
-  display: flex; justify-content: space-between;
-  font-size: 9px; color: var(--border2); margin-bottom: 8px;
-}
+.fg-trend { font-size: 11px; color: var(--text-lo); white-space: nowrap; }
 
 /* Community bars */
 .comm-bar-row {

@@ -205,13 +205,6 @@ function renderSentimentCard(data) {
     const valCls = cur <= 44 ? 'red' : cur <= 55 ? 'gold' : 'green';
     const hist   = [...data.fg].reverse();
 
-    const sparkBars = hist.map(d => {
-      const v = parseInt(d.value);
-      const h = Math.max(4, Math.round(v / 100 * 36));
-      const c = v <= 44 ? '#FF3D3D' : v <= 55 ? '#F7C948' : '#00E887';
-      return `<div class="fgs-bar" style="height:${h}px;background:${c}" title="${d.value_classification}: ${v}"></div>`;
-    }).join('');
-
     const sigText = cur <= 24 ? 'Extreme fear — historically strong buy signal (contrarian)'
       : cur <= 44 ? 'Market fearful — prices may be undervalued'
       : cur <= 55 ? 'Neutral — no contrarian signal'
@@ -219,19 +212,43 @@ function renderSentimentCard(data) {
       : 'Extreme greed — corrections often follow (contrarian sell)';
     const sigCls = cur <= 44 ? 'green' : cur <= 55 ? 'neutral' : 'red';
 
+    // Arc gauge geometry: semicircle from left (180°) to right (0°) through top
+    const gR = 60;
+    const arcEndDeg = 180 - (cur / 100 * 180);
+    const arcEndRad = arcEndDeg * Math.PI / 180;
+    const arcEx = (80 + gR * Math.cos(arcEndRad)).toFixed(1);
+    const arcEy = (80 - gR * Math.sin(arcEndRad)).toFixed(1);
+
+    const sparkBars = hist.map(d => {
+      const v = parseInt(d.value);
+      const h = Math.max(4, Math.round(v / 100 * 28));
+      const c = v <= 44 ? '#FF3D3D' : v <= 55 ? '#F7C948' : '#00E887';
+      return `<div class="fgs-bar" style="height:${h}px;background:${c}" title="${d.value_classification}: ${v}"></div>`;
+    }).join('');
+
     fgHtml = `<div class="sent-section-label">Fear & Greed <span class="sent-src">alternative.me</span></div>
-      <div class="fg-main-row">
-        <div class="fg-val-block">
-          <div class="fg-number ${valCls}">${cur}</div>
-          <div class="fg-class ${valCls}">${label}</div>
-        </div>
-        <div class="fg-spark-wrap">
-          <div class="fg-spark">${sparkBars}</div>
-          <div class="fg-trend">${trend}</div>
-        </div>
+      <div class="fg-arc-outer">
+        <svg viewBox="0 0 160 92" xmlns="http://www.w3.org/2000/svg" class="fg-arc-svg">
+          <defs>
+            <linearGradient id="fgg" x1="20" y1="0" x2="140" y2="0" gradientUnits="userSpaceOnUse">
+              <stop offset="0%"   stop-color="#FF3D3D"/>
+              <stop offset="44%"  stop-color="#F7C948"/>
+              <stop offset="100%" stop-color="#00E887"/>
+            </linearGradient>
+          </defs>
+          <path d="M 20 80 A 60 60 0 0 0 140 80" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round" opacity="0.18"/>
+          ${cur > 0 ? `<path d="M 20 80 A 60 60 0 0 0 ${arcEx} ${arcEy}" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round"/>` : ''}
+          ${cur > 0 ? `<circle cx="${arcEx}" cy="${arcEy}" r="4.5" fill="${fillC}" stroke="#0F1828" stroke-width="1.5"/>` : ''}
+          <circle cx="20" cy="80" r="3.5" fill="#FF3D3D" opacity="0.35"/>
+          <circle cx="140" cy="80" r="3.5" fill="#00E887" opacity="0.35"/>
+          <text x="80" y="67" text-anchor="middle" font-size="30" font-weight="800" fill="${fillC}" font-family="JetBrains Mono,monospace">${cur}</text>
+          <text x="80" y="79" text-anchor="middle" font-size="10" font-weight="700" fill="${fillC}" letter-spacing="0.06em" font-family="Inter,sans-serif">${label.toUpperCase()}</text>
+        </svg>
       </div>
-      <div class="fg-gauge-track"><div class="fg-gauge-fill" style="width:${cur}%;background:${fillC}"></div></div>
-      <div class="fg-gauge-labels"><span>Extreme Fear</span><span>Neutral</span><span>Extreme Greed</span></div>
+      <div class="fg-bottom-row">
+        <div class="fg-spark">${sparkBars}</div>
+        <div class="fg-trend">${trend}</div>
+      </div>
       ${badge(sigText, sigCls)}`;
   } else {
     fgHtml = `<div class="sent-section-label">Fear & Greed</div><div class="sent-unavail">Unavailable</div>`;
