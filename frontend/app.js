@@ -1,6 +1,11 @@
 'use strict';
 
-// EmailJS credentials
+// ═══════════════════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════════════════
+
+// EmailJS credentials — safe to expose here because allowed origins are
+// restricted to hammadrehmanawan.github.io in the EmailJS dashboard.
 const EJS_PUBLIC_KEY  = 'umm68O9D3twguzpjd';
 const EJS_SERVICE_ID  = 'service_cf3llwp';
 const EJS_TEMPLATE_ID = 'template_2544kb6';
@@ -26,7 +31,7 @@ const COINS = {
 const TICKER_IDS = ['bitcoin','ethereum','binancecoin','solana','ripple','cardano','avalanche-2'];
 const BASE = 'https://api.coingecko.com/api/v3';
 
-// ─── FIREBASE CONFIG ──────────────────────────────────────────────────
+// ─── FIREBASE CONFIG ────────────────────────────────────────────────
 // 1. Go to https://console.firebase.google.com and create a project.
 // 2. Authentication → Sign-in method → enable Google.
 // 3. Firestore Database → Create database (start in production mode).
@@ -35,17 +40,22 @@ const BASE = 'https://api.coingecko.com/api/v3';
 // 5. Project Settings → Your apps → Add web app → copy the config below.
 // 6. Authentication → Settings → Authorized domains → add hammadrehmanawan.github.io
 const FIREBASE_CONFIG = {
-  apiKey:            'YOUR_API_KEY',
-  authDomain:        'YOUR_PROJECT_ID.firebaseapp.com',
-  projectId:         'YOUR_PROJECT_ID',
-  storageBucket:     'YOUR_PROJECT_ID.appspot.com',
-  messagingSenderId: 'YOUR_SENDER_ID',
-  appId:             'YOUR_APP_ID',
+  apiKey:            'AIzaSyAj-kciCa5GpvOl-i6cE99nXtbIDeT1eQo',
+  authDomain:        'futurex-9f2c6.firebaseapp.com',
+  projectId:         'futurex-9f2c6',
+  storageBucket:     'futurex-9f2c6.firebasestorage.app',
+  messagingSenderId: '76081464641',
+  appId:             '1:76081464641:web:5d0716491dd91dffc24dc0',
+  measurementId:     'G-0WLTV3GHL9',
 };
 // ────────────────────────────────────────────────────────────────────
 
 let _db   = null;
 let _auth = null;
+
+// ═══════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════
 
 const CRYPTOCOMPARE_NEWS = 'https://min-api.cryptocompare.com/data/v2/news/';
 const FINBERT_URL        = 'https://api-inference.huggingface.co/models/ProsusAI/finbert';
@@ -57,6 +67,10 @@ const state = {
   sentiment: null, lastUpdated: null, _autoRan: false,
   user: null, alertSettings: {},
 };
+
+// ═══════════════════════════════════════════════════════════════════
+// API  (60 s in-memory cache)
+// ═══════════════════════════════════════════════════════════════════
 
 async function apiFetch(url, key, ttl = 60_000) {
   const hit = state.cache[key];
@@ -83,6 +97,10 @@ async function fetchTicker(ids) {
   return apiFetch(url, `tick-${ids.join(',')}`, 30_000);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// SENTIMENT  APIS
+// ═══════════════════════════════════════════════════════════════════
+
 async function fetchFearGreed() {
   return apiFetch('https://api.alternative.me/fng/?limit=7', 'fg', SENT_TTL);
 }
@@ -99,6 +117,9 @@ async function fetchCryptoNews(sym) {
 
 async function classifyFinBERT(headlines) {
   const ctrl  = new AbortController();
+  // 60 s — HuggingFace free tier can take ~20–40 s to warm the model;
+  // wait_for_model:true tells the API to block until it's ready instead of
+  // immediately returning {"error":"Model is currently loading"}.
   const timer = setTimeout(() => ctrl.abort(), 60_000);
   try {
     const res = await fetch(FINBERT_URL, {
@@ -183,6 +204,8 @@ async function loadSentiment(coinId) {
   try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
 }
 
+// ─── Render Sentiment Card ───────────────────────────────────────────
+
 function renderSentimentCard(data) {
   const card = document.getElementById('sentimentCard');
   if (!card) return;
@@ -193,6 +216,7 @@ function renderSentimentCard(data) {
     return;
   }
 
+  // ── Fear & Greed ──
   let fgHtml;
   if (data.fg?.length) {
     const cur    = parseInt(data.fg[0].value);
@@ -210,6 +234,7 @@ function renderSentimentCard(data) {
       : 'Extreme greed — corrections often follow (contrarian sell)';
     const sigCls = cur <= 44 ? 'green' : cur <= 55 ? 'neutral' : 'red';
 
+    // Arc gauge: semicircle left→top→right, value fills from left
     const gR = 60;
     const arcEndDeg = 180 - (cur / 100 * 180);
     const arcEndRad = arcEndDeg * Math.PI / 180;
@@ -254,6 +279,7 @@ function renderSentimentCard(data) {
     fgHtml = `<div class="sent-section-label">Fear &amp; Greed</div><div class="sent-unavail">Unavailable</div>`;
   }
 
+  // ── Community Sentiment ──
   let commHtml;
   if (data.community?.up != null) {
     const up  = data.community.up.toFixed(1);
@@ -281,6 +307,7 @@ function renderSentimentCard(data) {
     commHtml = `<div class="sent-section-label">Community</div><div class="sent-unavail">Unavailable</div>`;
   }
 
+  // ── FinBERT News Sentiment ──
   let fbHtml;
   if (data.finbert) {
     const pos = (data.finbert.positive * 100).toFixed(0);
@@ -315,6 +342,10 @@ function renderSentimentCard(data) {
     </div>
     <div class="sent-block sent-block-full">${fbHtml}</div>`;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// TECHNICAL INDICATORS
+// ═══════════════════════════════════════════════════════════════════
 
 function calcRSI(prices, period = 14) {
   const rsi = new Array(prices.length).fill(50);
@@ -364,6 +395,10 @@ function calcBollinger(prices, period = 20, mult = 2) {
   return { upper, mid, lower };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// STATISTICAL FORECAST  (Holt double-exponential smoothing)
+// ═══════════════════════════════════════════════════════════════════
+
 function holtForecast(prices, horizon = 7, alpha = 0.35, beta = 0.08) {
   let level = prices[0], trend = prices[1] - prices[0];
   for (let i = 1; i < prices.length; i++) {
@@ -384,6 +419,10 @@ function holtForecast(prices, horizon = 7, alpha = 0.35, beta = 0.08) {
   const high   = median.map((v, i) => v + avgRes * Math.sqrt(i + 1) * 1.8);
   return { median, low, high };
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// FUTURES CALCULATOR
+// ═══════════════════════════════════════════════════════════════════
 
 function calcFutures(entry, leverage, size, dir, tp, sl) {
   const margin = size / leverage;
@@ -406,6 +445,10 @@ function calcFutures(entry, leverage, size, dir, tp, sl) {
   return res;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// CHART
+// ═══════════════════════════════════════════════════════════════════
+
 function buildChart(dates, prices, bb, forecast, days, horizon) {
   if (state.chart) { state.chart.destroy(); state.chart = null; }
   const n = Math.min(dates.length, days);
@@ -417,6 +460,7 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
   });
   const allDates = [...dDates, ...fDates];
   const labels = allDates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+  // Full, human-readable dates for the tooltip title (e.g. "Mon, Jun 5 2026")
   const fullLabels = allDates.map(d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }));
   const pad  = arr => [...arr.slice(-n), ...new Array(horizon).fill(null)];
   const fpad = arr => [...new Array(n).fill(null), ...arr];
@@ -462,6 +506,10 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
   });
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// FORMATTERS
+// ═══════════════════════════════════════════════════════════════════
+
 function fmt(v, d = 2) {
   if (v == null) return '—';
   return Math.abs(v).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
@@ -469,6 +517,10 @@ function fmt(v, d = 2) {
 function fmtUSD(v, d = 2) { return v == null ? '—' : `$${fmt(v, d)}`; }
 function fmtPct(v) { return v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`; }
 function badge(text, type) { return `<span class="badge badge-${type}">${text}</span>`; }
+
+// ═══════════════════════════════════════════════════════════════════
+// FRESHNESS INDICATOR  ("last updated X ago")
+// ═══════════════════════════════════════════════════════════════════
 
 function updateFreshness() {
   const el = document.getElementById('freshness');
@@ -485,6 +537,10 @@ function updateFreshness() {
   el.innerHTML = `<span class="fresh-dot"></span>${txt}`;
   el.className = 'freshness' + (secs > 120 ? ' stale' : '');
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// VOLATILITY ALERT SYSTEM
+// ═══════════════════════════════════════════════════════════════════
 
 const SENSITIVITY_CFG = {
   conservative: { rsiLo: 20, rsiHi: 80, changeAbs: 10, bbWidth: 20, hint: 'RSI < 20 or > 80 · price ±10% in 24h · BB width > 20%' },
@@ -595,6 +651,8 @@ function startBackgroundAlertChecks() {
   }, 5 * 60 * 1000);
 }
 
+// ─── Alert UI helpers ───
+
 function showEmailjsHelp() {
   const el = document.getElementById('emailjsHelp');
   if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
@@ -614,6 +672,7 @@ function saveAlerts() {
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showAlertStatus('Please enter a valid email address.', 'error'); return;
   }
+  // GDPR: require explicit consent before storing an email address
   if (email && !consent) {
     showAlertStatus('Please tick the consent box before we store your email address.', 'error'); return;
   }
@@ -674,6 +733,10 @@ function initAlertUI() {
   setAlertSensitivity(s.sensitivity || 'moderate');
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// DIRECTION TOGGLE
+// ═══════════════════════════════════════════════════════════════════
+
 function setDir(dir) {
   state.direction = dir;
   document.getElementById('btnLong').classList.toggle('active',  dir === 'Long');
@@ -695,6 +758,10 @@ function updateLeverage(val) {
   document.getElementById('levHint').textContent = hint;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// TICKER
+// ═══════════════════════════════════════════════════════════════════
+
 async function refreshTicker() {
   try {
     const data = await fetchTicker(TICKER_IDS);
@@ -708,6 +775,10 @@ async function refreshTicker() {
     }).join('');
   } catch (e) { console.warn('Ticker:', e.message); }
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// LOAD COIN
+// ═══════════════════════════════════════════════════════════════════
 
 function showLoadError(coinId, days, message) {
   const wrap = document.querySelector('.chart-wrap');
@@ -791,14 +862,17 @@ async function loadCoin(coinId, days) {
     buildChart(dates, prices, bb, forecast, days, horizon);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
 
+    // Freshness indicator
     state.lastUpdated = Date.now();
     updateFreshness();
 
+    // Auto-fill entry price with live price (unless the user typed their own)
     const entryEl = document.getElementById('entryPrice');
     if (entryEl && !entryEl.dataset.userSet) entryEl.value = curr.toFixed(2);
 
     loadSentiment(coinId).catch(e => console.warn('Sentiment:', e.message));
 
+    // Auto-run the full analysis once on first successful load
     if (!state._autoRan) { state._autoRan = true; analyze(); }
 
   } catch (err) {
@@ -810,6 +884,10 @@ async function loadCoin(coinId, days) {
   }
   loader.classList.remove('visible');
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// ANALYZE
+// ═══════════════════════════════════════════════════════════════════
 
 async function analyze() {
   const btn = document.getElementById('analyzeBtn');
@@ -885,6 +963,10 @@ async function analyze() {
   btn.disabled = false; btn.textContent = 'Analyze Trade';
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// RENDER RESULTS
+// ═══════════════════════════════════════════════════════════════════
+
 function row(label, value, cls = '', sub = '', hl = '') {
   return `<div class="result-row ${hl}">
     <div><div class="res-label">${label}</div>${sub ? `<div class="res-sub">${sub}</div>` : ''}</div>
@@ -910,6 +992,10 @@ function renderResults(m, curr, fcst, horizon, chgF) {
     ${m.rr != null ? row('Risk / Reward Ratio', `1 : ${m.rr.toFixed(2)}`, m.rr >= 2 ? 'green' : m.rr >= 1 ? 'gold' : 'red', m.rr >= 2 ? `Good — for every $1 risked you could gain $${m.rr.toFixed(2)}` : m.rr >= 1 ? 'Fair — aim for 1:2 or better for quality trades' : 'Poor — you risk more than your potential gain', m.rr >= 2 ? 'hl-green' : m.rr >= 1 ? 'hl-gold' : 'hl-red') : ''}
   </div>`;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// RENDER SIGNAL
+// ═══════════════════════════════════════════════════════════════════
 
 function renderSignal(score, signals, dir) {
   let heading, hCls, summary, summaryEmoji;
@@ -957,6 +1043,10 @@ function renderSignal(score, signals, dir) {
     }</div>`;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// COIN SELECTOR
+// ═══════════════════════════════════════════════════════════════════
+
 function selectCoin(coinId) {
   state.coin = coinId;
   document.getElementById('coinSelect').value = coinId;
@@ -964,10 +1054,16 @@ function selectCoin(coinId) {
   loadCoin(coinId, state.days);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════════════════
+
 function init() {
+  // Hydrate alert settings from localStorage so getAlertSettings() is sync from the start
   try { state.alertSettings = JSON.parse(localStorage.getItem('cryptoAlertSettings') || '{}'); }
   catch { state.alertSettings = {}; }
 
+  // Show disclaimer banner on first visit
   if (!localStorage.getItem('disclaimerSeen')) {
     const banner = document.getElementById('disclaimerBanner');
     if (banner) banner.style.display = 'flex';
@@ -989,6 +1085,7 @@ function init() {
     });
   });
 
+  // Pre-populate defaults so the calculator is usable immediately
   document.getElementById('posSize').value = '1000';
   document.getElementById('leverage').value = '10';
   updateLeverage(10);
@@ -996,15 +1093,20 @@ function init() {
   loadCoin('bitcoin', 30);
   refreshTicker();
   setInterval(refreshTicker, 60_000);
-  setInterval(updateFreshness, 1000);
+  setInterval(updateFreshness, 1000); // tick the "updated X ago" label
   initAlertUI();
   startBackgroundAlertChecks();
   initFirebase();
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// FIREBASE AUTH + FIRESTORE
+// ═══════════════════════════════════════════════════════════════════
+
 function initFirebase() {
   if (typeof firebase === 'undefined') return;
   if (FIREBASE_CONFIG.apiKey === 'YOUR_API_KEY') {
+    // Config not yet filled in — show a disabled sign-in button
     renderAuthUI(null, /* disabled */ true);
     return;
   }
@@ -1020,9 +1122,11 @@ function initFirebase() {
       renderAuthUI(user);
       if (user) {
         await loadUserSettingsFromFirestore(user.uid);
+        // Re-populate alert UI with cloud settings
         const container = document.getElementById('watchCoins');
         if (container) container.innerHTML = '';
         initAlertUI();
+        // Pre-fill email from Google profile if the field is empty
         const emailEl = document.getElementById('alertEmail');
         if (emailEl && !emailEl.value && user.email) emailEl.value = user.email;
         showAlertStatus('Signed in — settings loaded from cloud.', 'success');
@@ -1104,6 +1208,10 @@ function dismissDisclaimer() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ═══════════════════════════════════════════════════════════════════
+// DASHBOARD — AI PORTFOLIO PLANNER
+// ═══════════════════════════════════════════════════════════════════
 
 function switchTab(tab) {
   const isCalc = tab === 'calc';
