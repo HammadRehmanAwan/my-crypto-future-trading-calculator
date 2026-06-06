@@ -14,7 +14,10 @@ app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://hammadrehmanawan.github.io"],
+    allow_origins=[
+        "https://hammadrehmanawan.github.io",
+        "https://hammadrehman-crypto-futures-calculator.hf.space",
+    ],
     allow_methods=["GET"],
     allow_headers=["*"],
 )
