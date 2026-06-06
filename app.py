@@ -1,11 +1,13 @@
 """
 Crypto Futures Trading Calculator
-Powered by Amazon Chronos-T5-Small (Hugging Face) + CoinGecko API
+Powered by Amazon Chronos-Bolt-Small (Hugging Face) + CoinGecko API
+All models are 100% free and open-source (Apache 2.0)
 """
 
 import warnings
 warnings.filterwarnings("ignore")
 
+import os
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -15,9 +17,9 @@ from datetime import timedelta
 import gradio as gr
 import torch
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # COIN REGISTRY
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 SUPPORTED_COINS = {
     "Bitcoin (BTC)":    "bitcoin",
@@ -37,17 +39,35 @@ SUPPORTED_COINS = {
     "Filecoin (FIL)":   "filecoin",
 }
 
-# ──────────────────────────────────────────────────────────────────────────────
-# MODEL  (lazy-loaded, singleton)
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# MODEL  (lazy-loaded singleton)
+# Primary:  amazon/chronos-bolt-small  — 20x faster on CPU, Apache 2.0
+# Fallback: amazon/chronos-t5-small   — original Chronos, also free
+# ─────────────────────────────────────────────────────────────────────────────
 
 _pipeline = None
+_pipeline_type = None   # "bolt" | "classic"
 
 
 def load_model():
-    global _pipeline
+    global _pipeline, _pipeline_type
     if _pipeline is not None:
-        return _pipeline, None
+        return _pipeline, _pipeline_type, None
+
+    # Try Chronos-Bolt first (fastest on CPU free tier)
+    try:
+        from chronos import ChronosBoltPipeline
+        _pipeline = ChronosBoltPipeline.from_pretrained(
+            "amazon/chronos-bolt-small",
+            device_map="cpu",
+            torch_dtype=torch.float32,
+        )
+        _pipeline_type = "bolt"
+        return _pipeline, _pipeline_type, None
+    except Exception:
+        pass
+
+    # Fallback: original Chronos-T5-Small
     try:
         from chronos import ChronosPipeline
         _pipeline = ChronosPipeline.from_pretrained(
@@ -55,17 +75,17 @@ def load_model():
             device_map="cpu",
             torch_dtype=torch.float32,
         )
-        return _pipeline, None
+        _pipeline_type = "classic"
+        return _pipeline, _pipeline_type, None
     except Exception as exc:
-        return None, str(exc)
+        return None, None, str(exc)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# DATA FETCHING
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# DATA FETCHING  (CoinGecko free public API — no key required)
+# ─────────────────────────────────────────────────────────────────────────────
 
 def fetch_ohlcv(coin_id: str, days: int = 90):
-    """Fetch daily price + volume from CoinGecko (free, no key)."""
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
     params = {"vs_currency": "usd", "days": days, "interval": "daily"}
     try:
@@ -93,9 +113,9 @@ def fetch_current_price(coin_id: str):
         return None, None, str(exc)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # TECHNICAL INDICATORS
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def calc_rsi(prices: np.ndarray, period: int = 14) -> np.ndarray:
     s = pd.Series(prices)
@@ -108,8 +128,8 @@ def calc_rsi(prices: np.ndarray, period: int = 14) -> np.ndarray:
 
 def calc_macd(prices: np.ndarray, fast=12, slow=26, sig=9):
     s = pd.Series(prices)
-    ema_f = s.ewm(span=fast, adjust=False).mean()
-    ema_s = s.ewm(span=slow, adjust=False).mean()
+    ema_f  = s.ewm(span=fast, adjust=False).mean()
+    ema_s  = s.ewm(span=slow, adjust=False).mean()
     line   = ema_f - ema_s
     signal = line.ewm(span=sig, adjust=False).mean()
     hist   = line - signal
@@ -123,33 +143,50 @@ def calc_bollinger(prices: np.ndarray, period=20, mult=2):
     return (mid + mult * std).values, mid.values, (mid - mult * std).values
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# AI PRICE PREDICTION  (Chronos)
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# AI PRICE PREDICTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+QUANTILE_LEVELS = [0.1, 0.5, 0.9]
+
 
 def ai_forecast(prices: np.ndarray, horizon: int = 7):
-    pipe, err = load_model()
+    pipe, ptype, err = load_model()
     if err:
         return None, err
+
     context = torch.tensor(prices[-60:], dtype=torch.float32).unsqueeze(0)
     try:
-        forecast = pipe.predict(
-            context=context,
-            prediction_length=horizon,
-            num_samples=100,
-        )
-        samples = forecast[0].numpy()          # (100, horizon)
-        lo  = np.quantile(samples, 0.10, axis=0)
-        med = np.quantile(samples, 0.50, axis=0)
-        hi  = np.quantile(samples, 0.90, axis=0)
+        if ptype == "bolt":
+            # ChronosBoltPipeline → quantiles directly: (batch, n_q, horizon)
+            forecast = pipe.predict(
+                context=context,
+                prediction_length=horizon,
+                quantile_levels=QUANTILE_LEVELS,
+            )
+            lo  = forecast[0, 0, :].numpy()
+            med = forecast[0, 1, :].numpy()
+            hi  = forecast[0, 2, :].numpy()
+        else:
+            # ChronosPipeline → samples: (batch, n_samples, horizon)
+            forecast = pipe.predict(
+                context=context,
+                prediction_length=horizon,
+                num_samples=100,
+            )
+            samples = forecast[0].numpy()
+            lo  = np.quantile(samples, 0.10, axis=0)
+            med = np.quantile(samples, 0.50, axis=0)
+            hi  = np.quantile(samples, 0.90, axis=0)
+
         return {"low": lo, "median": med, "high": hi}, None
     except Exception as exc:
         return None, str(exc)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # FUTURES MATHS
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def futures_metrics(
     entry: float,
@@ -161,16 +198,16 @@ def futures_metrics(
 ):
     margin    = size_usd / leverage
     contracts = size_usd / entry
-    mmr       = 0.005   # 0.5 % maintenance margin rate (industry standard)
+    mmr       = 0.005   # 0.5% maintenance margin rate (industry standard)
 
     if direction == "Long":
-        liq     = entry * (1 - 1 / leverage + mmr)
+        liq      = entry * (1 - 1 / leverage + mmr)
         liq_dist = (entry - liq) / entry * 100
-        pnl_fn  = lambda px: contracts * (px - entry)
+        pnl_fn   = lambda px: contracts * (px - entry)
     else:
-        liq     = entry * (1 + 1 / leverage - mmr)
+        liq      = entry * (1 + 1 / leverage - mmr)
         liq_dist = (liq - entry) / entry * 100
-        pnl_fn  = lambda px: contracts * (entry - px)
+        pnl_fn   = lambda px: contracts * (entry - px)
 
     res = dict(
         entry=entry, leverage=leverage, size=size_usd,
@@ -187,16 +224,16 @@ def futures_metrics(
         res.update(stop_loss=stop_loss, pnl_sl=pnl_sl, roe_sl=pnl_sl / margin * 100)
 
     if take_profit and stop_loss:
-        reward = abs(take_profit - entry)
-        risk   = abs(stop_loss  - entry)
+        reward    = abs(take_profit - entry)
+        risk      = abs(stop_loss   - entry)
         res["rr"] = reward / risk if risk else None
 
     return res
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # CHART BUILDERS
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def chart_prediction(df, fcst, horizon, coin_label):
     fig = go.Figure()
@@ -216,10 +253,8 @@ def chart_prediction(df, fcst, horizon, coin_label):
         fig.add_trace(go.Scatter(
             x=list(fdates) + list(reversed(fdates)),
             y=list(fcst["high"]) + list(reversed(fcst["low"])),
-            fill="toself",
-            fillcolor="rgba(0,212,255,0.10)",
-            line=dict(color="rgba(0,0,0,0)"),
-            name="80% CI",
+            fill="toself", fillcolor="rgba(0,212,255,0.12)",
+            line=dict(color="rgba(0,0,0,0)"), name="80% CI",
         ))
         fig.add_trace(go.Scatter(
             x=fdates, y=fcst["median"],
@@ -229,11 +264,9 @@ def chart_prediction(df, fcst, horizon, coin_label):
         ))
 
     fig.update_layout(
-        title=f"{coin_label} — Chronos-T5 AI Price Forecast",
-        xaxis_title="Date",
-        yaxis_title="Price (USD)",
-        template="plotly_dark",
-        height=420,
+        title=f"{coin_label} — Chronos-Bolt AI Price Forecast",
+        xaxis_title="Date", yaxis_title="Price (USD)",
+        template="plotly_dark", height=420,
         legend=dict(x=0, y=1),
     )
     return fig
@@ -250,57 +283,43 @@ def chart_technicals(df, rsi_v, macd_l, macd_s, macd_h, bb_u, bb_m, bb_l, coin_l
     dt = df.index[-n:]
     px = df["price"].values[-n:]
 
-    # Price + BB
-    fig.add_trace(go.Scatter(x=dt, y=px, name="Price",
-                             line=dict(color="#00D4FF")), 1, 1)
-    fig.add_trace(go.Scatter(x=dt, y=bb_u[-n:], name="BB Upper",
-                             line=dict(color="#888", dash="dot")), 1, 1)
-    fig.add_trace(go.Scatter(x=dt, y=bb_m[-n:], name="BB Mid",
-                             line=dict(color="#888", dash="dash")), 1, 1)
+    fig.add_trace(go.Scatter(x=dt, y=px,        name="Price",    line=dict(color="#00D4FF")), 1, 1)
+    fig.add_trace(go.Scatter(x=dt, y=bb_u[-n:], name="BB Upper", line=dict(color="#888", dash="dot")), 1, 1)
+    fig.add_trace(go.Scatter(x=dt, y=bb_m[-n:], name="BB Mid",   line=dict(color="#888", dash="dash")), 1, 1)
     fig.add_trace(go.Scatter(
         x=dt, y=bb_l[-n:], name="BB Lower",
         line=dict(color="#888", dash="dot"),
         fill="tonexty", fillcolor="rgba(136,136,136,0.08)",
     ), 1, 1)
 
-    # RSI
-    fig.add_trace(go.Scatter(x=dt, y=rsi_v[-n:], name="RSI",
-                             line=dict(color="#FFD700")), 2, 1)
-    fig.add_hline(y=70, line_dash="dash", line_color="red",      row=2, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="#00FF88",  row=2, col=1)
+    fig.add_trace(go.Scatter(x=dt, y=rsi_v[-n:], name="RSI", line=dict(color="#FFD700")), 2, 1)
+    fig.add_hline(y=70, line_dash="dash", line_color="red",     row=2, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="#00FF88", row=2, col=1)
 
-    # MACD
     colors = ["#00FF88" if v >= 0 else "#FF4444" for v in macd_h[-n:]]
-    fig.add_trace(go.Bar(x=dt, y=macd_h[-n:], name="Hist",
-                         marker_color=colors), 3, 1)
-    fig.add_trace(go.Scatter(x=dt, y=macd_l[-n:], name="MACD",
-                             line=dict(color="#00D4FF")), 3, 1)
-    fig.add_trace(go.Scatter(x=dt, y=macd_s[-n:], name="Signal",
-                             line=dict(color="#FF6B6B")), 3, 1)
+    fig.add_trace(go.Bar(x=dt,     y=macd_h[-n:], name="Hist",   marker_color=colors), 3, 1)
+    fig.add_trace(go.Scatter(x=dt, y=macd_l[-n:], name="MACD",  line=dict(color="#00D4FF")), 3, 1)
+    fig.add_trace(go.Scatter(x=dt, y=macd_s[-n:], name="Signal", line=dict(color="#FF6B6B")), 3, 1)
 
     fig.update_layout(
         title=f"{coin_label} — Technical Analysis",
-        template="plotly_dark",
-        height=620,
-        showlegend=False,
+        template="plotly_dark", height=620, showlegend=False,
     )
     return fig
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # TEXT FORMATTERS
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def fmt_metrics(m: dict, curr_px: float, fcst, rsi_val: float, coin: str) -> str:
     pred = fcst["median"][-1] if fcst else None
     pct  = (pred - curr_px) / curr_px * 100 if pred else None
     h    = m.get("horizon", 7)
 
-    lines = [
-        f"## {coin} — Trading Metrics\n",
-        "### 💰 Price",
-        f"- **Current Price:** ${curr_px:,.4f}",
-    ]
+    lines = [f"## {coin} — Trading Metrics\n", "### 💰 Price",
+             f"- **Current Price:** ${curr_px:,.4f}"]
+
     if pred:
         lo, hi = fcst["low"][-1], fcst["high"][-1]
         lines += [
@@ -322,38 +341,28 @@ def fmt_metrics(m: dict, curr_px: float, fcst, rsi_val: float, coin: str) -> str
     ]
 
     if "take_profit" in m:
-        lines += [
-            "\n### 🎯 Take Profit",
-            f"- **TP Price:** ${m['take_profit']:,.4f}",
-            f"- **PnL at TP:** ${m['pnl_tp']:+,.2f}",
-            f"- **ROE at TP:** {m['roe_tp']:+.2f}%",
-        ]
+        lines += ["\n### 🎯 Take Profit",
+                  f"- **TP Price:** ${m['take_profit']:,.4f}",
+                  f"- **PnL at TP:** ${m['pnl_tp']:+,.2f}",
+                  f"- **ROE at TP:** {m['roe_tp']:+.2f}%"]
     if "stop_loss" in m:
-        lines += [
-            "\n### 🛑 Stop Loss",
-            f"- **SL Price:** ${m['stop_loss']:,.4f}",
-            f"- **PnL at SL:** ${m['pnl_sl']:+,.2f}",
-            f"- **ROE at SL:** {m['roe_sl']:+.2f}%",
-        ]
+        lines += ["\n### 🛑 Stop Loss",
+                  f"- **SL Price:** ${m['stop_loss']:,.4f}",
+                  f"- **PnL at SL:** ${m['pnl_sl']:+,.2f}",
+                  f"- **ROE at SL:** {m['roe_sl']:+.2f}%"]
     if m.get("rr"):
         lines.append(f"- **Risk / Reward:** 1 : {m['rr']:.2f}")
 
     rsi_tag = "Overbought 🔴" if rsi_val > 70 else "Oversold 🟢" if rsi_val < 30 else "Neutral 🟡"
-    lines += [
-        "\n### 📈 Technicals",
-        f"- **RSI(14):** {rsi_val:.1f}  ({rsi_tag})",
-    ]
+    lines += ["\n### 📈 Technicals", f"- **RSI(14):** {rsi_val:.1f}  ({rsi_tag})"]
     return "\n".join(lines)
 
 
-def fmt_signal(
-    rsi_val, macd_l, macd_s, px, bb_u, bb_l, direction, m, fcst
-) -> str:
-    score   = 0
-    bullets = []
+def fmt_signal(rsi_val, macd_l, macd_s, px, bb_u, bb_l, direction, m, fcst) -> str:
+    score, bullets = 0, []
 
     if rsi_val < 30:
-        bullets.append("🟢 RSI oversold → bullish momentum likely"); score += 1
+        bullets.append("🟢 RSI oversold → bullish momentum likely");  score += 1
     elif rsi_val > 70:
         bullets.append("🔴 RSI overbought → bearish pressure likely"); score -= 1
     else:
@@ -365,7 +374,7 @@ def fmt_signal(
         bullets.append("🔴 MACD below signal line → bearish"); score -= 1
 
     if px < bb_l:
-        bullets.append("🟢 Price below lower BB → potential bounce"); score += 1
+        bullets.append("🟢 Price below lower BB → potential bounce");   score += 1
     elif px > bb_u:
         bullets.append("🔴 Price above upper BB → potential reversal"); score -= 1
     else:
@@ -413,9 +422,9 @@ def fmt_signal(
     return body
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # ORCHESTRATION
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 def analyze(coin_label, direction, entry_px, leverage, size_usd, tp, sl, horizon):
     coin_id = SUPPORTED_COINS.get(coin_label, "bitcoin")
@@ -438,14 +447,12 @@ def analyze(coin_label, direction, entry_px, leverage, size_usd, tp, sl, horizon
     m = futures_metrics(ep, float(leverage), float(size_usd), direction, tp_val, sl_val)
     m["horizon"] = int(horizon)
 
-    rsi_v              = calc_rsi(prices)
-    macd_l, macd_s, macd_h = calc_macd(prices)
-    bb_u, bb_m, bb_l   = calc_bollinger(prices)
+    rsi_v                   = calc_rsi(prices)
+    macd_l, macd_s, macd_h  = calc_macd(prices)
+    bb_u, bb_m, bb_l        = calc_bollinger(prices)
 
     fig_pred = chart_prediction(df, fcst, int(horizon), coin_label)
-    fig_tech = chart_technicals(
-        df, rsi_v, macd_l, macd_s, macd_h, bb_u, bb_m, bb_l, coin_label
-    )
+    fig_tech = chart_technicals(df, rsi_v, macd_l, macd_s, macd_h, bb_u, bb_m, bb_l, coin_label)
 
     metrics_md = fmt_metrics(m, curr_px, fcst, rsi_v[-1], coin_label)
     signal_md  = fmt_signal(
@@ -465,9 +472,9 @@ def refresh_price(coin_label):
     return f"{emoji} ${px:,.2f}  ({chg:+.2f}% 24h)"
 
 
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # GRADIO UI
-# ──────────────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 THEME = gr.themes.Soft(
     primary_hue="cyan",
@@ -480,17 +487,16 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 
     gr.Markdown("""
 # 📈 Crypto Futures Trading Calculator
-### Powered by [Amazon Chronos-T5-Small](https://huggingface.co/amazon/chronos-t5-small) · CoinGecko · RSI · MACD · Bollinger Bands
+### Powered by [Amazon Chronos-Bolt](https://huggingface.co/amazon/chronos-bolt-small) · CoinGecko · RSI · MACD · Bollinger Bands
 
-> **Chronos-T5-Small** is Amazon's state-of-the-art zero-shot probabilistic time-series model,
-> pre-trained on **27 billion data points** — the most accurate open-source crypto forecasting model on Hugging Face.
+> **100% Free & Open-Source** — Chronos-Bolt-Small (Apache 2.0) is Amazon's fastest zero-shot
+> time-series model, delivering **20× faster inference** than the original Chronos with equal accuracy.
+> No API keys. No subscriptions. Runs entirely on free CPU.
     """)
 
     with gr.Row():
-        coin_dd     = gr.Dropdown(
-            list(SUPPORTED_COINS), value="Bitcoin (BTC)",
-            label="Cryptocurrency", scale=2,
-        )
+        coin_dd     = gr.Dropdown(list(SUPPORTED_COINS), value="Bitcoin (BTC)",
+                                  label="Cryptocurrency", scale=2)
         price_box   = gr.Textbox(label="Live Price", interactive=False, scale=2)
         refresh_btn = gr.Button("🔄 Refresh Price", variant="secondary", scale=1)
 
@@ -501,16 +507,13 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
         with gr.Column(scale=1):
             gr.Markdown("### ⚙️ Position Parameters")
             direction = gr.Radio(["Long", "Short"], value="Long", label="Direction")
-            entry_px  = gr.Number(
-                label="Entry Price (USD)  — leave 0 to use live price", value=0)
+            entry_px  = gr.Number(label="Entry Price (USD)  — 0 = use live price",  value=0)
             leverage  = gr.Slider(1, 125, value=10, step=1, label="Leverage (×)")
             size_usd  = gr.Number(label="Position Size (USD)", value=1000)
 
             gr.Markdown("### 🎯 Risk Management")
-            tp = gr.Number(
-                label="Take Profit (USD)  — leave 0 to use AI prediction", value=0)
-            sl = gr.Number(
-                label="Stop Loss (USD)    — leave 0 to skip", value=0)
+            tp = gr.Number(label="Take Profit (USD)  — 0 = use AI target", value=0)
+            sl = gr.Number(label="Stop Loss   (USD)  — 0 = skip",          value=0)
 
             gr.Markdown("### 🤖 AI Forecast Settings")
             horizon = gr.Slider(1, 14, value=7, step=1, label="Forecast Horizon (days)")
@@ -521,8 +524,8 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
             metrics_md = gr.Markdown()
 
     with gr.Row():
-        pred_plot  = gr.Plot(label="📊 AI Price Prediction")
-        signal_md  = gr.Markdown()
+        pred_plot = gr.Plot(label="📊 AI Price Prediction")
+        signal_md = gr.Markdown()
 
     tech_plot = gr.Plot(label="📉 Technical Analysis")
 
@@ -538,14 +541,42 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 
 | Component | Detail |
 |---|---|
-| **AI Model** | [amazon/chronos-t5-small](https://huggingface.co/amazon/chronos-t5-small) — zero-shot probabilistic time-series forecasting |
-| **Price Data** | CoinGecko free public API (no API key required) |
+| **AI Model** | [amazon/chronos-bolt-small](https://huggingface.co/amazon/chronos-bolt-small) — zero-shot probabilistic forecasting, Apache 2.0, **free** |
+| **Price Data** | CoinGecko public API — free, no key required |
 | **Indicators** | RSI(14), MACD(12/26/9), Bollinger Bands(20, 2σ) |
 | **Futures Math** | Liquidation price, PnL, ROE, Risk/Reward ratio |
-| **Trade Signal** | Composite score from AI + 3 technical indicators |
+| **Trade Signal** | Composite score: AI forecast + 3 technical indicators |
 
 ⚠️ *For educational purposes only. Crypto trading carries significant risk. Not financial advice.*
     """)
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://hammadrehmanawan.github.io"],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
+@app.get("/firebase-config")
+def get_firebase_config():
+    return JSONResponse({
+        "apiKey":            os.environ.get("FIREBASE_API_KEY", ""),
+        "authDomain":        os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId":         os.environ.get("FIREBASE_PROJECT_ID", ""),
+        "storageBucket":     os.environ.get("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.environ.get("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId":             os.environ.get("FIREBASE_APP_ID", ""),
+        "measurementId":     os.environ.get("FIREBASE_MEASUREMENT_ID", ""),
+    })
+
+app = gr.mount_gradio_app(app, demo, path="/")
+
 if __name__ == "__main__":
-    demo.launch()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)

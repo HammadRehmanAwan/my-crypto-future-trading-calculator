@@ -1,0 +1,41 @@
+name: Deploy to Hugging Face Spaces
+
+on:
+  push:
+    branches:
+      - claude/crypto-model-hugging-face-rSr4s
+      - main
+    paths:
+      - 'frontend/**'
+      - 'README.md'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Push static frontend to HF Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Actions"
+
+          # Clone the HF Space repo
+          git clone https://HammadRehman:$HF_TOKEN@huggingface.co/spaces/HammadRehman/crypto-futures-calculator hf_space
+
+          # Copy README (frontmatter tells HF this is a static space)
+          cp README.md hf_space/README.md
+
+          # Copy frontend files to the Space root
+          cp frontend/index.html hf_space/index.html
+          cp frontend/style.css  hf_space/style.css
+          cp frontend/app.js     hf_space/app.js
+
+          # Commit and push
+          cd hf_space
+          git add README.md index.html style.css app.js
+          git diff --staged --quiet || git commit -m "Deploy: update static frontend"
+          git push
