@@ -97,72 +97,80 @@ async function fetchCoinCommunity(coinId) {
   return apiFetch(url, `comm-${coinId}`, SENT_TTL);
 }
 
-async function fetchCryptoNews(sym) {
-  const url = `${CRYPTOCOMPARE_NEWS}?lang=EN&categories=${sym},Crypto&sortOrder=latest&limit=10`;
-  return apiFetch(url, `news-${sym}`, SENT_TTL);
+// Fetch broad crypto + regulation news (no coin filter — avoids category issues)
+async function fetchCryptoNews() {
+  const cats = 'BTC,ETH,SOL,XRP,BNB,Crypto,Regulation,Mining,Technology';
+  const url = `${CRYPTOCOMPARE_NEWS}?lang=EN&categories=${cats}&sortOrder=latest&limit=30`;
+  return apiFetch(url, 'news-crypto', SENT_TTL);
 }
 
-// Client-side financial keyword sentiment — no external API, always works.
+// Module-level sentiment lexicon shared by all scoring functions
+const _SENT_POS = new Set([
+  'rally','rallied','rallying','surge','surged','surging','bullish','bull',
+  'gain','gains','gained','soar','soared','soaring','rise','risen','rising',
+  'jumped','jump','climb','climbed','climbing','recover','recovered','recovery',
+  'breakout','breakthrough','adoption','mainstream','institutional','invest',
+  'investment','partnership','integration','launch','launched','approve',
+  'approval','approved','legal','legalize','legalized','regulated','secure',
+  'stability','stable','growth','growing','demand','innovation','positive',
+  'optimistic','confident','strong','boom','booming','milestone','increase',
+  'increased','impressive','achievement','opportunity','success','successful',
+  'profit','profits','profitable','outperform','upgrade','buy','accumulate',
+  'inflow','inflows','etf','momentum','higher','high','green','pumped',
+  'support','trust','optimism','upside','record','ath','all-time','peak',
+  'expand','expansion','boost','boosted','accelerate','grow','upward',
+  'rebound','improving','improved','winning','win','best','top','healthy',
+]);
+
+const _SENT_NEG = new Set([
+  'crash','crashed','crashing','dump','dumped','dumping','drop','dropped',
+  'dropping','plunge','plunged','plunging','bear','bearish','decline',
+  'declined','declining','fall','fell','falling','selloff','sell-off',
+  'hack','hacked','hacking','exploit','exploited','fraud','scam','ponzi',
+  'ban','banned','banning','restrict','restricted','restriction','fine',
+  'fined','penalty','penalties','investigation','investigate','lawsuit',
+  'sued','sue','liquidation','liquidated','insolvent','bankrupt','bankruptcy',
+  'fud','fear','concern','concerns','warning','warn','warned','threat',
+  'threatened','crisis','collapse','collapsed','collapsing','fail','failed',
+  'failure','loss','losses','lost','risk','risky','dangerous','danger',
+  'problem','problems','suspect','controversial','illegal','crime','criminal',
+  'breach','vulnerability','outflow','outflows','correction','bloodbath',
+  'stolen','theft','clampdown','shutdown','suspended','suspension','frozen',
+  'contagion','implosion','scandal','overvalued','bubble','downturn',
+  'pessimistic','lower','low','red','down','tumble','tumbled','slump',
+  'slumped','nosedive','sank','sink','wipeout','wiped','plummet','plummeted',
+  'lose','losing','worst','weak','weakening','trouble','troubled','hurting',
+  'hurt','negative','bad','worse','ugly','pressure','pressured','struggling',
+]);
+
+function classifyHeadline(title) {
+  const words = title.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/);
+  let p = 0, n = 0;
+  for (const w of words) {
+    if (_SENT_POS.has(w)) p++;
+    if (_SENT_NEG.has(w)) n++;
+  }
+  return p > n ? 'pos' : n > p ? 'neg' : 'neu';
+}
+
 function analyzeHeadlineSentiment(headlines) {
-  const POS = new Set([
-    'rally','rallied','rallying','surge','surged','surging','bullish','bull',
-    'gain','gains','gained','soar','soared','soaring','rise','risen','rising',
-    'jumped','jump','jumps','climb','climbed','climbing','recover','recovered',
-    'recovery','breakout','breakthrough','adoption','mainstream','institutional',
-    'invest','investment','partnership','integration','launch','launched',
-    'approve','approval','approved','legal','legalize','legalized','regulated',
-    'secure','stability','stable','growth','growing','demand','innovation',
-    'positive','optimistic','confident','strong','boom','booming','milestone',
-    'increase','increased','impressive','achievement','opportunity','success',
-    'successful','profit','profits','profitable','outperform','upgrade','buy',
-    'accumulate','inflow','inflows','etf','momentum','higher','high','green',
-    'pumped','pumping','support','trust','optimism','upside','record','ath',
-    'all-time','peak','expand','expanding','expansion','partnership','integrate',
-    'boost','boosted','boosting','accelerate','accelerating','grow','upward',
-    'thrive','thriving','flourish','strengthen','strengthening','rebound',
-    'rebounding','attract','attracting','improving','improved','improve','new',
-    'winning','win','winner','best','top','ahead','positive','healthy',
-  ]);
-
-  const NEG = new Set([
-    'crash','crashed','crashing','dump','dumped','dumping','drop','dropped',
-    'dropping','plunge','plunged','plunging','bear','bearish','decline',
-    'declined','declining','fall','fell','falling','selloff','sell-off',
-    'hack','hacked','hacking','exploit','exploited','fraud','scam','ponzi',
-    'ban','banned','banning','restrict','restricted','restriction','fine',
-    'fined','penalty','penalties','investigation','investigate','lawsuit',
-    'sued','sue','liquidation','liquidated','insolvent','bankrupt','bankruptcy',
-    'fud','fear','concern','concerns','warning','warn','warned','threat',
-    'threatened','crisis','collapse','collapsed','collapsing','fail','failed',
-    'failure','loss','losses','lost','risk','risky','dangerous','danger',
-    'problem','problems','suspect','controversial','illegal','crime','criminal',
-    'breach','vulnerability','outflow','outflows','correction','bloodbath',
-    'stolen','theft','clampdown','shutdown','suspended','suspension','frozen',
-    'contagion','implosion','scandal','overvalued','bubble','downturn',
-    'pessimistic','lower','low','red','down','tumble','tumbled','slump',
-    'slumped','nosedive','sank','sink','wipeout','wiped','plummet','plummeted',
-    'lose','losing','loser','worst','weak','weakening','weaken','trouble',
-    'troubled','hurting','hurt','negative','bad','worse','worst','ugly',
-    'collapse','pressure','pressured','struggling','struggle','struggles',
-  ]);
-
   if (!headlines.length) return null;
-
   let pos = 0, neg = 0, neu = 0;
   for (const h of headlines) {
-    const words = h.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/);
-    let p = 0, n = 0;
-    for (const w of words) {
-      if (POS.has(w)) p++;
-      if (NEG.has(w)) n++;
-    }
-    if (p > n)      pos++;
-    else if (n > p) neg++;
-    else            neu++;
+    const s = classifyHeadline(h);
+    if (s === 'pos') pos++;
+    else if (s === 'neg') neg++;
+    else neu++;
   }
-
   const total = headlines.length;
   return { positive: pos / total, neutral: neu / total, negative: neg / total };
+}
+
+function formatTimeAgo(unixTs) {
+  const secs = Math.floor(Date.now() / 1000) - unixTs;
+  if (secs < 3600)  return `${Math.floor(secs / 60)}m ago`;
+  if (secs < 86400) return `${Math.floor(secs / 3600)}h ago`;
+  return `${Math.floor(secs / 86400)}d ago`;
 }
 
 let _sentGen = 0;
@@ -184,8 +192,15 @@ async function loadSentiment(coinId) {
 
   let newsItems = [];
   try {
-    const newsRes = await fetchCryptoNews(sym);
-    newsItems = (newsRes?.Data || []).slice(0, 10);
+    const newsRes = await fetchCryptoNews();
+    const raw = newsRes?.Data;
+    if (Array.isArray(raw)) {
+      const cutoff = Math.floor(Date.now() / 1000) - 3 * 24 * 3600;
+      newsItems = raw
+        .filter(n => n.published_on >= cutoff)
+        .slice(0, 8)
+        .map(n => ({ ...n, _sent: classifyHeadline(n.title || '') }));
+    }
   } catch { /* ignore */ }
 
   if (gen !== _sentGen) return;
@@ -199,6 +214,7 @@ async function loadSentiment(coinId) {
     } : null,
     newsSentiment: analyzeHeadlineSentiment(headlines),
     headlines,
+    newsItems,
   };
   try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
 }
@@ -294,30 +310,52 @@ function renderSentimentCard(data) {
     commHtml = `<div class="sent-section-label">Community</div><div class="sent-unavail">Unavailable</div>`;
   }
 
-  // ── News Sentiment (client-side keyword analysis) ──
+  // ── News Sentiment + Article List ──
+  const articles = data.newsItems || [];
+  const ns       = data.newsSentiment;
   let fbHtml;
-  const ns = data.newsSentiment;
-  if (ns) {
-    const pos = (ns.positive * 100).toFixed(0);
-    const neu = (ns.neutral  * 100).toFixed(0);
-    const neg = (ns.negative * 100).toFixed(0);
-    const cls = ns.positive > 0.5 ? 'green' : ns.negative > 0.5 ? 'red' : 'neutral';
-    const overall = ns.positive > 0.5 ? 'Positive' : ns.negative > 0.5 ? 'Negative' : 'Neutral';
-    const headlineHtml = data.headlines.slice(0, 4)
-      .map(h => `<div class="fb-headline">• ${h.length > 95 ? h.slice(0, 92) + '…' : h}</div>`).join('');
+
+  if (articles.length > 0) {
+    let sentHtml = '';
+    if (ns) {
+      const pos     = (ns.positive * 100).toFixed(0);
+      const neu     = (ns.neutral  * 100).toFixed(0);
+      const neg     = (ns.negative * 100).toFixed(0);
+      const cls     = ns.positive > 0.5 ? 'green' : ns.negative > 0.5 ? 'red' : 'neutral';
+      const overall = ns.positive > 0.5 ? 'Positive' : ns.negative > 0.5 ? 'Negative' : 'Neutral';
+      sentHtml = `
+        <div class="fb-bars">
+          <div class="fb-row"><span class="fb-lbl green">Positive</span><div class="fb-track"><div class="fb-fill green" style="width:${pos}%"></div></div><span class="fb-pct">${pos}%</span></div>
+          <div class="fb-row"><span class="fb-lbl neutral-text">Neutral</span><div class="fb-track"><div class="fb-fill neutral" style="width:${neu}%"></div></div><span class="fb-pct">${neu}%</span></div>
+          <div class="fb-row"><span class="fb-lbl red">Negative</span><div class="fb-track"><div class="fb-fill red" style="width:${neg}%"></div></div><span class="fb-pct">${neg}%</span></div>
+        </div>
+        ${badge(`Overall ${overall} — ${pos}% positive · ${neg}% negative · ${articles.length} articles`, cls)}`;
+    }
+
+    const listHtml = articles.map(item => {
+      const sc   = item._sent;
+      const time = formatTimeAgo(item.published_on);
+      const title = item.title.length > 90 ? item.title.slice(0, 87) + '…' : item.title;
+      const href  = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
+      return `<a class="nl-item"${href}>
+        <span class="nl-dot nl-${sc}"></span>
+        <div class="nl-body">
+          <div class="nl-title">${title}</div>
+          <div class="nl-meta"><span class="nl-src">${item.source || ''}</span><span class="nl-time">${time}</span></div>
+        </div>
+      </a>`;
+    }).join('');
 
     fbHtml = `
-      <div class="sent-section-label">News Sentiment <span class="sent-src">Keyword AI · ${data.headlines.length} headlines</span></div>
-      <div class="fb-bars">
-        <div class="fb-row"><span class="fb-lbl green">Positive</span><div class="fb-track"><div class="fb-fill green" style="width:${pos}%"></div></div><span class="fb-pct">${pos}%</span></div>
-        <div class="fb-row"><span class="fb-lbl neutral-text">Neutral</span><div class="fb-track"><div class="fb-fill neutral" style="width:${neu}%"></div></div><span class="fb-pct">${neu}%</span></div>
-        <div class="fb-row"><span class="fb-lbl red">Negative</span><div class="fb-track"><div class="fb-fill red" style="width:${neg}%"></div></div><span class="fb-pct">${neg}%</span></div>
+      <div class="sent-section-label">News Sentiment
+        <span class="sent-src">Keyword AI · ${articles.length} articles · last 3 days</span>
       </div>
-      ${badge(`Overall ${overall} — ${pos}% positive, ${neg}% negative across ${data.headlines.length} headlines`, cls)}
-      ${headlineHtml ? `<div class="fb-headlines">${headlineHtml}</div>` : ''}`;
+      ${sentHtml}
+      <div class="nl-list">${listHtml}</div>`;
   } else {
-    fbHtml = `<div class="sent-section-label">News Sentiment</div>
-      <div class="sent-unavail">No recent headlines available</div>`;
+    fbHtml = `
+      <div class="sent-section-label">News Sentiment</div>
+      <div class="sent-unavail">No recent headlines found — data may be temporarily unavailable</div>`;
   }
 
   card.innerHTML = `
