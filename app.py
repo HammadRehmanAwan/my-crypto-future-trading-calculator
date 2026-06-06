@@ -547,5 +547,40 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 ⚠️ *For educational purposes only. Crypto trading carries significant risk. Not financial advice.*
     """)
 
+# ──────────────────────────────────────────────────────────────────────────────
+# FASTAPI WRAPPER — serves the FutureX HTML frontend at / and Gradio at /ai
+# ──────────────────────────────────────────────────────────────────────────────
+
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+
+_fastapi = FastAPI()
+
+
+@_fastapi.get("/", include_in_schema=False)
+@_fastapi.get("/index.html", include_in_schema=False)
+async def _index():
+    return FileResponse("index.html")
+
+
+@_fastapi.get("/app.js", include_in_schema=False)
+async def _appjs():
+    return FileResponse("app.js")
+
+
+@_fastapi.get("/style.css", include_in_schema=False)
+async def _css():
+    return FileResponse("style.css")
+
+
+@_fastapi.get("/favicon.svg", include_in_schema=False)
+async def _favicon():
+    return FileResponse("favicon.svg")
+
+
+# Mount Gradio AI calculator at /ai
+app = gr.mount_gradio_app(_fastapi, demo, path="/ai")
+
 if __name__ == "__main__":
-    demo.launch()
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=7860)
