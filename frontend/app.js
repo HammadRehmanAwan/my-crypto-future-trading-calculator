@@ -35,7 +35,7 @@ const BASE = 'https://api.coingecko.com/api/v3';
 // Credentials are served from the backend so they never appear in source.
 // Set BACKEND_URL to wherever app.py is deployed (Render, HuggingFace, etc.)
 // and add the seven FIREBASE_* environment variables on that server.
-const BACKEND_URL = ''; // e.g. 'https://my-app.onrender.com'
+const BACKEND_URL = 'https://my-crypto-future-trading-calculator.onrender.com';
 // ────────────────────────────────────────────────────────────────────
 
 let _db   = null;
