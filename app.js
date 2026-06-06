@@ -46,7 +46,6 @@ let _auth = null;
 // ═══════════════════════════════════════════════════════════════════
 
 const CRYPTOCOMPARE_NEWS = 'https://min-api.cryptocompare.com/data/v2/news/';
-const FINBERT_URL        = 'https://api-inference.huggingface.co/models/ProsusAI/finbert';
 const SENT_TTL           = 5 * 60_000;
 
 const state = {
@@ -99,46 +98,71 @@ async function fetchCoinCommunity(coinId) {
 }
 
 async function fetchCryptoNews(sym) {
-  const url = `${CRYPTOCOMPARE_NEWS}?lang=EN&categories=${sym},Crypto&sortOrder=latest&limit=5`;
+  const url = `${CRYPTOCOMPARE_NEWS}?lang=EN&categories=${sym},Crypto&sortOrder=latest&limit=10`;
   return apiFetch(url, `news-${sym}`, SENT_TTL);
 }
 
-async function classifyFinBERT(headlines) {
-  const ctrl  = new AbortController();
-  // 60 s — HuggingFace free tier can take ~20–40 s to warm the model;
-  // wait_for_model:true tells the API to block until it's ready instead of
-  // immediately returning {"error":"Model is currently loading"}.
-  const timer = setTimeout(() => ctrl.abort(), 60_000);
-  try {
-    const res = await fetch(FINBERT_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputs: headlines, options: { wait_for_model: true } }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const data = await res.json();
-    return data?.error ? null : data;
-  } catch {
-    return null;
-  }
-}
+// Client-side financial keyword sentiment — no external API, always works.
+function analyzeHeadlineSentiment(headlines) {
+  const POS = new Set([
+    'rally','rallied','rallying','surge','surged','surging','bullish','bull',
+    'gain','gains','gained','soar','soared','soaring','rise','risen','rising',
+    'jumped','jump','jumps','climb','climbed','climbing','recover','recovered',
+    'recovery','breakout','breakthrough','adoption','mainstream','institutional',
+    'invest','investment','partnership','integration','launch','launched',
+    'approve','approval','approved','legal','legalize','legalized','regulated',
+    'secure','stability','stable','growth','growing','demand','innovation',
+    'positive','optimistic','confident','strong','boom','booming','milestone',
+    'increase','increased','impressive','achievement','opportunity','success',
+    'successful','profit','profits','profitable','outperform','upgrade','buy',
+    'accumulate','inflow','inflows','etf','momentum','higher','high','green',
+    'pumped','pumping','support','trust','optimism','upside','record','ath',
+    'all-time','peak','expand','expanding','expansion','partnership','integrate',
+    'boost','boosted','boosting','accelerate','accelerating','grow','upward',
+    'thrive','thriving','flourish','strengthen','strengthening','rebound',
+    'rebounding','attract','attracting','improving','improved','improve','new',
+    'winning','win','winner','best','top','ahead','positive','healthy',
+  ]);
 
-function parseFinBERT(data) {
-  if (!Array.isArray(data)) return null;
-  const results = Array.isArray(data[0]) ? data : [data];
-  let pos = 0, neg = 0, neu = 0, count = 0;
-  for (const r of results) {
-    if (!Array.isArray(r)) continue;
-    r.forEach(({ label, score }) => {
-      if (label === 'positive') pos += score;
-      else if (label === 'negative') neg += score;
-      else neu += score;
-    });
-    count++;
+  const NEG = new Set([
+    'crash','crashed','crashing','dump','dumped','dumping','drop','dropped',
+    'dropping','plunge','plunged','plunging','bear','bearish','decline',
+    'declined','declining','fall','fell','falling','selloff','sell-off',
+    'hack','hacked','hacking','exploit','exploited','fraud','scam','ponzi',
+    'ban','banned','banning','restrict','restricted','restriction','fine',
+    'fined','penalty','penalties','investigation','investigate','lawsuit',
+    'sued','sue','liquidation','liquidated','insolvent','bankrupt','bankruptcy',
+    'fud','fear','concern','concerns','warning','warn','warned','threat',
+    'threatened','crisis','collapse','collapsed','collapsing','fail','failed',
+    'failure','loss','losses','lost','risk','risky','dangerous','danger',
+    'problem','problems','suspect','controversial','illegal','crime','criminal',
+    'breach','vulnerability','outflow','outflows','correction','bloodbath',
+    'stolen','theft','clampdown','shutdown','suspended','suspension','frozen',
+    'contagion','implosion','scandal','overvalued','bubble','downturn',
+    'pessimistic','lower','low','red','down','tumble','tumbled','slump',
+    'slumped','nosedive','sank','sink','wipeout','wiped','plummet','plummeted',
+    'lose','losing','loser','worst','weak','weakening','weaken','trouble',
+    'troubled','hurting','hurt','negative','bad','worse','worst','ugly',
+    'collapse','pressure','pressured','struggling','struggle','struggles',
+  ]);
+
+  if (!headlines.length) return null;
+
+  let pos = 0, neg = 0, neu = 0;
+  for (const h of headlines) {
+    const words = h.toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/);
+    let p = 0, n = 0;
+    for (const w of words) {
+      if (POS.has(w)) p++;
+      if (NEG.has(w)) n++;
+    }
+    if (p > n)      pos++;
+    else if (n > p) neg++;
+    else            neu++;
   }
-  return count ? { positive: pos / count, negative: neg / count, neutral: neu / count } : null;
+
+  const total = headlines.length;
+  return { positive: pos / total, neutral: neu / total, negative: neg / total };
 }
 
 let _sentGen = 0;
@@ -158,36 +182,23 @@ async function loadSentiment(coinId) {
   const fgData   = fgRes.status  === 'fulfilled' ? fgRes.value?.data : null;
   const commData = commRes.status === 'fulfilled' ? commRes.value     : null;
 
+  let newsItems = [];
+  try {
+    const newsRes = await fetchCryptoNews(sym);
+    newsItems = (newsRes?.Data || []).slice(0, 10);
+  } catch { /* ignore */ }
+
+  if (gen !== _sentGen) return;
+
+  const headlines = newsItems.map(n => n.title).filter(Boolean);
   state.sentiment = {
     fg:        fgData,
     community: commData ? {
       up:   commData.sentiment_votes_up_percentage,
       down: commData.sentiment_votes_down_percentage,
     } : null,
-    finbert:   null,
-    headlines: [],
-    finbertLoading: true,
-  };
-  try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
-
-  let newsItems = [];
-  try {
-    const newsRes = await fetchCryptoNews(sym);
-    newsItems = (newsRes?.Data || []).slice(0, 5);
-  } catch { /* ignore */ }
-
-  let finbert = null;
-  if (newsItems.length) {
-    finbert = await classifyFinBERT(newsItems.map(n => n.title).filter(Boolean)).catch(() => null);
-  }
-
-  if (gen !== _sentGen) return;
-
-  state.sentiment = {
-    ...state.sentiment,
-    finbert:        parseFinBERT(finbert),
-    headlines:      newsItems.map(n => n.title),
-    finbertLoading: false,
+    newsSentiment: analyzeHeadlineSentiment(headlines),
+    headlines,
   };
   try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
 }
@@ -295,38 +306,37 @@ function renderSentimentCard(data) {
     commHtml = `<div class="sent-section-label">Community</div><div class="sent-unavail">Unavailable</div>`;
   }
 
-  // ── FinBERT News Sentiment ──
+  // ── News Sentiment (client-side keyword analysis) ──
   let fbHtml;
-  if (data.finbert) {
-    const pos = (data.finbert.positive * 100).toFixed(0);
-    const neu = (data.finbert.neutral  * 100).toFixed(0);
-    const neg = (data.finbert.negative * 100).toFixed(0);
-    const cls = data.finbert.positive > 0.55 ? 'green' : data.finbert.negative > 0.55 ? 'red' : 'neutral';
-    const overall = data.finbert.positive > 0.55 ? 'Positive' : data.finbert.negative > 0.55 ? 'Negative' : 'Neutral';
-    const headlineHtml = data.headlines.length ? data.headlines.slice(0, 3)
-      .map(h => `<div class="fb-headline">• ${h.length > 90 ? h.slice(0, 87) + '…' : h}</div>`).join('') : '';
+  const ns = data.newsSentiment;
+  if (ns) {
+    const pos = (ns.positive * 100).toFixed(0);
+    const neu = (ns.neutral  * 100).toFixed(0);
+    const neg = (ns.negative * 100).toFixed(0);
+    const cls = ns.positive > 0.5 ? 'green' : ns.negative > 0.5 ? 'red' : 'neutral';
+    const overall = ns.positive > 0.5 ? 'Positive' : ns.negative > 0.5 ? 'Negative' : 'Neutral';
+    const headlineHtml = data.headlines.slice(0, 4)
+      .map(h => `<div class="fb-headline">• ${h.length > 95 ? h.slice(0, 92) + '…' : h}</div>`).join('');
 
-    fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI · ${data.headlines.length} headlines</span></div>
+    fbHtml = `
+      <div class="sent-section-label">News Sentiment <span class="sent-src">Keyword AI · ${data.headlines.length} headlines</span></div>
       <div class="fb-bars">
         <div class="fb-row"><span class="fb-lbl green">Positive</span><div class="fb-track"><div class="fb-fill green" style="width:${pos}%"></div></div><span class="fb-pct">${pos}%</span></div>
         <div class="fb-row"><span class="fb-lbl neutral-text">Neutral</span><div class="fb-track"><div class="fb-fill neutral" style="width:${neu}%"></div></div><span class="fb-pct">${neu}%</span></div>
         <div class="fb-row"><span class="fb-lbl red">Negative</span><div class="fb-track"><div class="fb-fill red" style="width:${neg}%"></div></div><span class="fb-pct">${neg}%</span></div>
       </div>
-      ${badge(`Overall ${overall} — ${pos}% positive, ${neg}% negative across recent headlines`, cls)}
+      ${badge(`Overall ${overall} — ${pos}% positive, ${neg}% negative across ${data.headlines.length} headlines`, cls)}
       ${headlineHtml ? `<div class="fb-headlines">${headlineHtml}</div>` : ''}`;
-  } else if (data.finbertLoading) {
-    fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
-      <div class="sent-loading" style="padding:6px 0"><div class="spin" style="width:14px;height:14px;border-width:2px"></div><span>Loading AI model — first load takes ~20 s, please wait…</span></div>`;
   } else {
-    fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
-      <div class="sent-unavail">Model warming up — reload the page in 20 seconds to try again</div>`;
+    fbHtml = `<div class="sent-section-label">News Sentiment</div>
+      <div class="sent-unavail">No recent headlines available</div>`;
   }
 
   card.innerHTML = `
     <h3 class="card-heading">Market Sentiment <span class="heading-sub">— News · Community · Fear &amp; Greed</span></h3>
     <div class="sent-top-grid">
-      <div class="sent-block">${fgHtml}</div>
-      <div class="sent-block">${commHtml}</div>
+      <div class="sent-block sent-block-fg">${fgHtml}</div>
+      <div class="sent-block sent-block-comm">${commHtml}</div>
     </div>
     <div class="sent-block sent-block-full">${fbHtml}</div>`;
 }
@@ -1094,26 +1104,21 @@ function init() {
 async function initFirebase() {
   if (typeof firebase === 'undefined') return;
   if (!BACKEND_URL) {
+    // Backend URL not configured — show a disabled sign-in button
     renderAuthUI(null, /* disabled */ true);
     return;
   }
-  // Show a disabled sign-in button immediately so the auth bar is never blank.
-  // Render's free tier can take 30–60 s to wake from sleep — without this the
-  // button doesn't appear until the fetch resolves (or times out).
-  renderAuthUI(null, /* disabled */ true);
-
   let config;
   try {
-    const ctrl  = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 20_000);
-    const res   = await fetch(`${BACKEND_URL}/firebase-config`, { signal: ctrl.signal });
-    clearTimeout(timer);
+    const res = await fetch(`${BACKEND_URL}/firebase-config`);
     config = await res.json();
   } catch (e) {
     console.warn('Could not fetch Firebase config:', e.message);
+    renderAuthUI(null, /* disabled */ true);
     return;
   }
   if (!config?.apiKey) {
+    renderAuthUI(null, /* disabled */ true);
     return;
   }
   try {

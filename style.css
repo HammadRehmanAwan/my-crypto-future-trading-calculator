@@ -954,36 +954,50 @@ input, select, button { font-family: inherit; }
 .sent-section-label {
   font-size: 10px; font-weight: 700; letter-spacing: .08em;
   text-transform: uppercase; color: var(--text-lo);
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
 }
 .sent-src {
   font-weight: 400; text-transform: none; letter-spacing: 0;
-  color: var(--border2); margin-left: 4px;
+  color: var(--border2); margin-left: 4px; font-size: 9px;
 }
 
 /* Top two-column grid: F&G + Community */
 .sent-top-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
-  margin-bottom: 16px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 0;
+  margin-bottom: 0;
+  border: 1px solid var(--border); border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.sent-block-fg {
+  padding: 14px 16px;
+  border-right: 1px solid var(--border);
+}
+.sent-block-comm {
+  padding: 14px 16px;
+  display: flex; flex-direction: column; justify-content: flex-start;
 }
 @media (max-width: 520px) {
   .sent-top-grid { grid-template-columns: 1fr; }
+  .sent-block-fg { border-right: none; border-bottom: 1px solid var(--border); }
 }
 
-.sent-block { }
 .sent-block-full {
-  border-top: 1px solid var(--border); padding-top: 14px;
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 14px 16px;
 }
 
 /* Fear & Greed arc gauge */
 .fg-arc-outer {
   display: flex; justify-content: center;
-  margin: 2px 0 4px;
+  margin: 4px 0 6px;
 }
-.fg-arc-svg { width: 100%; max-width: 180px; height: auto; overflow: visible; }
+.fg-arc-svg { width: 100%; max-width: 190px; height: auto; overflow: visible; }
 .fg-bottom-row {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 8px;
-  margin-top: 2px; margin-bottom: 8px;
+  margin-top: 4px; margin-bottom: 8px;
 }
 .fg-spark {
   display: flex; align-items: flex-end; gap: 2px; height: 28px; flex: 1;
@@ -993,36 +1007,36 @@ input, select, button { font-family: inherit; }
 
 /* Community bars */
 .comm-bar-row {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
 }
 .comm-side { font-size: 10px; font-weight: 700; width: 28px; flex-shrink: 0; }
 .comm-track {
-  flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
+  flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden;
 }
-.comm-fill { height: 100%; border-radius: 3px; transition: width .5s; }
-.comm-fill.green { background: #00E887; }
-.comm-fill.red   { background: #FF3D3D; }
-.comm-pct { font-size: 11px; width: 36px; text-align: right; flex-shrink: 0; }
+.comm-fill { height: 100%; border-radius: 4px; transition: width .5s; }
+.comm-fill.green { background: linear-gradient(90deg, #00E887, #00c97a); }
+.comm-fill.red   { background: linear-gradient(90deg, #FF3D3D, #e02020); }
+.comm-pct { font-size: 12px; font-weight: 600; width: 38px; text-align: right; flex-shrink: 0; }
 
-/* FinBERT bars */
-.fb-bars { margin-bottom: 8px; }
+/* News Sentiment bars */
+.fb-bars { margin-bottom: 10px; }
 .fb-row {
-  display: flex; align-items: center; gap: 6px; margin-bottom: 5px;
+  display: flex; align-items: center; gap: 8px; margin-bottom: 7px;
 }
-.fb-lbl { font-size: 10px; font-weight: 600; width: 52px; flex-shrink: 0; }
+.fb-lbl { font-size: 10px; font-weight: 700; width: 54px; flex-shrink: 0; letter-spacing: .03em; }
 .fb-track {
-  flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden;
+  flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden;
 }
-.fb-fill { height: 100%; border-radius: 3px; transition: width .6s; }
-.fb-fill.green   { background: #00E887; }
-.fb-fill.neutral { background: #F7C948; }
-.fb-fill.red     { background: #FF3D3D; }
-.fb-pct { font-size: 11px; width: 30px; text-align: right; flex-shrink: 0; }
+.fb-fill { height: 100%; border-radius: 4px; transition: width .6s; }
+.fb-fill.green   { background: linear-gradient(90deg, #00E887, #00c97a); }
+.fb-fill.neutral { background: linear-gradient(90deg, #F7C948, #e0aa20); }
+.fb-fill.red     { background: linear-gradient(90deg, #FF3D3D, #e02020); }
+.fb-pct { font-size: 11px; font-weight: 600; width: 32px; text-align: right; flex-shrink: 0; }
 
 .fb-headlines {
-  margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
 }
 .fb-headline {
-  font-size: 11px; color: var(--text-lo); line-height: 1.5;
+  font-size: 11px; color: var(--text-lo); line-height: 1.6;
   padding: 2px 0;
 }
