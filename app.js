@@ -31,11 +31,14 @@ const COINS = {
 const TICKER_IDS = ['bitcoin','ethereum','binancecoin','solana','ripple','cardano','avalanche-2'];
 const BASE = 'https://api.coingecko.com/api/v3';
 
-// ─── FIREBASE CONFIG ────────────────────────────────────────────────
-// Credentials are served from the backend so they never appear in source.
-// Set BACKEND_URL to wherever app.py is deployed (Render, HuggingFace, etc.)
-// and add the seven FIREBASE_* environment variables on that server.
-const BACKEND_URL = 'https://my-crypto-future-trading-calculator.onrender.com';
+// ─── BACKEND URL ────────────────────────────────────────────────────
+// When running on HF Space the page is served by the same FastAPI process
+// that also exposes /firebase-config and /news, so we use the current origin.
+// When running on GitHub Pages we point at the Render deployment.
+const _HF_ORIGIN = 'https://hammadrehman-crypto-futures-calculator.hf.space';
+const BACKEND_URL = (location.origin === _HF_ORIGIN)
+  ? _HF_ORIGIN
+  : 'https://my-crypto-future-trading-calculator.onrender.com';
 // ────────────────────────────────────────────────────────────────────
 
 let _db   = null;

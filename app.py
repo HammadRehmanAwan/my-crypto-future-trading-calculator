@@ -548,13 +548,38 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
     """)
 
 # ──────────────────────────────────────────────────────────────────────────────
-# FASTAPI WRAPPER — serves the FutureX HTML frontend at / and Gradio at /ai
+# FASTAPI WRAPPER — serves the FutureX HTML frontend at /, Gradio AI at /ai,
+# and Firebase config at /firebase-config (so the frontend works on HF Space).
 # ──────────────────────────────────────────────────────────────────────────────
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 
 _fastapi = FastAPI()
+
+_fastapi.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://hammadrehmanawan.github.io",
+        "https://hammadrehman-crypto-futures-calculator.hf.space",
+    ],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
+
+
+@_fastapi.get("/firebase-config", include_in_schema=False)
+async def _firebase_config():
+    return JSONResponse({
+        "apiKey":            os.environ.get("FIREBASE_API_KEY", ""),
+        "authDomain":        os.environ.get("FIREBASE_AUTH_DOMAIN", ""),
+        "projectId":         os.environ.get("FIREBASE_PROJECT_ID", ""),
+        "storageBucket":     os.environ.get("FIREBASE_STORAGE_BUCKET", ""),
+        "messagingSenderId": os.environ.get("FIREBASE_MESSAGING_SENDER_ID", ""),
+        "appId":             os.environ.get("FIREBASE_APP_ID", ""),
+        "measurementId":     os.environ.get("FIREBASE_MEASUREMENT_ID", ""),
+    })
 
 
 @_fastapi.get("/", include_in_schema=False)
@@ -578,7 +603,7 @@ async def _favicon():
     return FileResponse("favicon.svg")
 
 
-# Mount Gradio AI calculator at /ai
+# Gradio AI calculator at /ai  (does NOT override the HTML frontend at /)
 app = gr.mount_gradio_app(_fastapi, demo, path="/ai")
 
 if __name__ == "__main__":
