@@ -233,13 +233,12 @@ function renderSentimentCard(data) {
       : 'Extreme greed — corrections often follow (contrarian sell)';
     const sigCls = cur <= 44 ? 'green' : cur <= 55 ? 'neutral' : 'red';
 
-    // Arc gauge: semicircle left→top→right, value fills from left
-    const gR = 60;
-    const arcEndDeg = 180 - (cur / 100 * 180);
-    const arcEndRad = arcEndDeg * Math.PI / 180;
-    const arcEx = (80 + gR * Math.cos(arcEndRad)).toFixed(1);
-    const arcEy = (80 - gR * Math.sin(arcEndRad)).toFixed(1);
-    const largeArc = cur > 50 ? 1 : 0;
+    // Arc gauge: center (100,100) R=80, semicircle left→top→right
+    // large-arc is always 0: the filled arc (CCW from 180° to endAngle)
+    // is always ≤180° for any value 0–100, so the major-arc flag is never needed.
+    const endAngle = Math.PI * (1 - cur / 100);
+    const gEx = (100 + 80 * Math.cos(endAngle)).toFixed(1);
+    const gEy = (100 - 80 * Math.sin(endAngle)).toFixed(1);
 
     const sparkBars = hist.map(d => {
       const v = parseInt(d.value);
@@ -250,23 +249,27 @@ function renderSentimentCard(data) {
 
     fgHtml = `<div class="sent-section-label">Fear &amp; Greed <span class="sent-src">alternative.me</span></div>
       <div class="fg-arc-outer">
-        <svg viewBox="0 0 160 92" xmlns="http://www.w3.org/2000/svg" class="fg-arc-svg">
+        <svg viewBox="0 0 200 115" xmlns="http://www.w3.org/2000/svg" class="fg-arc-svg">
           <defs>
-            <linearGradient id="fgg" x1="20" y1="0" x2="140" y2="0" gradientUnits="userSpaceOnUse">
+            <linearGradient id="fgg" x1="20" y1="0" x2="180" y2="0" gradientUnits="userSpaceOnUse">
               <stop offset="0%"   stop-color="#FF3D3D"/>
               <stop offset="44%"  stop-color="#F7C948"/>
               <stop offset="100%" stop-color="#00E887"/>
             </linearGradient>
           </defs>
-          <path d="M 20 80 A 60 60 0 0 0 140 80" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round" opacity="0.18"/>
-          ${cur > 0 ? `<path d="M 20 80 A 60 60 0 ${largeArc} 0 ${arcEx} ${arcEy}" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round"/>` : ''}
-          ${cur > 0 ? `<circle cx="${arcEx}" cy="${arcEy}" r="5" fill="${fillC}" stroke="#0F1828" stroke-width="2"/>` : ''}
-          <circle cx="20" cy="80" r="3.5" fill="#FF3D3D" opacity="0.4"/>
-          <circle cx="140" cy="80" r="3.5" fill="#00E887" opacity="0.4"/>
-          <text x="80" y="66" text-anchor="middle" font-size="30" font-weight="800" fill="${fillC}" font-family="JetBrains Mono,monospace">${cur}</text>
-          <text x="80" y="79" text-anchor="middle" font-size="10" font-weight="700" fill="${fillC}" letter-spacing="0.06em" font-family="Inter,sans-serif">${label.toUpperCase()}</text>
-          <text x="22" y="89" text-anchor="start" font-size="8" fill="#FF3D3D" opacity="0.6" font-family="Inter,sans-serif">Fear</text>
-          <text x="138" y="89" text-anchor="end" font-size="8" fill="#00E887" opacity="0.6" font-family="Inter,sans-serif">Greed</text>
+          <!-- Track -->
+          <path d="M 20 100 A 80 80 0 0 0 180 100" fill="none" stroke="url(#fgg)" stroke-width="16" stroke-linecap="round" opacity="0.15"/>
+          <!-- Filled arc -->
+          ${cur > 0 ? `<path d="M 20 100 A 80 80 0 0 0 ${gEx} ${gEy}" fill="none" stroke="url(#fgg)" stroke-width="16" stroke-linecap="round"/>` : ''}
+          <!-- Value dot -->
+          ${cur > 0 ? `<circle cx="${gEx}" cy="${gEy}" r="8" fill="${fillC}" stroke="#0F1828" stroke-width="3"/>` : ''}
+          <!-- Number -->
+          <text x="100" y="76" text-anchor="middle" font-size="34" font-weight="800" fill="${fillC}" font-family="JetBrains Mono,monospace">${cur}</text>
+          <!-- Label -->
+          <text x="100" y="93" text-anchor="middle" font-size="9.5" font-weight="700" fill="${fillC}" letter-spacing="0.08em" font-family="Inter,sans-serif">${label.toUpperCase()}</text>
+          <!-- Axis labels -->
+          <text x="20" y="112" text-anchor="middle" font-size="9" fill="#FF3D3D" opacity="0.8" font-family="Inter,sans-serif">Fear</text>
+          <text x="180" y="112" text-anchor="middle" font-size="9" fill="#00E887" opacity="0.8" font-family="Inter,sans-serif">Greed</text>
         </svg>
       </div>
       <div class="fg-bottom-row">

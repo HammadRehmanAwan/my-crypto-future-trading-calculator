@@ -992,9 +992,9 @@ input, select, button { font-family: inherit; }
 /* Fear & Greed arc gauge */
 .fg-arc-outer {
   display: flex; justify-content: center;
-  margin: 4px 0 6px;
+  margin: 6px 0 8px;
 }
-.fg-arc-svg { width: 100%; max-width: 190px; height: auto; overflow: visible; }
+.fg-arc-svg { width: 100%; height: auto; }
 .fg-bottom-row {
   display: flex; align-items: flex-end; justify-content: space-between; gap: 8px;
   margin-top: 4px; margin-bottom: 8px;
