@@ -97,11 +97,10 @@ async function fetchCoinCommunity(coinId) {
   return apiFetch(url, `comm-${coinId}`, SENT_TTL);
 }
 
-// Fetch broad crypto + regulation news (no coin filter — avoids category issues)
+// Fetch news via our backend proxy (avoids CryptoCompare browser key requirement)
 async function fetchCryptoNews() {
-  const cats = 'BTC,ETH,SOL,XRP,BNB,Crypto,Regulation,Mining,Technology';
-  const url = `${CRYPTOCOMPARE_NEWS}?lang=EN&categories=${cats}&sortOrder=latest&limit=30`;
-  return apiFetch(url, 'news-crypto', SENT_TTL);
+  if (!BACKEND_URL) return null;
+  return apiFetch(`${BACKEND_URL}/news`, 'news-proxy', SENT_TTL);
 }
 
 // Module-level sentiment lexicon shared by all scoring functions
@@ -192,12 +191,13 @@ async function loadSentiment(coinId) {
 
   let newsItems = [];
   try {
-    const newsRes = await fetchCryptoNews();
-    const raw = newsRes?.Data;
-    if (Array.isArray(raw)) {
+    const raw = await fetchCryptoNews();
+    if (Array.isArray(raw) && raw.length) {
       const cutoff = Math.floor(Date.now() / 1000) - 3 * 24 * 3600;
-      newsItems = raw
-        .filter(n => n.published_on >= cutoff)
+      const recent = raw.filter(n => n.published_on >= cutoff);
+      // If 3-day filter leaves nothing (HN fallback uses 7-day window), take top 6 anyway
+      const pool = recent.length >= 3 ? recent : raw;
+      newsItems = pool
         .slice(0, 8)
         .map(n => ({ ...n, _sent: classifyHeadline(n.title || '') }));
     }
