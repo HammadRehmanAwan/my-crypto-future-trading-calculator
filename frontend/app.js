@@ -233,13 +233,6 @@ function renderSentimentCard(data) {
       : 'Extreme greed — corrections often follow (contrarian sell)';
     const sigCls = cur <= 44 ? 'green' : cur <= 55 ? 'neutral' : 'red';
 
-    // Arc gauge: center (100,100) R=80, semicircle left→top→right
-    // large-arc is always 0: the filled arc (CCW from 180° to endAngle)
-    // is always ≤180° for any value 0–100, so the major-arc flag is never needed.
-    const endAngle = Math.PI * (1 - cur / 100);
-    const gEx = (100 + 80 * Math.cos(endAngle)).toFixed(1);
-    const gEy = (100 - 80 * Math.sin(endAngle)).toFixed(1);
-
     const sparkBars = hist.map(d => {
       const v = parseInt(d.value);
       const h = Math.max(4, Math.round(v / 100 * 28));
@@ -247,34 +240,26 @@ function renderSentimentCard(data) {
       return `<div class="fgs-bar" style="height:${h}px;background:${c}" title="${d.value_classification}: ${v}"></div>`;
     }).join('');
 
-    fgHtml = `<div class="sent-section-label">Fear &amp; Greed <span class="sent-src">alternative.me</span></div>
-      <div class="fg-arc-outer">
-        <svg viewBox="0 0 200 115" xmlns="http://www.w3.org/2000/svg" class="fg-arc-svg">
-          <defs>
-            <linearGradient id="fgg" x1="20" y1="0" x2="180" y2="0" gradientUnits="userSpaceOnUse">
-              <stop offset="0%"   stop-color="#FF3D3D"/>
-              <stop offset="44%"  stop-color="#F7C948"/>
-              <stop offset="100%" stop-color="#00E887"/>
-            </linearGradient>
-          </defs>
-          <!-- Track -->
-          <path d="M 20 100 A 80 80 0 0 0 180 100" fill="none" stroke="url(#fgg)" stroke-width="16" stroke-linecap="round" opacity="0.15"/>
-          <!-- Filled arc -->
-          ${cur > 0 ? `<path d="M 20 100 A 80 80 0 0 0 ${gEx} ${gEy}" fill="none" stroke="url(#fgg)" stroke-width="16" stroke-linecap="round"/>` : ''}
-          <!-- Value dot -->
-          ${cur > 0 ? `<circle cx="${gEx}" cy="${gEy}" r="8" fill="${fillC}" stroke="#0F1828" stroke-width="3"/>` : ''}
-          <!-- Number -->
-          <text x="100" y="76" text-anchor="middle" font-size="34" font-weight="800" fill="${fillC}" font-family="JetBrains Mono,monospace">${cur}</text>
-          <!-- Label -->
-          <text x="100" y="93" text-anchor="middle" font-size="9.5" font-weight="700" fill="${fillC}" letter-spacing="0.08em" font-family="Inter,sans-serif">${label.toUpperCase()}</text>
-          <!-- Axis labels -->
-          <text x="20" y="112" text-anchor="middle" font-size="9" fill="#FF3D3D" opacity="0.8" font-family="Inter,sans-serif">Fear</text>
-          <text x="180" y="112" text-anchor="middle" font-size="9" fill="#00E887" opacity="0.8" font-family="Inter,sans-serif">Greed</text>
-        </svg>
+    fgHtml = `
+      <div class="sent-section-label">Fear &amp; Greed <span class="sent-src">alternative.me</span></div>
+      <div class="fg-num-row">
+        <div class="fg-big-num" style="color:${fillC}">${cur}</div>
+        <div class="fg-num-info">
+          <div class="fg-classify" style="color:${fillC}">${label}</div>
+          <div class="fg-trend-text">${trend}</div>
+        </div>
       </div>
-      <div class="fg-bottom-row">
+      <div class="fg-bar-wrap">
+        <div class="fg-bar-track">
+          <div class="fg-bar-indicator" style="left:${cur}%"></div>
+        </div>
+        <div class="fg-bar-axis">
+          <span style="color:#FF3D3D">Fear</span>
+          <span style="color:#00E887">Greed</span>
+        </div>
+      </div>
+      <div class="fg-spark-row">
         <div class="fg-spark">${sparkBars}</div>
-        <div class="fg-trend">${trend}</div>
       </div>
       ${badge(sigText, sigCls)}`;
   } else {
