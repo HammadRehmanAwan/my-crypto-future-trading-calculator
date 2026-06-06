@@ -593,6 +593,19 @@ function setCooldown(coinId) {
   localStorage.setItem(`alertCD_${coinId}`, String(Date.now()));
 }
 
+// Daily send-count tracking — resets automatically each calendar day.
+function _alertDayKey() {
+  const d = new Date();
+  return `alertDay_${d.getFullYear()}_${d.getMonth()}_${d.getDate()}`;
+}
+function _alertDailyCount() {
+  return parseInt(localStorage.getItem(_alertDayKey()) || '0');
+}
+function _alertDailyBump() {
+  const k = _alertDayKey();
+  localStorage.setItem(k, String(parseInt(localStorage.getItem(k) || '0') + 1));
+}
+
 function checkVolatilityConditions(coinId, coinName, currPrice, rsi, change24h, bbWidth) {
   const s = getAlertSettings();
   if (!s.enabled || !s.email) return;
@@ -619,6 +632,7 @@ async function sendVolatilityEmail(s, coinName, price, reasons, coinId) {
   if (typeof emailjs === 'undefined') {
     showAlertStatus('EmailJS library not loaded — check your internet connection.', 'error'); return;
   }
+  if (_alertDailyCount() >= 5) return;
   try {
     await emailjs.send(EJS_SERVICE_ID, EJS_TEMPLATE_ID, {
       to_email:      s.email,
@@ -628,6 +642,7 @@ async function sendVolatilityEmail(s, coinName, price, reasons, coinId) {
       alert_time:    new Date().toLocaleString(),
     }, EJS_PUBLIC_KEY);
     if (coinId !== '_test') setCooldown(coinId);
+    _alertDailyBump();
     showAlertStatus(`Alert email sent for ${coinName}!`, 'success');
   } catch (e) {
     showAlertStatus(`Email failed: ${e?.text || e?.message || 'Unknown error — is your email address correct?'}`, 'error');
