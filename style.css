@@ -989,21 +989,50 @@ input, select, button { font-family: inherit; }
   padding: 14px 16px;
 }
 
-/* Fear & Greed arc gauge */
-.fg-arc-outer {
-  display: flex; justify-content: center;
-  margin: 6px 0 8px;
+/* Fear & Greed — number row */
+.fg-num-row {
+  display: flex; align-items: center; gap: 14px;
+  margin: 10px 0 14px;
 }
-.fg-arc-svg { width: 100%; height: auto; }
-.fg-bottom-row {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 8px;
-  margin-top: 4px; margin-bottom: 8px;
+.fg-big-num {
+  font-size: 52px; font-weight: 800;
+  font-family: var(--mono); line-height: 1; flex-shrink: 0;
 }
+.fg-num-info { flex: 1; min-width: 0; }
+.fg-classify {
+  font-size: 13px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase;
+  line-height: 1.2;
+}
+.fg-trend-text {
+  font-size: 11px; color: var(--text-lo); margin-top: 4px;
+}
+
+/* Gradient bar */
+.fg-bar-wrap { margin-bottom: 10px; }
+.fg-bar-track {
+  height: 10px;
+  background: linear-gradient(90deg, #FF3D3D 0%, #F7C948 44%, #00E887 100%);
+  border-radius: 5px; position: relative; margin-bottom: 5px;
+}
+.fg-bar-indicator {
+  position: absolute; top: -4px;
+  width: 4px; height: 18px;
+  background: #fff; border-radius: 2px;
+  transform: translateX(-50%);
+  box-shadow: 0 1px 5px rgba(0,0,0,.6);
+}
+.fg-bar-axis {
+  display: flex; justify-content: space-between;
+  font-size: 10px; font-weight: 600;
+}
+
+/* 7-day spark bars */
+.fg-spark-row { margin-bottom: 10px; }
 .fg-spark {
-  display: flex; align-items: flex-end; gap: 2px; height: 28px; flex: 1;
+  display: flex; align-items: flex-end; gap: 2px; height: 28px;
 }
 .fgs-bar { flex: 1; border-radius: 2px 2px 0 0; min-height: 4px; transition: height .3s; }
-.fg-trend { font-size: 11px; color: var(--text-lo); white-space: nowrap; }
 
 /* Community bars */
 .comm-bar-row {
