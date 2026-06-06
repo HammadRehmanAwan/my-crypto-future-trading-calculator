@@ -1094,21 +1094,26 @@ function init() {
 async function initFirebase() {
   if (typeof firebase === 'undefined') return;
   if (!BACKEND_URL) {
-    // Backend URL not configured — show a disabled sign-in button
     renderAuthUI(null, /* disabled */ true);
     return;
   }
+  // Show a disabled sign-in button immediately so the auth bar is never blank.
+  // Render's free tier can take 30–60 s to wake from sleep — without this the
+  // button doesn't appear until the fetch resolves (or times out).
+  renderAuthUI(null, /* disabled */ true);
+
   let config;
   try {
-    const res = await fetch(`${BACKEND_URL}/firebase-config`);
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20_000);
+    const res   = await fetch(`${BACKEND_URL}/firebase-config`, { signal: ctrl.signal });
+    clearTimeout(timer);
     config = await res.json();
   } catch (e) {
     console.warn('Could not fetch Firebase config:', e.message);
-    renderAuthUI(null, /* disabled */ true);
     return;
   }
   if (!config?.apiKey) {
-    renderAuthUI(null, /* disabled */ true);
     return;
   }
   try {
