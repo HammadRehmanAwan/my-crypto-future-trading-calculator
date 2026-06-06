@@ -31,18 +31,29 @@ const COINS = {
 const TICKER_IDS = ['bitcoin','ethereum','binancecoin','solana','ripple','cardano','avalanche-2'];
 const BASE = 'https://api.coingecko.com/api/v3';
 
+// ─── FIREBASE CONFIG ────────────────────────────────────────────────
+// Credentials are served from the backend so they never appear in source.
+// Set BACKEND_URL to wherever app.py is deployed (Render, HuggingFace, etc.)
+// and add the seven FIREBASE_* environment variables on that server.
+const BACKEND_URL = 'https://my-crypto-future-trading-calculator.onrender.com';
+// ────────────────────────────────────────────────────────────────────
+
+let _db   = null;
+let _auth = null;
+
 // ═══════════════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════════════
 
 const CRYPTOCOMPARE_NEWS = 'https://min-api.cryptocompare.com/data/v2/news/';
 const FINBERT_URL        = 'https://api-inference.huggingface.co/models/ProsusAI/finbert';
-const SENT_TTL           = 5 * 60_000; // 5-minute cache for sentiment data
+const SENT_TTL           = 5 * 60_000;
 
 const state = {
   coin: 'bitcoin', days: 30, direction: 'Long',
   prices: null, dates: null, chart: null, cache: {},
-  sentiment: null,
+  sentiment: null, lastUpdated: null, _autoRan: false,
+  user: null, alertSettings: {},
 };
 
 // ═══════════════════════════════════════════════════════════════════
@@ -94,12 +105,15 @@ async function fetchCryptoNews(sym) {
 
 async function classifyFinBERT(headlines) {
   const ctrl  = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), 12_000); // abort after 12 s
+  // 60 s — HuggingFace free tier can take ~20–40 s to warm the model;
+  // wait_for_model:true tells the API to block until it's ready instead of
+  // immediately returning {"error":"Model is currently loading"}.
+  const timer = setTimeout(() => ctrl.abort(), 60_000);
   try {
     const res = await fetch(FINBERT_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ inputs: headlines }),
+      body: JSON.stringify({ inputs: headlines, options: { wait_for_model: true } }),
       signal: ctrl.signal,
     });
     clearTimeout(timer);
@@ -113,7 +127,6 @@ async function classifyFinBERT(headlines) {
 
 function parseFinBERT(data) {
   if (!Array.isArray(data)) return null;
-  // Batch -> [[{label,score},...], ...], single -> [{label,score},...]
   const results = Array.isArray(data[0]) ? data : [data];
   let pos = 0, neg = 0, neu = 0, count = 0;
   for (const r of results) {
@@ -136,7 +149,6 @@ async function loadSentiment(coinId) {
   state.sentiment = null;
   renderSentimentCard(null);
 
-  // Phase 1: fast APIs (renders quickly)
   const [fgRes, commRes] = await Promise.allSettled([
     fetchFearGreed(),
     fetchCoinCommunity(coinId),
@@ -158,7 +170,6 @@ async function loadSentiment(coinId) {
   };
   try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
 
-  // Phase 2: slow FinBERT (updates card when ready)
   let newsItems = [];
   try {
     const newsRes = await fetchCryptoNews(sym);
@@ -181,7 +192,7 @@ async function loadSentiment(coinId) {
   try { renderSentimentCard(state.sentiment); } catch (e) { console.error('Sentiment render error:', e); }
 }
 
-// --- Render Sentiment Card ---
+// ─── Render Sentiment Card ───────────────────────────────────────────
 
 function renderSentimentCard(data) {
   const card = document.getElementById('sentimentCard');
@@ -193,7 +204,7 @@ function renderSentimentCard(data) {
     return;
   }
 
-  // Fear & Greed
+  // ── Fear & Greed ──
   let fgHtml;
   if (data.fg?.length) {
     const cur    = parseInt(data.fg[0].value);
@@ -202,15 +213,7 @@ function renderSentimentCard(data) {
     const diff   = prev != null ? cur - prev : 0;
     const trend  = prev != null ? (diff > 0 ? `↑ ${diff} from yesterday` : diff < 0 ? `↓ ${Math.abs(diff)} from yesterday` : 'Unchanged from yesterday') : '';
     const fillC  = cur <= 44 ? '#FF3D3D' : cur <= 55 ? '#F7C948' : '#00E887';
-    const valCls = cur <= 44 ? 'red' : cur <= 55 ? 'gold' : 'green';
     const hist   = [...data.fg].reverse();
-
-    const sparkBars = hist.map(d => {
-      const v = parseInt(d.value);
-      const h = Math.max(4, Math.round(v / 100 * 36));
-      const c = v <= 44 ? '#FF3D3D' : v <= 55 ? '#F7C948' : '#00E887';
-      return `<div class="fgs-bar" style="height:${h}px;background:${c}" title="${d.value_classification}: ${v}"></div>`;
-    }).join('');
 
     const sigText = cur <= 24 ? 'Extreme fear — historically strong buy signal (contrarian)'
       : cur <= 44 ? 'Market fearful — prices may be undervalued'
@@ -219,25 +222,52 @@ function renderSentimentCard(data) {
       : 'Extreme greed — corrections often follow (contrarian sell)';
     const sigCls = cur <= 44 ? 'green' : cur <= 55 ? 'neutral' : 'red';
 
-    fgHtml = `<div class="sent-section-label">Fear & Greed <span class="sent-src">alternative.me</span></div>
-      <div class="fg-main-row">
-        <div class="fg-val-block">
-          <div class="fg-number ${valCls}">${cur}</div>
-          <div class="fg-class ${valCls}">${label}</div>
-        </div>
-        <div class="fg-spark-wrap">
-          <div class="fg-spark">${sparkBars}</div>
-          <div class="fg-trend">${trend}</div>
-        </div>
+    // Arc gauge: semicircle left→top→right, value fills from left
+    const gR = 60;
+    const arcEndDeg = 180 - (cur / 100 * 180);
+    const arcEndRad = arcEndDeg * Math.PI / 180;
+    const arcEx = (80 + gR * Math.cos(arcEndRad)).toFixed(1);
+    const arcEy = (80 - gR * Math.sin(arcEndRad)).toFixed(1);
+    const largeArc = cur > 50 ? 1 : 0;
+
+    const sparkBars = hist.map(d => {
+      const v = parseInt(d.value);
+      const h = Math.max(4, Math.round(v / 100 * 28));
+      const c = v <= 44 ? '#FF3D3D' : v <= 55 ? '#F7C948' : '#00E887';
+      return `<div class="fgs-bar" style="height:${h}px;background:${c}" title="${d.value_classification}: ${v}"></div>`;
+    }).join('');
+
+    fgHtml = `<div class="sent-section-label">Fear &amp; Greed <span class="sent-src">alternative.me</span></div>
+      <div class="fg-arc-outer">
+        <svg viewBox="0 0 160 92" xmlns="http://www.w3.org/2000/svg" class="fg-arc-svg">
+          <defs>
+            <linearGradient id="fgg" x1="20" y1="0" x2="140" y2="0" gradientUnits="userSpaceOnUse">
+              <stop offset="0%"   stop-color="#FF3D3D"/>
+              <stop offset="44%"  stop-color="#F7C948"/>
+              <stop offset="100%" stop-color="#00E887"/>
+            </linearGradient>
+          </defs>
+          <path d="M 20 80 A 60 60 0 0 0 140 80" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round" opacity="0.18"/>
+          ${cur > 0 ? `<path d="M 20 80 A 60 60 0 ${largeArc} 0 ${arcEx} ${arcEy}" fill="none" stroke="url(#fgg)" stroke-width="8" stroke-linecap="round"/>` : ''}
+          ${cur > 0 ? `<circle cx="${arcEx}" cy="${arcEy}" r="5" fill="${fillC}" stroke="#0F1828" stroke-width="2"/>` : ''}
+          <circle cx="20" cy="80" r="3.5" fill="#FF3D3D" opacity="0.4"/>
+          <circle cx="140" cy="80" r="3.5" fill="#00E887" opacity="0.4"/>
+          <text x="80" y="66" text-anchor="middle" font-size="30" font-weight="800" fill="${fillC}" font-family="JetBrains Mono,monospace">${cur}</text>
+          <text x="80" y="79" text-anchor="middle" font-size="10" font-weight="700" fill="${fillC}" letter-spacing="0.06em" font-family="Inter,sans-serif">${label.toUpperCase()}</text>
+          <text x="22" y="89" text-anchor="start" font-size="8" fill="#FF3D3D" opacity="0.6" font-family="Inter,sans-serif">Fear</text>
+          <text x="138" y="89" text-anchor="end" font-size="8" fill="#00E887" opacity="0.6" font-family="Inter,sans-serif">Greed</text>
+        </svg>
       </div>
-      <div class="fg-gauge-track"><div class="fg-gauge-fill" style="width:${cur}%;background:${fillC}"></div></div>
-      <div class="fg-gauge-labels"><span>Extreme Fear</span><span>Neutral</span><span>Extreme Greed</span></div>
+      <div class="fg-bottom-row">
+        <div class="fg-spark">${sparkBars}</div>
+        <div class="fg-trend">${trend}</div>
+      </div>
       ${badge(sigText, sigCls)}`;
   } else {
-    fgHtml = `<div class="sent-section-label">Fear & Greed</div><div class="sent-unavail">Unavailable</div>`;
+    fgHtml = `<div class="sent-section-label">Fear &amp; Greed</div><div class="sent-unavail">Unavailable</div>`;
   }
 
-  // Community Sentiment
+  // ── Community Sentiment ──
   let commHtml;
   if (data.community?.up != null) {
     const up  = data.community.up.toFixed(1);
@@ -265,7 +295,7 @@ function renderSentimentCard(data) {
     commHtml = `<div class="sent-section-label">Community</div><div class="sent-unavail">Unavailable</div>`;
   }
 
-  // FinBERT News Sentiment
+  // ── FinBERT News Sentiment ──
   let fbHtml;
   if (data.finbert) {
     const pos = (data.finbert.positive * 100).toFixed(0);
@@ -286,14 +316,14 @@ function renderSentimentCard(data) {
       ${headlineHtml ? `<div class="fb-headlines">${headlineHtml}</div>` : ''}`;
   } else if (data.finbertLoading) {
     fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
-      <div class="sent-loading" style="padding:6px 0"><div class="spin" style="width:14px;height:14px;border-width:2px"></div><span>Fetching headlines and running AI analysis…</span></div>`;
+      <div class="sent-loading" style="padding:6px 0"><div class="spin" style="width:14px;height:14px;border-width:2px"></div><span>Loading AI model — first load takes ~20 s, please wait…</span></div>`;
   } else {
     fbHtml = `<div class="sent-section-label">News Sentiment <span class="sent-src">FinBERT AI</span></div>
       <div class="sent-unavail">Model warming up — reload the page in 20 seconds to try again</div>`;
   }
 
   card.innerHTML = `
-    <h3 class="card-heading">Market Sentiment <span class="heading-sub">— News · Community · Fear & Greed</span></h3>
+    <h3 class="card-heading">Market Sentiment <span class="heading-sub">— News · Community · Fear &amp; Greed</span></h3>
     <div class="sent-top-grid">
       <div class="sent-block">${fgHtml}</div>
       <div class="sent-block">${commHtml}</div>
@@ -418,16 +448,18 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
   });
   const allDates = [...dDates, ...fDates];
   const labels = allDates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+  // Full, human-readable dates for the tooltip title (e.g. "Mon, Jun 5 2026")
+  const fullLabels = allDates.map(d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }));
   const pad  = arr => [...arr.slice(-n), ...new Array(horizon).fill(null)];
   const fpad = arr => [...new Array(n).fill(null), ...arr];
   const datasets = [
-    { label: 'Price', data: pad(dPrices), borderColor: '#00D4FF', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, tension: 0.3, order: 1 },
+    { label: 'Price', data: pad(dPrices), borderColor: '#00D4FF', backgroundColor: 'transparent', borderWidth: 2, pointRadius: 0, pointHoverRadius: 5, tension: 0.3, order: 1 },
     { label: 'BB Upper', data: pad(bb.upper), borderColor: 'rgba(100,116,139,0.45)', backgroundColor: 'transparent', borderWidth: 1, borderDash: [4,3], pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'BB Mid', data: pad(bb.mid), borderColor: 'rgba(100,116,139,0.25)', backgroundColor: 'transparent', borderWidth: 1, pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'BB Lower', data: pad(bb.lower), borderColor: 'rgba(100,116,139,0.45)', backgroundColor: 'rgba(100,116,139,0.06)', fill: '-1', borderWidth: 1, borderDash: [4,3], pointRadius: 0, tension: 0.3, order: 3 },
     { label: 'Forecast CI High', data: fpad(forecast.high), borderColor: 'rgba(255,184,0,0.2)', backgroundColor: 'rgba(255,184,0,0.08)', fill: '+1', borderWidth: 1, pointRadius: 0, tension: 0.2, order: 4 },
     { label: 'Forecast CI Low',  data: fpad(forecast.low),  borderColor: 'rgba(255,184,0,0.2)', backgroundColor: 'transparent', borderWidth: 1, pointRadius: 0, tension: 0.2, order: 4 },
-    { label: 'Forecast (Trend)', data: fpad(forecast.median), borderColor: '#FFB800', backgroundColor: 'transparent', borderWidth: 2, borderDash: [6,3], pointRadius: 4, pointBackgroundColor: '#FFB800', tension: 0.2, order: 2 },
+    { label: 'Forecast (Trend)', data: fpad(forecast.median), borderColor: '#FFB800', backgroundColor: 'transparent', borderWidth: 2, borderDash: [6,3], pointRadius: 4, pointHoverRadius: 6, pointBackgroundColor: '#FFB800', tension: 0.2, order: 2 },
   ];
   const ctx = document.getElementById('priceChart').getContext('2d');
   state.chart = new Chart(ctx, {
@@ -442,7 +474,14 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
         tooltip: {
           backgroundColor: '#0F1828', borderColor: '#1A2540', borderWidth: 1,
           titleColor: '#00D4FF', bodyColor: '#CBD5E1', padding: 10,
+          displayColors: true, usePointStyle: true,
           callbacks: {
+            title: items => {
+              if (!items.length) return '';
+              const idx = items[0].dataIndex;
+              const isForecast = idx >= n;
+              return `${fullLabels[idx]}${isForecast ? '  ·  forecast' : ''}`;
+            },
             label: ctx => ctx.parsed.y == null ? null : ` ${ctx.dataset.label}: $${fmt(ctx.parsed.y)}`,
           },
         },
@@ -468,6 +507,26 @@ function fmtPct(v) { return v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed
 function badge(text, type) { return `<span class="badge badge-${type}">${text}</span>`; }
 
 // ═══════════════════════════════════════════════════════════════════
+// FRESHNESS INDICATOR  ("last updated X ago")
+// ═══════════════════════════════════════════════════════════════════
+
+function updateFreshness() {
+  const el = document.getElementById('freshness');
+  if (!el) return;
+  if (!state.lastUpdated) { el.textContent = ''; return; }
+  const secs = Math.round((Date.now() - state.lastUpdated) / 1000);
+  let txt;
+  if (secs < 5)        txt = 'Updated just now';
+  else if (secs < 60)  txt = `Updated ${secs}s ago`;
+  else {
+    const mins = Math.floor(secs / 60);
+    txt = `Updated ${mins}m ${secs % 60}s ago`;
+  }
+  el.innerHTML = `<span class="fresh-dot"></span>${txt}`;
+  el.className = 'freshness' + (secs > 120 ? ' stale' : '');
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // VOLATILITY ALERT SYSTEM
 // ═══════════════════════════════════════════════════════════════════
 
@@ -478,14 +537,21 @@ const SENSITIVITY_CFG = {
 };
 
 function getAlertSettings() {
-  try { return JSON.parse(localStorage.getItem('cryptoAlertSettings') || '{}'); }
-  catch { return {}; }
+  return state.alertSettings;
 }
-function persistAlertSettings(s) { localStorage.setItem('cryptoAlertSettings', JSON.stringify(s)); }
+
+function persistAlertSettings(s) {
+  state.alertSettings = s;
+  localStorage.setItem('cryptoAlertSettings', JSON.stringify(s));
+  if (_db && state.user) {
+    _db.collection('users').doc(state.user.uid).collection('data').doc('settings')
+      .set(s).catch(e => console.warn('Firestore write:', e.message));
+  }
+}
 
 function isOnCooldown(coinId) {
   const last = parseInt(localStorage.getItem(`alertCD_${coinId}`) || '0');
-  return Date.now() - last < 2 * 60 * 60 * 1000; // 2-hour cooldown per coin
+  return Date.now() - last < 2 * 60 * 60 * 1000;
 }
 function setCooldown(coinId) {
   localStorage.setItem(`alertCD_${coinId}`, String(Date.now()));
@@ -568,12 +634,12 @@ function startBackgroundAlertChecks() {
         const bb     = calcBollinger(prices);
         runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
       } catch { /* ignore per-coin errors */ }
-      await new Promise(r => setTimeout(r, 1200)); // stagger to respect rate limits
+      await new Promise(r => setTimeout(r, 1200));
     }
-  }, 5 * 60 * 1000); // every 5 minutes
+  }, 5 * 60 * 1000);
 }
 
-// Alert UI helpers (called from HTML)
+// ─── Alert UI helpers ───
 
 function showEmailjsHelp() {
   const el = document.getElementById('emailjsHelp');
@@ -587,13 +653,22 @@ function setAlertSensitivity(val) {
 }
 
 function saveAlerts() {
-  const email = document.getElementById('alertEmail').value.trim();
+  const email   = document.getElementById('alertEmail').value.trim();
+  const enabled = document.getElementById('alertEnabled').checked;
+  const consent = document.getElementById('gdprConsent')?.checked;
+
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     showAlertStatus('Please enter a valid email address.', 'error'); return;
   }
+  // GDPR: require explicit consent before storing an email address
+  if (email && !consent) {
+    showAlertStatus('Please tick the consent box before we store your email address.', 'error'); return;
+  }
   const s = {
-    enabled:     document.getElementById('alertEnabled').checked,
+    enabled,
     email,
+    consent: !!consent,
+    consentAt: consent ? new Date().toISOString() : null,
     sensitivity: document.querySelector('.thresh-btn.active')?.dataset?.t || 'moderate',
     watchCoins:  [...document.querySelectorAll('.watch-coin-cb:checked')].map(c => c.value),
   };
@@ -602,16 +677,35 @@ function saveAlerts() {
 }
 
 async function testAlert() {
+  const email   = document.getElementById('alertEmail').value.trim();
+  const consent = document.getElementById('gdprConsent')?.checked;
+  if (!email) { showAlertStatus('Enter your email address first.', 'error'); return; }
+  if (!consent) { showAlertStatus('Please tick the consent box before we send to your email.', 'error'); return; }
   saveAlerts();
   const s = getAlertSettings();
-  if (!s.email) { showAlertStatus('Enter your email address first.', 'error'); return; }
+  if (!s.email) return;
   await sendVolatilityEmail(s, 'Bitcoin (BTC) — TEST', 65000, ['This is a test alert. Your email setup is working correctly!'], '_test');
+}
+
+function forgetAlertData() {
+  state.alertSettings = {};
+  localStorage.removeItem('cryptoAlertSettings');
+  if (_db && state.user) {
+    _db.collection('users').doc(state.user.uid).collection('data').doc('settings')
+      .delete().catch(() => {});
+  }
+  document.getElementById('alertEmail').value = '';
+  document.getElementById('alertEnabled').checked = false;
+  const cb = document.getElementById('gdprConsent');
+  if (cb) cb.checked = false;
+  showAlertStatus('Your stored email and alert settings have been deleted.', 'success');
 }
 
 function initAlertUI() {
   const s = getAlertSettings();
   const container = document.getElementById('watchCoins');
   if (container) {
+    container.innerHTML = '';
     Object.entries(COINS).forEach(([id, c]) => {
       const checked = (s.watchCoins || ['bitcoin']).includes(id);
       const lbl = document.createElement('label');
@@ -622,6 +716,8 @@ function initAlertUI() {
   }
   if (s.email)    document.getElementById('alertEmail').value    = s.email;
   if (s.enabled)  document.getElementById('alertEnabled').checked = true;
+  const cb = document.getElementById('gdprConsent');
+  if (cb && s.consent) cb.checked = true;
   setAlertSensitivity(s.sensitivity || 'moderate');
 }
 
@@ -644,9 +740,9 @@ function updateLeverage(val) {
   else if (v <= 25) { risk = 'High Risk';       hint = `${v}× leverage — only a ${(100/v).toFixed(1)}% move against you wipes your capital. Experienced traders only.`; }
   else if (v <= 50) { risk = 'Very High Risk';  hint = `${v}× leverage — a tiny ${(100/v).toFixed(1)}% move against you wipes your capital. Extreme caution.`; }
   else              { risk = 'Extreme Risk'; hint = `${v}× leverage — price only needs to move ${(100/v).toFixed(1)}% against you to lose everything. Not recommended for beginners.`; }
-  const badgeEl = document.getElementById('levRiskBadge');
-  badgeEl.textContent = risk;
-  badgeEl.className = `lev-risk-badge ${v <= 3 ? 'lev-low' : v <= 10 ? 'lev-mod' : v <= 25 ? 'lev-high' : 'lev-extreme'}`;
+  const badge = document.getElementById('levRiskBadge');
+  badge.textContent = risk;
+  badge.className = `lev-risk-badge ${v <= 3 ? 'lev-low' : v <= 10 ? 'lev-mod' : v <= 25 ? 'lev-high' : 'lev-extreme'}`;
   document.getElementById('levHint').textContent = hint;
 }
 
@@ -672,8 +768,33 @@ async function refreshTicker() {
 // LOAD COIN
 // ═══════════════════════════════════════════════════════════════════
 
+function showLoadError(coinId, days, message) {
+  const wrap = document.querySelector('.chart-wrap');
+  const loader = document.getElementById('chartLoader');
+  if (loader) loader.classList.remove('visible');
+  let banner = document.getElementById('loadErrorBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'loadErrorBanner';
+    banner.className = 'load-error';
+    wrap.appendChild(banner);
+  }
+  banner.innerHTML = `
+    <div class="le-icon">!</div>
+    <div class="le-text">${message}</div>
+    <button class="le-retry" id="loadRetryBtn">Retry</button>`;
+  banner.style.display = 'flex';
+  document.getElementById('loadRetryBtn').onclick = () => loadCoin(coinId, days);
+}
+
+function clearLoadError() {
+  const banner = document.getElementById('loadErrorBanner');
+  if (banner) banner.style.display = 'none';
+}
+
 async function loadCoin(coinId, days) {
   const loader = document.getElementById('chartLoader');
+  clearLoadError();
   loader.classList.add('visible');
   try {
     const { dates, prices } = await fetchHistory(coinId, days);
@@ -728,12 +849,25 @@ async function loadCoin(coinId, days) {
     const forecast = holtForecast(prices, horizon);
     buildChart(dates, prices, bb, forecast, days, horizon);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
+
+    // Freshness indicator
+    state.lastUpdated = Date.now();
+    updateFreshness();
+
+    // Auto-fill entry price with live price (unless the user typed their own)
+    const entryEl = document.getElementById('entryPrice');
+    if (entryEl && !entryEl.dataset.userSet) entryEl.value = curr.toFixed(2);
+
     loadSentiment(coinId).catch(e => console.warn('Sentiment:', e.message));
+
+    // Auto-run the full analysis once on first successful load
+    if (!state._autoRan) { state._autoRan = true; analyze(); }
+
   } catch (err) {
-    loader.innerHTML = `<span style="color:#FF3D3D">${
-      err.message.includes('429') ? 'Rate-limited — wait 60 s then try again.'
-      : `Load failed: ${err.message}`
-    }</span>`;
+    const msg = err.message.includes('429')
+      ? 'CoinGecko is rate-limiting free requests right now. Please wait ~60 seconds, then retry.'
+      : `Couldn't load market data (${err.message}). Check your connection and retry.`;
+    showLoadError(coinId, days, msg);
     return;
   }
   loader.classList.remove('visible');
@@ -748,6 +882,7 @@ async function analyze() {
   btn.disabled = true; btn.textContent = 'Analyzing…';
   const coinId = document.getElementById('coinSelect').value;
   if (!state.prices || state.coin !== coinId) { state.coin = coinId; await loadCoin(coinId, state.days); }
+  if (!state.prices) { btn.disabled = false; btn.textContent = 'Analyze Trade'; return; }
   const prices  = state.prices;
   const curr    = prices[prices.length - 1];
   const entry   = parseFloat(document.getElementById('entryPrice').value)  || curr;
@@ -787,7 +922,6 @@ async function analyze() {
   else if (m.liqDist < 10) signals.push({ t:`Caution: Your forced-close price is ${m.liqDist.toFixed(1)}% away — moderate risk`, c:'yellow' });
   else                      signals.push({ t:`Safe buffer: Your forced-close price is ${m.liqDist.toFixed(1)}% away`, c:'green' });
 
-  // Sentiment signals (from pre-loaded state.sentiment)
   if (state.sentiment?.fg?.length) {
     const fgV = parseInt(state.sentiment.fg[0].value);
     const fgL = state.sentiment.fg[0].value_classification;
@@ -855,28 +989,23 @@ function renderSignal(score, signals, dir) {
   let heading, hCls, summary, summaryEmoji;
   if (score >= 3) {
     heading = 'Strong Bullish — Good time to go Long';
-    hCls = 'green';
-    summaryEmoji = '▲';
+    hCls = 'green'; summaryEmoji = '▲';
     summary = 'Most indicators agree: conditions strongly favor the price going UP. This is a good environment for a Long trade, but always use a stop-loss.';
   } else if (score >= 1) {
     heading = 'Mild Bullish — Slight upward lean';
-    hCls = 'yellow';
-    summaryEmoji = '↑';
+    hCls = 'yellow'; summaryEmoji = '↑';
     summary = 'Conditions lean upward, but signals are not strong. If trading Long, use a smaller position size and definitely set a stop-loss.';
   } else if (score <= -3) {
     heading = 'Strong Bearish — Good time to go Short';
-    hCls = 'red';
-    summaryEmoji = '▼';
+    hCls = 'red'; summaryEmoji = '▼';
     summary = 'Most indicators agree: conditions strongly favor the price going DOWN. This is a good environment for a Short trade, but always use a stop-loss.';
   } else if (score <= -1) {
     heading = 'Mild Bearish — Slight downward lean';
-    hCls = 'yellow';
-    summaryEmoji = '↓';
+    hCls = 'yellow'; summaryEmoji = '↓';
     summary = 'Conditions lean downward. Long trades carry higher risk right now. Consider waiting for a better entry or reducing your position size.';
   } else {
     heading = 'Neutral — No clear direction';
-    hCls = 'neutral';
-    summaryEmoji = '—';
+    hCls = 'neutral'; summaryEmoji = '—';
     summary = 'No clear direction. The market is undecided. Best practice: wait for stronger signals before entering a trade to improve your odds.';
   }
   const aligned = (score > 0 && dir === 'Long') || (score < 0 && dir === 'Short');
@@ -903,12 +1032,13 @@ function renderSignal(score, signals, dir) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// COIN SELECTOR  (from ticker)
+// COIN SELECTOR
 // ═══════════════════════════════════════════════════════════════════
 
 function selectCoin(coinId) {
   state.coin = coinId;
   document.getElementById('coinSelect').value = coinId;
+  state._autoRan = false;
   loadCoin(coinId, state.days);
 }
 
@@ -917,13 +1047,23 @@ function selectCoin(coinId) {
 // ═══════════════════════════════════════════════════════════════════
 
 function init() {
+  // Hydrate alert settings from localStorage so getAlertSettings() is sync from the start
+  try { state.alertSettings = JSON.parse(localStorage.getItem('cryptoAlertSettings') || '{}'); }
+  catch { state.alertSettings = {}; }
+
+  // Show disclaimer banner on first visit
+  if (!localStorage.getItem('disclaimerSeen')) {
+    const banner = document.getElementById('disclaimerBanner');
+    if (banner) banner.style.display = 'flex';
+  }
+
   const sel = document.getElementById('coinSelect');
   Object.entries(COINS).forEach(([id, c]) => {
     const opt = document.createElement('option');
     opt.value = id; opt.textContent = c.name;
     sel.appendChild(opt);
   });
-  sel.addEventListener('change', e => { state.coin = e.target.value; loadCoin(e.target.value, state.days); });
+  sel.addEventListener('change', e => { state.coin = e.target.value; state._autoRan = false; loadCoin(e.target.value, state.days); });
   document.querySelectorAll('.tf-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
@@ -932,11 +1072,145 @@ function init() {
       loadCoin(state.coin, state.days);
     });
   });
+
+  // Pre-populate defaults so the calculator is usable immediately
+  document.getElementById('posSize').value = '1000';
+  document.getElementById('leverage').value = '10';
+  updateLeverage(10);
+
   loadCoin('bitcoin', 30);
   refreshTicker();
   setInterval(refreshTicker, 60_000);
+  setInterval(updateFreshness, 1000); // tick the "updated X ago" label
   initAlertUI();
   startBackgroundAlertChecks();
+  initFirebase();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// FIREBASE AUTH + FIRESTORE
+// ═══════════════════════════════════════════════════════════════════
+
+async function initFirebase() {
+  if (typeof firebase === 'undefined') return;
+  if (!BACKEND_URL) {
+    renderAuthUI(null, /* disabled */ true);
+    return;
+  }
+  // Show a disabled sign-in button immediately so the auth bar is never blank.
+  // Render's free tier can take 30–60 s to wake from sleep — without this the
+  // button doesn't appear until the fetch resolves (or times out).
+  renderAuthUI(null, /* disabled */ true);
+
+  let config;
+  try {
+    const ctrl  = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20_000);
+    const res   = await fetch(`${BACKEND_URL}/firebase-config`, { signal: ctrl.signal });
+    clearTimeout(timer);
+    config = await res.json();
+  } catch (e) {
+    console.warn('Could not fetch Firebase config:', e.message);
+    return;
+  }
+  if (!config?.apiKey) {
+    return;
+  }
+  try {
+    firebase.initializeApp(config);
+    _auth = firebase.auth();
+    _db   = firebase.firestore();
+
+    renderAuthUI(null);
+
+    _auth.onAuthStateChanged(async user => {
+      state.user = user;
+      renderAuthUI(user);
+      if (user) {
+        await loadUserSettingsFromFirestore(user.uid);
+        // Re-populate alert UI with cloud settings
+        const container = document.getElementById('watchCoins');
+        if (container) container.innerHTML = '';
+        initAlertUI();
+        // Pre-fill email from Google profile if the field is empty
+        const emailEl = document.getElementById('alertEmail');
+        if (emailEl && !emailEl.value && user.email) emailEl.value = user.email;
+        showAlertStatus('Signed in — settings loaded from cloud.', 'success');
+      }
+    });
+  } catch (e) {
+    console.warn('Firebase init failed:', e.message);
+  }
+}
+
+async function loadUserSettingsFromFirestore(uid) {
+  if (!_db) return;
+  try {
+    const doc = await _db.collection('users').doc(uid).collection('data').doc('settings').get();
+    if (doc.exists) {
+      state.alertSettings = doc.data();
+      localStorage.setItem('cryptoAlertSettings', JSON.stringify(state.alertSettings));
+    }
+  } catch (e) {
+    console.warn('Firestore read failed, using localStorage:', e.message);
+  }
+}
+
+async function signInWithGoogle() {
+  if (!_auth) {
+    alert('Firebase is not configured yet. Fill in FIREBASE_CONFIG in app.js first.');
+    return;
+  }
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    await _auth.signInWithPopup(provider);
+  } catch (e) {
+    if (e.code !== 'auth/popup-closed-by-user') {
+      showAlertStatus('Sign-in failed: ' + (e.message || e.code), 'error');
+    }
+  }
+}
+
+async function signOutUser() {
+  if (!_auth) return;
+  await _auth.signOut();
+  state.user = null;
+  renderAuthUI(null);
+  showAlertStatus('Signed out. Settings are still saved locally on this device.', 'success');
+}
+
+function renderAuthUI(user, disabled = false) {
+  const bar = document.getElementById('authBar');
+  if (!bar) return;
+
+  if (user) {
+    const avatar = user.photoURL
+      ? `<img class="user-avatar" src="${user.photoURL}" alt="" referrerpolicy="no-referrer">`
+      : `<span class="user-avatar-placeholder">${(user.displayName || user.email || '?')[0].toUpperCase()}</span>`;
+    bar.innerHTML = `
+      <div class="user-pill">
+        ${avatar}
+        <span class="user-name">${user.displayName || user.email}</span>
+        <button class="btn-signout" onclick="signOutUser()">Sign out</button>
+      </div>`;
+  } else {
+    bar.innerHTML = `
+      <button class="btn-google-signin" onclick="signInWithGoogle()" ${disabled ? 'disabled title="Add your Firebase config to enable login"' : ''}>
+        <svg width="16" height="16" viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.19 3.23l6.85-6.85C35.9 2.38 30.28 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.08 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-3.59-13.46-8.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Sign in with Google
+      </button>`;
+  }
+}
+
+function dismissDisclaimer() {
+  localStorage.setItem('disclaimerSeen', '1');
+  const banner = document.getElementById('disclaimerBanner');
+  if (banner) banner.style.display = 'none';
 }
 
 document.addEventListener('DOMContentLoaded', init);
@@ -1053,7 +1327,6 @@ async function runDashboard() {
       return { ...coin, dir, alloc, lev, margin, tp, sl, pnlTp, pnlSl };
     });
 
-    // Normalize allocations to exactly equal capital
     const allocSum = trades.reduce((s, t) => s + t.alloc, 0);
     trades.forEach(t => { t.alloc = Math.round(t.alloc / allocSum * capital); });
 
