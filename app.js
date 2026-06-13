@@ -2075,28 +2075,89 @@ function localChatResponse(message, context) {
 
 // ── Hub Analysis Orchestrator ──────────────────────────────────────
 
-// Recompute and render the master AI Trading Score from whatever data is in.
-function renderHubMasterScore() {
-  const techData = hubState.analysis;
-  let masterScore = 50;
-  const breakdown = [];
-  if (techData) {
-    masterScore = (masterScore + techData.techScore.score) / 2;
-    breakdown.push({ label: 'Technical', score: techData.techScore.score });
-  }
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+
+// 5-state market verdict from the 0–100 overall score.
+function verdictFor(score) {
+  if (score >= 72) return { label: 'STRONG LONG',  cls: 'bull', icon: '▲▲' };
+  if (score >= 58) return { label: 'LONG',         cls: 'bull', icon: '▲'  };
+  if (score >= 43) return { label: 'NEUTRAL',      cls: 'neu',  icon: '■'  };
+  if (score >= 29) return { label: 'SHORT',        cls: 'bear', icon: '▼'  };
+  return                  { label: 'STRONG SHORT', cls: 'bear', icon: '▼▼' };
+}
+
+// Deterministic 5-bucket outcome distribution. Peaks near the overall score;
+// higher confidence tightens the spread. (Shared with the Phase-3 engine.)
+function computeProbabilityDistribution(overall, confidence) {
+  const centers = [
+    { k: 'Strong Bullish', c: 88, cls: 'bull' },
+    { k: 'Bullish',        c: 66, cls: 'bull' },
+    { k: 'Neutral',        c: 50, cls: 'neu'  },
+    { k: 'Bearish',        c: 34, cls: 'bear' },
+    { k: 'Strong Bearish', c: 12, cls: 'bear' },
+  ];
+  const sigma = Math.max(7, 26 - confidence * 0.16);
+  const raw = centers.map(b => Math.exp(-((overall - b.c) ** 2) / (2 * sigma * sigma)));
+  const sum = raw.reduce((a, b) => a + b, 0) || 1;
+  const dist = centers.map((b, i) => ({ ...b, p: Math.round((raw[i] / sum) * 100) }));
+  // Reconcile rounding so the column sums to exactly 100%.
+  const drift = 100 - dist.reduce((a, b) => a + b.p, 0);
+  if (drift) { const top = dist.reduce((m, b) => (b.p > m.p ? b : m), dist[0]); top.p += drift; }
+  return dist;
+}
+
+// Synthesize every available signal layer into one weighted model.
+function computeIntelModel() {
+  const sub = [];
+  const tech = hubState.analysis;
+
+  if (tech) sub.push({ key: 'technical', label: 'Technical', score: tech.techScore.score, weight: 0.40 });
+
   if (hubState.futures) {
     const f = hubState.futures;
-    const futScore = f.ls_ratio > 1.1 && f.funding_rate > 0
-      ? Math.min(80, 50 + (f.ls_ratio - 1) * 30)
-      : f.ls_ratio < 0.9 && f.funding_rate < 0
-      ? Math.max(20, 50 - (1 - f.ls_ratio) * 30)
-      : 50;
-    masterScore = (masterScore + futScore) / 2;
-    breakdown.push({ label: 'Futures', score: Math.round(futScore) });
+    let fs = 50;
+    fs += clamp((f.ls_ratio - 1) * 30, -25, 25);
+    fs += clamp((f.funding_rate * 100) * 30, -15, 15);
+    if (f.market_bias === 'Bullish') fs += 6; else if (f.market_bias === 'Bearish') fs -= 6;
+    sub.push({ key: 'futures', label: 'Futures', score: Math.round(clamp(fs, 0, 100)), weight: 0.25 });
   }
-  masterScore = Math.min(100, Math.max(0, Math.round(masterScore)));
-  breakdown.push({ label: 'Master', score: masterScore });
-  renderTradingScore(masterScore, breakdown);
+
+  const s = state.sentiment;
+  if (s && (s.fg?.length || s.community?.up != null || s.newsSentiment)) {
+    let acc = 0, parts = 0;
+    if (s.fg?.length)            { acc += parseInt(s.fg[0].value); parts++; }
+    if (s.community?.up != null) { acc += s.community.up; parts++; }
+    if (s.newsSentiment)         { acc += (0.5 + (s.newsSentiment.positive - s.newsSentiment.negative) / 2) * 100; parts++; }
+    sub.push({ key: 'sentiment', label: 'Sentiment', score: Math.round(clamp(parts ? acc / parts : 50, 0, 100)), weight: 0.20 });
+  }
+
+  let expMovePct = null, expMoveUsd = null;
+  const horizon = 7;
+  if (tech?.prices?.length >= 10) {
+    const f = holtForecast(tech.prices, horizon);
+    const pred = f.median[f.median.length - 1];
+    expMovePct = (pred - tech.curr) / tech.curr * 100;
+    expMoveUsd = pred - tech.curr;
+    sub.push({ key: 'forecast', label: 'AI Forecast', score: Math.round(clamp(50 + expMovePct * 5, 0, 100)), weight: 0.15 });
+  }
+
+  const totW = sub.reduce((a, b) => a + b.weight, 0) || 1;
+  const overall = sub.length ? Math.round(sub.reduce((a, b) => a + b.score * b.weight, 0) / totW) : 50;
+  const mean = sub.reduce((a, b) => a + b.score, 0) / (sub.length || 1);
+  const dispersion = Math.sqrt(sub.reduce((a, b) => a + (b.score - mean) ** 2, 0) / (sub.length || 1));
+  const confidence = Math.round(clamp(35 + Math.abs(overall - 50) * 0.9 - dispersion * 0.6 + sub.length * 3, 5, 99));
+
+  return {
+    sub, overall, confidence,
+    trendStrength: tech?.trend?.strength ?? 0,
+    trendDir: tech?.trend?.direction,
+    expMovePct, expMoveUsd, horizon,
+  };
+}
+
+// Recompute and render the AI Intelligence Dashboard from whatever data is in.
+function renderHubMasterScore() {
+  renderAIIntelligenceDashboard(computeIntelModel());
 }
 
 async function runHubAnalysis() {
@@ -2223,6 +2284,7 @@ async function runHubAnalysis() {
       community: state.sentiment?.community,
       newsSentiment: state.sentiment?.newsSentiment,
     });
+    renderHubMasterScore();  // sentiment now feeds the AI Intelligence Dashboard
   })();
 
   await Promise.allSettled([futuresP, tokP, onchainP, newsP, sentP]);
@@ -2232,44 +2294,73 @@ async function runHubAnalysis() {
 
 // ── Render: Trading Score ──────────────────────────────────────────
 
-function renderTradingScore(score, breakdown) {
+function renderAIIntelligenceDashboard(model) {
   const card = document.getElementById('hubScoreCard');
   if (!card) return;
 
-  let signal, sigClass;
-  if (score >= 75)      { signal = 'Strong Buy';  sigClass = 'bull'; }
-  else if (score >= 60) { signal = 'Buy';         sigClass = 'bull'; }
-  else if (score >= 45) { signal = 'Neutral';     sigClass = 'neu'; }
-  else if (score >= 30) { signal = 'Sell';        sigClass = 'bear'; }
-  else                  { signal = 'Strong Sell'; sigClass = 'bear'; }
+  const { sub, overall, confidence, trendStrength, trendDir, expMovePct, expMoveUsd, horizon } = model;
+  const v = verdictFor(overall);
+  const color = v.cls === 'bull' ? 'var(--green)' : v.cls === 'bear' ? 'var(--red)' : 'var(--gold)';
+  const dist = computeProbabilityDistribution(overall, confidence);
 
-  const color = score >= 60 ? '#00E887' : score >= 45 ? '#FFB800' : '#FF3D3D';
+  const stat = (label, value, sub2, cls) => `
+    <div class="aidash-stat">
+      <div class="ad-stat-label">${label}</div>
+      <div class="ad-stat-val ${cls || ''}">${value}</div>
+      <div class="ad-stat-sub">${sub2 || ''}</div>
+    </div>`;
 
-  const barsHtml = breakdown.filter(b => b.label !== 'Master').map(b => `
+  const expCls = expMovePct == null ? '' : expMovePct >= 0 ? 'green' : 'red';
+  const expStr = expMovePct == null ? '—' : fmtPct(expMovePct);
+  const expSub = expMoveUsd == null ? `over ${horizon}d`
+    : `${expMoveUsd >= 0 ? '+' : '-'}${fmtUSD(expMoveUsd)} · ${horizon}d`;
+
+  const probBars = dist.map(b => `
+    <div class="prob-row">
+      <span class="prob-lbl ${b.cls}">${b.k}</span>
+      <div class="prob-track"><div class="prob-fill ${b.cls}" style="width:${b.p}%"></div></div>
+      <span class="prob-pct">${b.p}%</span>
+    </div>`).join('');
+
+  const breakdown = sub.map(b => `
     <div class="score-breakdown-row">
       <span class="score-bd-label">${b.label}</span>
       <div class="score-bd-track">
-        <div class="score-bd-fill" style="width:${b.score}%;background:${b.score>=60?'#00E887':b.score>=45?'#FFB800':'#FF3D3D'}"></div>
+        <div class="score-bd-fill" style="width:${b.score}%;background:${b.score >= 60 ? 'var(--green)' : b.score >= 45 ? 'var(--gold)' : 'var(--red)'}"></div>
       </div>
       <span class="score-bd-val">${b.score}</span>
     </div>`).join('');
 
   card.innerHTML = `
-    <div class="hub-score-layout">
-      <div class="score-ring-wrap">
+    <div class="aidash-head">
+      <h3 class="card-heading">AI Intelligence Dashboard <span class="heading-sub">— ${COINS[hubState.coinId]?.name || ''}</span></h3>
+      <span class="aidash-badge">Technical · Futures · Sentiment · AI Forecast</span>
+    </div>
+    <div class="aidash-top">
+      <div class="aidash-ring-col">
         <div class="score-ring" style="--score-color:${color}">
           <div class="score-ring-inner">
-            <div class="score-number" style="color:${color}">${score}</div>
+            <div class="score-number" style="color:${color}">${overall}</div>
             <div class="score-ring-label">/ 100</div>
           </div>
         </div>
-        <div class="score-signal signal-pill-${sigClass}">${signal}</div>
+        <div class="aidash-verdict verdict-${v.cls}">${v.icon} ${v.label}</div>
       </div>
-      <div class="score-breakdown">
-        <div class="score-bd-title">Score Breakdown</div>
-        ${barsHtml}
-        <div class="score-note">AI Trading Score combines technical indicators, futures data, and market sentiment. Educational use only.</div>
+      <div class="aidash-main">
+        <div class="aidash-stats">
+          ${stat('Confidence', confidence + '%', confidence >= 66 ? 'High conviction' : confidence >= 40 ? 'Moderate' : 'Low — mixed signals', confidence >= 66 ? 'green' : confidence >= 40 ? 'gold' : 'red')}
+          ${stat('Trend Strength', trendStrength + '/100', trendDir || '—', trendDir === 'Bullish' ? 'green' : trendDir === 'Bearish' ? 'red' : '')}
+          ${stat('Expected Move', expStr, expSub, expCls)}
+          ${stat('Time Horizon', horizon + 'd', 'forecast window', 'accent')}
+        </div>
+        <div class="prob-title">Outcome Probability <span class="heading-sub">— model distribution</span></div>
+        <div class="prob-bars">${probBars}</div>
       </div>
+    </div>
+    <div class="aidash-breakdown">
+      <div class="score-bd-title">Signal Breakdown</div>
+      ${breakdown}
+      <div class="score-note">AI Trading Score synthesizes technical indicators, futures positioning, market sentiment, and statistical forecast. Educational use only — not financial advice.</div>
     </div>`;
 }
 
