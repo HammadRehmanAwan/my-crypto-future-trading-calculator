@@ -1871,3 +1871,42 @@ input, select, button { font-family: inherit; }
 .prob-pct { font-family: var(--mono); font-size: 12px; font-weight: 700; width: 38px; text-align: right; flex-shrink: 0; color: var(--text-hi); }
 
 .aidash-breakdown { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border); }
+
+/* ═══════════════════════════════════════════════════════
+   TRADE PROBABILITY ENGINE  (Phase 3)
+═══════════════════════════════════════════════════════ */
+.hub-tpe-card {
+  background:
+    radial-gradient(640px 220px at 100% 0%, rgba(139,92,246,0.08), transparent 60%),
+    linear-gradient(150deg, rgba(31,46,82,0.5), rgba(15,22,38,0.96));
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.tpe-top {
+  display: grid; grid-template-columns: minmax(240px, 1fr) 1fr; gap: 22px;
+  align-items: center; margin-bottom: 6px;
+}
+@media (max-width: 760px) { .tpe-top { grid-template-columns: 1fr; } }
+
+.tpe-radar-wrap { position: relative; height: 260px; }
+.tpe-radar-cap {
+  text-align: center; font-size: 10px; color: var(--text-lo);
+  margin-top: 6px; font-style: italic;
+}
+.tpe-proj { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.tpe-section-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--text-lo);
+  margin: 18px 0 10px; padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tpe-factors { display: flex; flex-direction: column; gap: 7px; }
+.tpe-factor { display: flex; align-items: center; gap: 10px; }
+.tpe-f-lbl { font-size: 11px; color: var(--text-lo); width: 104px; flex-shrink: 0; font-weight: 600; }
+.tpe-f-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.tpe-f-fill { height: 100%; border-radius: 4px; transition: width .6s ease; }
+.tpe-f-val { font-family: var(--mono); font-size: 12px; font-weight: 700; width: 30px; text-align: right; flex-shrink: 0; }
+.tpe-f-val.green { color: var(--green); }
+.tpe-f-val.red   { color: var(--red); }
+.tpe-f-val.gold  { color: var(--gold); }

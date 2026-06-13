@@ -2155,9 +2155,167 @@ function computeIntelModel() {
   };
 }
 
-// Recompute and render the AI Intelligence Dashboard from whatever data is in.
+// Recompute and render the AI Intelligence Dashboard + Trade Probability Engine
+// from whatever data is currently available.
 function renderHubMasterScore() {
-  renderAIIntelligenceDashboard(computeIntelModel());
+  const model = computeIntelModel();
+  renderAIIntelligenceDashboard(model);
+  renderTradeProbabilityEngine(model);
+}
+
+// ── Trade Score System: 7 granular weighted factors (radar) ────────
+function computeTradeFactors() {
+  const t = hubState.analysis;
+  const f = hubState.futures;
+  const s = state.sentiment;
+  const factors = [];
+
+  if (t) {
+    // RSI — oversold reads bullish, overbought bearish (mean-reversion)
+    factors.push({ key: 'RSI', score: Math.round(clamp(50 + (50 - t.rsi) * 1.2, 0, 100)) });
+    // MACD — cross direction + normalized histogram magnitude
+    const macdBull = t.macd > t.sig;
+    const mag = clamp(Math.abs(t.macd - t.sig) / (Math.abs(t.curr) || 1) * 4000, 0, 18);
+    factors.push({ key: 'MACD', score: Math.round(clamp(50 + (macdBull ? 1 : -1) * (20 + mag), 0, 100)) });
+    // EMA structure — price vs 20/50/200
+    let e = 50;
+    e += t.curr > t.ema20 ? 12 : -12;
+    e += t.curr > t.ema50 ? 10 : -10;
+    e += t.curr > t.ema200 ? 10 : -10;
+    factors.push({ key: 'EMA', score: Math.round(clamp(e, 0, 100)) });
+  }
+  if (f) {
+    const frPct = (f.funding_rate || 0) * 100;
+    factors.push({ key: 'Funding', score: Math.round(clamp(50 + clamp(frPct * 1500, -35, 35), 0, 100)) });
+    let oi = 50 + clamp((f.ls_ratio - 1) * 30, -25, 25);
+    oi += f.market_bias === 'Bullish' ? 8 : f.market_bias === 'Bearish' ? -8 : 0;
+    factors.push({ key: 'Open Interest', score: Math.round(clamp(oi, 0, 100)) });
+  }
+  if (s && (s.fg?.length || s.community?.up != null || s.newsSentiment)) {
+    let acc = 0, parts = 0;
+    if (s.fg?.length)            { acc += parseInt(s.fg[0].value); parts++; }
+    if (s.community?.up != null) { acc += s.community.up; parts++; }
+    if (s.newsSentiment)         { acc += (0.5 + (s.newsSentiment.positive - s.newsSentiment.negative) / 2) * 100; parts++; }
+    factors.push({ key: 'Sentiment', score: Math.round(clamp(parts ? acc / parts : 50, 0, 100)) });
+  }
+  if (t?.prices?.length >= 10) {
+    const fc = holtForecast(t.prices, 7);
+    const mv = (fc.median[fc.median.length - 1] - t.curr) / t.curr * 100;
+    factors.push({ key: 'AI Forecast', score: Math.round(clamp(50 + mv * 5, 0, 100)) });
+  }
+  return factors;
+}
+
+// Probability-weighted financial projections from the outcome distribution.
+function computeTradeProjections(model, dist) {
+  const t = hubState.analysis;
+  const horizon = model.horizon || 7;
+  const atrPct = (t && t.atr) ? (t.atr / t.curr * 100) : 2.5;
+  const volH = atrPct * Math.sqrt(horizon);   // expected % range over the horizon
+  const mult = { 'Strong Bullish': 3.0, 'Bullish': 1.3, 'Neutral': 0, 'Bearish': -1.3, 'Strong Bearish': -3.0 };
+
+  let expReturn = 0, expDraw = 0;
+  for (const b of dist) {
+    const ret = (mult[b.k] || 0) * volH;
+    const w = b.p / 100;
+    expReturn += w * ret;
+    if (ret < 0) expDraw += w * ret;
+  }
+  const pBear = dist.filter(b => b.cls === 'bear').reduce((a, b) => a + b.p, 0);
+  const volScore = clamp(atrPct * 20, 0, 100);
+  const riskScore = Math.round(clamp(0.45 * volScore + 0.35 * (100 - model.confidence) + 0.20 * pBear, 0, 100));
+  const oppScore = Math.round(clamp(Math.abs(model.overall - 50) * 2 * (model.confidence / 100) + Math.min(40, Math.abs(expReturn) * 3), 0, 100));
+  return { expReturn, expDraw, riskScore, oppScore, horizon };
+}
+
+function renderTradeProbabilityEngine(model) {
+  const card = document.getElementById('hubTpeCard');
+  if (!card) return;
+  const factors = computeTradeFactors();
+  if (!factors.length) {
+    card.innerHTML = `<h3 class="card-heading">Trade Probability Engine</h3>
+      <div class="hub-unavail">Run a full analysis to compute trade probabilities.</div>`;
+    return;
+  }
+
+  const dist = computeProbabilityDistribution(model.overall, model.confidence);
+  const { expReturn, expDraw, riskScore, oppScore, horizon } = computeTradeProjections(model, dist);
+
+  const stat = (label, value, sub2, cls) => `
+    <div class="aidash-stat">
+      <div class="ad-stat-label">${label}</div>
+      <div class="ad-stat-val ${cls || ''}">${value}</div>
+      <div class="ad-stat-sub">${sub2 || ''}</div>
+    </div>`;
+
+  const probBars = dist.map(b => `
+    <div class="prob-row">
+      <span class="prob-lbl ${b.cls}">${b.k}</span>
+      <div class="prob-track"><div class="prob-fill ${b.cls}" style="width:${b.p}%"></div></div>
+      <span class="prob-pct">${b.p}%</span>
+    </div>`).join('');
+
+  const factorBars = factors.map(f => {
+    const c = f.score >= 58 ? 'green' : f.score >= 43 ? 'gold' : 'red';
+    const bg = f.score >= 58 ? 'var(--green)' : f.score >= 43 ? 'var(--gold)' : 'var(--red)';
+    return `<div class="tpe-factor">
+      <span class="tpe-f-lbl">${f.key}</span>
+      <div class="tpe-f-track"><div class="tpe-f-fill" style="width:${f.score}%;background:${bg}"></div></div>
+      <span class="tpe-f-val ${c}">${f.score}</span>
+    </div>`;
+  }).join('');
+
+  card.innerHTML = `
+    <h3 class="card-heading">Trade Probability Engine <span class="heading-sub">— probability-weighted outlook</span></h3>
+    <div class="tpe-top">
+      <div class="tpe-radar-col">
+        <div class="tpe-radar-wrap"><canvas id="tpeRadar"></canvas></div>
+        <div class="tpe-radar-cap">Trade Score radar &middot; ${factors.length} weighted factors (0 = bearish, 100 = bullish)</div>
+      </div>
+      <div class="tpe-proj">
+        ${stat('Expected Return', (expReturn >= 0 ? '+' : '') + expReturn.toFixed(1) + '%', `over ${horizon}d (prob-weighted)`, expReturn >= 0 ? 'green' : 'red')}
+        ${stat('Expected Drawdown', expDraw.toFixed(1) + '%', 'prob-weighted downside', 'red')}
+        ${stat('Risk Score', riskScore + '/100', riskScore >= 60 ? 'High risk' : riskScore >= 40 ? 'Moderate' : 'Low risk', riskScore >= 60 ? 'red' : riskScore >= 40 ? 'gold' : 'green')}
+        ${stat('Opportunity Score', oppScore + '/100', oppScore >= 60 ? 'Strong setup' : oppScore >= 40 ? 'Fair setup' : 'Weak setup', oppScore >= 60 ? 'green' : oppScore >= 40 ? 'gold' : 'red')}
+      </div>
+    </div>
+    <div class="tpe-section-label">Outcome Probability <span class="sent-src">5-state distribution</span></div>
+    <div class="prob-bars">${probBars}</div>
+    <div class="tpe-section-label">Factor Breakdown <span class="sent-src">Trade Score System</span></div>
+    <div class="tpe-factors">${factorBars}</div>
+    <div class="hub-note">Probabilities and projections are model estimates derived from volatility (ATR), signal agreement, and the composite score. Educational use only — not financial advice.</div>`;
+
+  buildRadarChart(factors, model.overall);
+}
+
+function buildRadarChart(factors, overall) {
+  const ctx = document.getElementById('tpeRadar');
+  if (!ctx || typeof Chart === 'undefined') return;
+  if (hubState.tpeChart) { try { hubState.tpeChart.destroy(); } catch (e) {} hubState.tpeChart = null; }
+  const color = overall >= 58 ? '#00E676' : overall >= 43 ? '#FFB800' : '#FF5252';
+  const fill  = overall >= 58 ? 'rgba(0,230,118,0.18)' : overall >= 43 ? 'rgba(255,184,0,0.18)' : 'rgba(255,82,82,0.18)';
+  hubState.tpeChart = new Chart(ctx, {
+    type: 'radar',
+    data: {
+      labels: factors.map(f => f.key),
+      datasets: [
+        { label: 'Bullishness', data: factors.map(f => f.score), borderColor: color, backgroundColor: fill, borderWidth: 2, pointBackgroundColor: color, pointRadius: 3, pointHoverRadius: 5 },
+        { label: 'Neutral', data: factors.map(() => 50), borderColor: 'rgba(120,140,170,0.35)', backgroundColor: 'transparent', borderDash: [4, 4], borderWidth: 1, pointRadius: 0 },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 500 },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${c.parsed.r}/100` } } },
+      scales: { r: {
+        min: 0, max: 100, beginAtZero: true,
+        ticks: { display: false, stepSize: 25 },
+        grid: { color: 'rgba(42,58,92,0.6)' },
+        angleLines: { color: 'rgba(42,58,92,0.6)' },
+        pointLabels: { color: '#6D85B0', font: { size: 11, weight: '600' } },
+      } },
+    },
+  });
 }
 
 async function runHubAnalysis() {
