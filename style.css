@@ -1910,3 +1910,67 @@ input, select, button { font-family: inherit; }
 .tpe-f-val.green { color: var(--green); }
 .tpe-f-val.red   { color: var(--red); }
 .tpe-f-val.gold  { color: var(--gold); }
+
+/* ═══════════════════════════════════════════════════════
+   PHASE 4 — Futures analytics / Whale / Liquidation
+═══════════════════════════════════════════════════════ */
+.est-badge, .live-badge {
+  font-size: 10px; font-weight: 700; letter-spacing: .03em;
+  padding: 3px 9px; border-radius: 20px; white-space: nowrap;
+}
+.est-badge  { color: var(--gold); background: var(--gold-d); border: 1px solid rgba(255,184,0,0.3); }
+.live-badge { color: var(--green); background: var(--green-d); border: 1px solid rgba(0,230,118,0.3); }
+
+/* ─── Liquidation Heatmap ─── */
+.hub-liq-card {
+  background:
+    radial-gradient(640px 200px at 0% 0%, rgba(255,82,82,0.06), transparent 60%),
+    radial-gradient(640px 200px at 100% 0%, rgba(0,230,118,0.06), transparent 60%),
+    linear-gradient(150deg, rgba(31,46,82,0.5), rgba(15,22,38,0.96));
+  border: 1px solid rgba(255,255,255,0.08);
+}
+.liq-summary {
+  display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;
+  margin-bottom: 16px;
+}
+@media (max-width: 560px) { .liq-summary { grid-template-columns: 1fr; } }
+.liq-sum-item {
+  background: rgba(255,255,255,0.025); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px; text-align: center;
+}
+.liq-sum-lbl { display: block; font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-lo); margin-bottom: 5px; }
+.liq-sum-lbl.green { color: var(--green); } .liq-sum-lbl.red { color: var(--red); }
+.liq-sum-val { font-family: var(--mono); font-size: 15px; font-weight: 800; }
+.liq-sum-val.green { color: var(--green); } .liq-sum-val.red { color: var(--red); } .liq-sum-val.accent { color: var(--accent); }
+
+.liq-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+@media (max-width: 640px) { .liq-grid { grid-template-columns: 1fr; gap: 16px; } }
+.liq-side-label { font-size: 11px; font-weight: 700; margin-bottom: 10px; }
+.liq-side-label.green { color: var(--green); } .liq-side-label.red { color: var(--red); }
+.liq-ladder { display: flex; flex-direction: column; gap: 5px; }
+.liq-row { display: grid; grid-template-columns: 88px 1fr auto; gap: 10px; align-items: center; }
+.liq-price { font-family: var(--mono); font-size: 12px; font-weight: 600; }
+.liq-price.green { color: var(--green); } .liq-price.red { color: var(--red); }
+.liq-bar-track { height: 15px; background: rgba(255,255,255,0.04); border-radius: 4px; overflow: hidden; }
+.liq-bar { height: 100%; border-radius: 4px; transition: width .6s ease; }
+.liq-bar.long  { background: linear-gradient(90deg, rgba(255,82,82,0.45), var(--red)); }
+.liq-bar.short { background: linear-gradient(90deg, rgba(0,230,118,0.45), var(--green)); }
+.liq-meta { font-size: 10px; color: var(--text-lo); white-space: nowrap; font-family: var(--mono); }
+
+/* ─── Whale Intelligence ─── */
+.whale-verdict-row { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.whale-verdict { font-size: 14px; font-weight: 800; letter-spacing: .03em; padding: 5px 14px; border-radius: 10px; }
+.whale-flow-note { font-size: 11px; color: var(--text-lo); }
+.whale-timeline { display: flex; flex-direction: column; gap: 8px; }
+.whale-sig { display: flex; align-items: flex-start; gap: 9px; font-size: 12px; line-height: 1.45; }
+.whale-sig-ico {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700;
+  background: rgba(255,255,255,0.04); border: 1px solid var(--border);
+}
+.whale-sig-ico.green { color: var(--green); border-color: rgba(0,230,118,0.3); }
+.whale-sig-ico.red   { color: var(--red);   border-color: rgba(255,82,82,0.3); }
+.whale-sig-ico.gold  { color: var(--gold);  border-color: rgba(255,184,0,0.3); }
+.whale-sig-ico.neutral-text { color: var(--text-lo); }
+.whale-sig-txt { color: var(--text); padding-top: 2px; }

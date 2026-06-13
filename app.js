@@ -1973,6 +1973,47 @@ async function fetchFuturesDirect(coinId) {
   };
 }
 
+// Live order flow + market structure straight from OKX (real public data):
+// taker buy/sell volume delta from the last trades + order-book imbalance.
+async function fetchOrderFlow(coinId) {
+  const inst = OKX_INST[coinId];
+  if (!inst) throw new Error('No market for this coin');
+  const OKX = 'https://www.okx.com';
+  const get = async (url) => {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const b = await r.json();
+    return b.code === '0' ? (b.data || []) : null;
+  };
+  const [trades, books] = await Promise.all([
+    get(`${OKX}/api/v5/market/trades?instId=${inst}&limit=100`),
+    get(`${OKX}/api/v5/market/books?instId=${inst}&sz=50`),
+  ]);
+
+  let buyVol = 0, sellVol = 0, buyNotional = 0, sellNotional = 0;
+  if (trades) for (const t of trades) {
+    const sz = parseFloat(t.sz) || 0, px = parseFloat(t.px) || 0;
+    if (t.side === 'buy') { buyVol += sz; buyNotional += sz * px; }
+    else { sellVol += sz; sellNotional += sz * px; }
+  }
+  const totVol = buyVol + sellVol;
+  const delta = totVol ? (buyVol - sellVol) / totVol : 0;
+
+  let bidDepth = 0, askDepth = 0, bestBid = null, bestAsk = null;
+  if (books && books[0]) {
+    const b = books[0];
+    for (const lvl of (b.bids || [])) bidDepth += parseFloat(lvl[1]) || 0;
+    for (const lvl of (b.asks || [])) askDepth += parseFloat(lvl[1]) || 0;
+    bestBid = b.bids?.[0] ? parseFloat(b.bids[0][0]) : null;
+    bestAsk = b.asks?.[0] ? parseFloat(b.asks[0][0]) : null;
+  }
+  const depthTot = bidDepth + askDepth;
+  const obImbalance = depthTot ? (bidDepth - askDepth) / depthTot : 0;
+  const spreadPct = (bestBid && bestAsk) ? (bestAsk - bestBid) / ((bestAsk + bestBid) / 2) * 100 : null;
+
+  return { delta, buyVol, sellVol, buyNotional, sellNotional, obImbalance, bidDepth, askDepth, spreadPct };
+}
+
 // Single CoinGecko call with everything we need (cached 10 min).
 async function fetchCoinFull(coinId) {
   const url = `${BASE}/coins/${coinId}?localization=false&tickers=false&market_data=true&community_data=true&developer_data=true`;
@@ -2330,7 +2371,8 @@ async function runHubAnalysis() {
 
   // Reset cards to loading state
   ['hubTechCard','hubFuturesCard','hubSentHubCard','hubNewsCard',
-   'hubNarrCard','hubTokCard','hubOnChainCard','hubRiskCard'].forEach(id => {
+   'hubNarrCard','hubTokCard','hubOnChainCard','hubRiskCard',
+   'hubLiqCard','hubWhaleCard','hubOrderFlowCard'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
       const heading = el.querySelector('.card-heading');
@@ -2398,6 +2440,9 @@ async function runHubAnalysis() {
   });
   // Narratives without news yet (category match); refreshed when news lands.
   renderNarrativeCard(detectNarratives(coinId, []), coinId);
+  // Liquidation + whale render from technicals now; enriched once futures land.
+  renderLiquidationCard();
+  renderWhaleCard();
 
   if (statusLbl) statusLbl.textContent = 'Loading live market data…';
 
@@ -2407,8 +2452,13 @@ async function runHubAnalysis() {
   // Futures: OKX directly in the browser; fall back to the Render proxy.
   const futuresP = fetchFuturesDirect(coinId)
     .catch(() => backendFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000, backendOpts))
-    .then(d => { hubState.futures = d; renderHubFuturesCard(d); renderHubMasterScore(); })
+    .then(d => { hubState.futures = d; renderHubFuturesCard(d); renderHubMasterScore(); renderLiquidationCard(); renderWhaleCard(); })
     .catch(() => { hubState.futures = null; renderHubFuturesCard(null); });
+
+  // Live order flow + market structure (real OKX trades + order book).
+  const orderFlowP = fetchOrderFlow(coinId)
+    .then(d => { hubState.orderflow = d; renderOrderFlowCard(d); })
+    .catch(() => { hubState.orderflow = null; renderOrderFlowCard(null); });
 
   // Tokenomics + on-chain: one CoinGecko call, derived locally.
   const coinFullP = fetchCoinFull(coinId);
@@ -2421,7 +2471,7 @@ async function runHubAnalysis() {
   const onchainP = coinFullP
     .then(d => deriveOnchain(coinId, d))
     .catch(() => backendFetch(`${BACKEND_URL}/onchain/${coinId}`, `hub-onchain-${coinId}`, 600_000, backendOpts))
-    .then(d => { hubState.onchain = d; renderOnChainCard(d); })
+    .then(d => { hubState.onchain = d; renderOnChainCard(d); renderWhaleCard(); })
     .catch(() => { hubState.onchain = null; renderOnChainCard(null); });
 
   const newsP = fetchCryptoNews()
@@ -2445,7 +2495,7 @@ async function runHubAnalysis() {
     renderHubMasterScore();  // sentiment now feeds the AI Intelligence Dashboard
   })();
 
-  await Promise.allSettled([futuresP, tokP, onchainP, newsP, sentP]);
+  await Promise.allSettled([futuresP, orderFlowP, tokP, onchainP, newsP, sentP]);
   if (statusLbl) statusLbl.textContent = `Analysis complete for ${COINS[coinId]?.name || coinId}`;
   if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Full Analysis'; }
 }
@@ -2606,6 +2656,179 @@ function renderHubFuturesCard(futures) {
       <div class="fm-bar-wrap"><div class="fm-bar green" style="width:${Math.min(100,f.short_squeeze_risk||0)}%"></div></div>
       <div class="fm-val green">${(f.short_squeeze_risk || 0).toFixed(0)}/100</div>
     </div>`;
+}
+
+// ── Render: Order Flow & Market Structure (live OKX) ──────────────
+
+function renderOrderFlowCard(data) {
+  const card = document.getElementById('hubOrderFlowCard');
+  if (!card) return;
+  if (!data) {
+    card.innerHTML = `<h3 class="card-heading">Order Flow &amp; Structure</h3>
+      <div class="hub-unavail">Order-flow data unavailable for this market.</div>`;
+    return;
+  }
+  const d = data;
+  const buyPct  = Math.round((d.delta + 1) / 2 * 100);
+  const sellPct = 100 - buyPct;
+  const obPct   = Math.round((d.obImbalance + 1) / 2 * 100);
+  const askPct  = 100 - obPct;
+  const flow   = d.delta > 0.15 ? { t: 'Aggressive buying', c: 'green' }
+               : d.delta < -0.15 ? { t: 'Aggressive selling', c: 'red' }
+               : { t: 'Balanced flow', c: 'neutral-text' };
+  const struct = d.obImbalance > 0.12 ? { t: 'Bid-heavy (support)', c: 'green' }
+               : d.obImbalance < -0.12 ? { t: 'Ask-heavy (resistance)', c: 'red' }
+               : { t: 'Balanced book', c: 'neutral-text' };
+
+  card.innerHTML = `
+    <div class="aidash-head"><h3 class="card-heading">Order Flow &amp; Structure</h3><span class="live-badge">Live &middot; OKX</span></div>
+    <div class="ls-bar-label">Volume Delta &mdash; taker buys vs sells (last 100 trades)</div>
+    <div class="ls-bar">
+      <div class="ls-bar-long" style="width:${buyPct}%">${buyPct}% Buy</div>
+      <div class="ls-bar-short" style="width:${sellPct}%">${sellPct}% Sell</div>
+    </div>
+    <div class="hub-metric-row"><span>Taker Buy Volume</span><span class="green">$${(d.buyNotional / 1e6).toFixed(2)}M</span></div>
+    <div class="hub-metric-row"><span>Taker Sell Volume</span><span class="red">$${(d.sellNotional / 1e6).toFixed(2)}M</span></div>
+    <div class="hub-metric-row"><span>Order Flow</span><span class="${flow.c}">${flow.t}</span></div>
+    <div class="hub-divider"></div>
+    <div class="ls-bar-label">Order Book Imbalance &mdash; top 50 levels</div>
+    <div class="ls-bar">
+      <div class="ls-bar-long" style="width:${obPct}%">${obPct}% Bids</div>
+      <div class="ls-bar-short" style="width:${askPct}%">${askPct}% Asks</div>
+    </div>
+    <div class="hub-metric-row"><span>Spread</span><span class="accent">${d.spreadPct != null ? d.spreadPct.toFixed(3) + '%' : '—'}</span></div>
+    <div class="hub-metric-row"><span>Market Structure</span><span class="${struct.c}">${struct.t}</span></div>`;
+}
+
+// ── Liquidation Heatmap (modeled from leverage tiers + open interest) ──
+
+function computeLiquidationModel(curr, oiUsd) {
+  // Approximate share of open interest sitting at each leverage tier
+  // (retail crypto perps skew toward high leverage near the price).
+  const tiers = [
+    { lev: 100, share: 0.16 },
+    { lev: 50,  share: 0.23 },
+    { lev: 25,  share: 0.30 },
+    { lev: 10,  share: 0.21 },
+    { lev: 5,   share: 0.10 },
+  ];
+  const mmr = 0.005;
+  const maxShare = Math.max(...tiers.map(t => t.share));
+  const longZones = [], shortZones = [];
+  for (const t of tiers) {
+    const longLiq  = curr * (1 - 1 / t.lev + mmr);
+    const shortLiq = curr * (1 + 1 / t.lev - mmr);
+    const notional = oiUsd ? oiUsd * t.share * 0.5 : null;
+    longZones.push({ price: longLiq, dist: (curr - longLiq) / curr * 100, lev: t.lev, intensity: t.share / maxShare, notional });
+    shortZones.push({ price: shortLiq, dist: (shortLiq - curr) / curr * 100, lev: t.lev, intensity: t.share / maxShare, notional });
+  }
+  const danger = (zones) => zones.reduce((m, z) => {
+    const s = z.intensity / Math.max(0.5, z.dist);
+    return s > m.s ? { s, z } : m;
+  }, { s: 0, z: zones[0] }).z;
+  return { longZones, shortZones, dangerLong: danger(longZones), dangerShort: danger(shortZones) };
+}
+
+function renderLiquidationCard() {
+  const card = document.getElementById('hubLiqCard');
+  if (!card) return;
+  const t = hubState.analysis;
+  if (!t) {
+    card.innerHTML = `<h3 class="card-heading">Liquidation Heatmap</h3><div class="hub-unavail">Price data needed for liquidation modeling.</div>`;
+    return;
+  }
+  const curr = t.curr;
+  const oiUsd = hubState.futures?.open_interest || null;
+  const m = computeLiquidationModel(curr, oiUsd);
+
+  const zoneRow = (z, side) => `
+    <div class="liq-row">
+      <span class="liq-price ${side === 'short' ? 'green' : 'red'}">${fmtUSD(z.price)}</span>
+      <div class="liq-bar-track"><div class="liq-bar ${side}" style="width:${Math.round(z.intensity * 100)}%"></div></div>
+      <span class="liq-meta">${z.lev}× &middot; ${side === 'short' ? '+' : '-'}${z.dist.toFixed(1)}%${z.notional ? ` &middot; $${(z.notional / 1e6).toFixed(0)}M` : ''}</span>
+    </div>`;
+  const shortRows = [...m.shortZones].sort((a, b) => a.dist - b.dist).map(z => zoneRow(z, 'short')).join('');
+  const longRows  = [...m.longZones].sort((a, b) => a.dist - b.dist).map(z => zoneRow(z, 'long')).join('');
+
+  card.innerHTML = `
+    <div class="aidash-head">
+      <h3 class="card-heading">Liquidation Heatmap <span class="heading-sub">— ${COINS[hubState.coinId]?.name || ''}</span></h3>
+      <span class="est-badge">Modeled estimate</span>
+    </div>
+    <div class="liq-summary">
+      <div class="liq-sum-item"><span class="liq-sum-lbl green">Upside squeeze zone</span><span class="liq-sum-val green">+${m.dangerShort.dist.toFixed(1)}% &middot; ${m.dangerShort.lev}×</span></div>
+      <div class="liq-sum-item"><span class="liq-sum-lbl">Current price</span><span class="liq-sum-val accent">${fmtUSD(curr)}</span></div>
+      <div class="liq-sum-item"><span class="liq-sum-lbl red">Cascade risk zone</span><span class="liq-sum-val red">-${m.dangerLong.dist.toFixed(1)}% &middot; ${m.dangerLong.lev}×</span></div>
+    </div>
+    <div class="liq-grid">
+      <div class="liq-col">
+        <div class="liq-side-label green">Short Liquidations &middot; above price &middot; squeeze fuel ↑</div>
+        <div class="liq-ladder">${shortRows}</div>
+      </div>
+      <div class="liq-col">
+        <div class="liq-side-label red">Long Liquidations &middot; below price &middot; cascade risk ↓</div>
+        <div class="liq-ladder">${longRows}</div>
+      </div>
+    </div>
+    <div class="hub-note">Zones modeled from common leverage tiers (5–100×)${oiUsd ? ' scaled by open interest' : ''} — not exchange liquidation feeds. Educational estimate.</div>`;
+}
+
+// ── Whale Intelligence (estimated from on-chain + flow proxies) ───
+
+function computeWhaleModel() {
+  const oc = hubState.onchain, fut = hubState.futures;
+  const acc = oc?.accumulation_score ?? 50;
+  const dist = oc?.distribution_score ?? 50;
+  const vmc = oc?.volume_mc_ratio ?? null;
+  const chg = fut?.price_change_pct ?? 0;
+  // Net exchange-flow proxy: price up on turnover ≈ outflow (bullish);
+  // price down on turnover ≈ inflow (bearish).
+  let flow = acc - dist;
+  if (vmc != null) flow += clamp(chg * (vmc > 0.08 ? 6 : 3), -30, 30);
+  flow = Math.round(clamp(flow, -100, 100));
+  const sentiment = flow > 12 ? { t: 'Accumulation', cls: 'bull' }
+                  : flow < -12 ? { t: 'Distribution', cls: 'bear' }
+                  : { t: 'Neutral', cls: 'neu' };
+  return { acc, dist, vmc, chg, flow, sentiment };
+}
+
+function renderWhaleCard() {
+  const card = document.getElementById('hubWhaleCard');
+  if (!card) return;
+  const coinId = hubState.coinId;
+  const m = computeWhaleModel();
+  const flowPct = Math.round((m.flow + 100) / 2);
+
+  const txRow = (coinId === 'bitcoin' && hubState.onchain?.btc_transactions_24h != null)
+    ? `<div class="hub-metric-row"><span>BTC Transactions 24h</span><span class="accent">${(hubState.onchain.btc_transactions_24h / 1000).toFixed(1)}k</span></div>`
+    : '';
+
+  const signals = [
+    { ico: m.acc >= 55 ? '▲' : m.acc >= 45 ? '▶' : '▼', t: `Accumulation score ${m.acc}/100`, c: m.acc >= 55 ? 'green' : m.acc >= 45 ? 'gold' : 'red' },
+    { ico: m.dist >= 55 ? '▲' : '▶', t: `Distribution pressure ${m.dist}/100`, c: m.dist >= 55 ? 'red' : 'green' },
+    { ico: m.flow > 0 ? '▲' : m.flow < 0 ? '▼' : '▶', t: `Net exchange flow: ${m.flow > 12 ? 'outflow (bullish)' : m.flow < -12 ? 'inflow (bearish)' : 'balanced'}`, c: m.flow > 12 ? 'green' : m.flow < -12 ? 'red' : 'neutral-text' },
+  ];
+  if (m.vmc != null) signals.push({ ico: m.vmc > 0.12 ? '▲' : '▶', t: `Volume/MC ${(m.vmc * 100).toFixed(1)}% — ${m.vmc > 0.12 ? 'elevated turnover' : 'normal turnover'}`, c: m.vmc > 0.12 ? 'gold' : 'neutral-text' });
+
+  card.innerHTML = `
+    <div class="aidash-head"><h3 class="card-heading">Whale Intelligence</h3><span class="est-badge">Estimated</span></div>
+    <div class="whale-verdict-row">
+      <span class="whale-verdict verdict-${m.sentiment.cls}">${m.sentiment.t}</span>
+      <span class="whale-flow-note">net positioning</span>
+    </div>
+    <div class="ls-bar-label">Exchange Flow &mdash; outflow (bullish) vs inflow (bearish)</div>
+    <div class="fg-bar-track" style="margin:6px 0 14px"><div class="fg-bar-indicator" style="left:${flowPct}%"></div></div>
+    <div class="onchain-scores-row">
+      <div class="onchain-stat"><div class="os-label">Accumulation</div><div class="os-val green">${m.acc}/100</div><div class="os-bar-track"><div class="os-bar-fill" style="width:${m.acc}%;background:var(--green)"></div></div></div>
+      <div class="onchain-stat"><div class="os-label">Distribution</div><div class="os-val red">${m.dist}/100</div><div class="os-bar-track"><div class="os-bar-fill" style="width:${m.dist}%;background:var(--red)"></div></div></div>
+    </div>
+    ${txRow}
+    <div class="hub-divider"></div>
+    <div class="hub-sent-section-label">Whale Signals</div>
+    <div class="whale-timeline">
+      ${signals.map(s => `<div class="whale-sig"><span class="whale-sig-ico ${s.c}">${s.ico}</span><span class="whale-sig-txt">${s.t}</span></div>`).join('')}
+    </div>
+    <div class="hub-note">Whale activity is estimated from on-chain developer/community signals, volume/market-cap turnover, and price-flow proxies. Live large-transfer counts are BTC-only on the free tier. Educational estimate.</div>`;
 }
 
 // ── Render: Market Sentiment Card (Hub) ───────────────────────────
