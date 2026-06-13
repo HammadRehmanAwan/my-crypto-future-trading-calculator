@@ -428,13 +428,14 @@ function renderSentimentCard(data) {
     const listHtml = articles.map(item => {
       const sc   = item._sent;
       const time = formatTimeAgo(item.published_on);
-      const title = item.title.length > 90 ? item.title.slice(0, 87) + '…' : item.title;
-      const href  = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
+      const rawTitle = item.title || '';
+      const title = escapeHtml(rawTitle.length > 90 ? rawTitle.slice(0, 87) + '…' : rawTitle);
+      const href  = item.url ? ` href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer"` : '';
       return `<a class="nl-item"${href}>
         <span class="nl-dot nl-${sc}"></span>
         <div class="nl-body">
           <div class="nl-title">${title}</div>
-          <div class="nl-meta"><span class="nl-src">${item.source || ''}</span><span class="nl-time">${time}</span></div>
+          <div class="nl-meta"><span class="nl-src">${escapeHtml(item.source || '')}</span><span class="nl-time">${time}</span></div>
         </div>
       </a>`;
     }).join('');
@@ -634,6 +635,24 @@ function fmt(v, d = 2) {
 function fmtUSD(v, d = 2) { return v == null ? '—' : `$${fmt(v, d)}`; }
 function fmtPct(v) { return v == null ? '—' : `${v >= 0 ? '+' : ''}${v.toFixed(2)}%`; }
 function badge(text, type) { return `<span class="badge badge-${type}">${text}</span>`; }
+
+// Escape any externally-sourced string (news titles, sources, URLs) before it
+// is interpolated into innerHTML, to prevent stored/reflected XSS.
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+// Deterministic news-impact score (0–100) derived from sentiment-keyword
+// density in the headline. Replaces the previous Math.random() placeholder.
+function headlineImpact(title) {
+  const words = (title || '').toLowerCase().replace(/[^a-z\s-]/g, ' ').split(/\s+/);
+  let p = 0, n = 0;
+  for (const w of words) { if (_SENT_POS.has(w)) p++; if (_SENT_NEG.has(w)) n++; }
+  const hits = p + n;
+  return hits ? Math.min(95, 40 + hits * 18) : 25;
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // FRESHNESS INDICATOR  ("last updated X ago")
@@ -1302,6 +1321,7 @@ function init() {
 
   loadCoin('bitcoin', 30);
   refreshTicker();
+  loadHeroMetrics();
   setInterval(refreshTicker, 60_000);
   setInterval(updateFreshness, 1000); // tick the "updated X ago" label
   initAlertUI();
@@ -1446,6 +1466,104 @@ function switchTab(tab) {
   document.getElementById('tabCalc').classList.toggle('active', isCalc);
   document.getElementById('tabDash').classList.toggle('active', isDash);
   document.getElementById('tabHub').classList.toggle('active',  isHub);
+  // Hero band is the landing experience — show it only on the default view.
+  const hero = document.getElementById('heroSection');
+  if (hero) hero.style.display = isCalc ? '' : 'none';
+  // Keep the mobile bottom-nav in sync.
+  document.querySelectorAll('.bn-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// HERO — live landing metrics + CTAs
+// ═══════════════════════════════════════════════════════════════════
+
+function setHeroValue(id, value, cls, sub) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const v = el.querySelector('.hm-value');
+  if (v) { v.textContent = value; v.className = 'hm-value' + (cls ? ' ' + cls : ''); }
+  if (sub != null) { const s = el.querySelector('.hm-sub'); if (s) s.textContent = sub; }
+}
+
+async function loadHeroMetrics() {
+  // BTC price + 24h change
+  fetchTicker(['bitcoin']).then(d => {
+    const p = d?.bitcoin; if (!p) return;
+    const chg = p.usd_24h_change || 0;
+    setHeroValue('heroBtc', '$' + p.usd.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+      '', (chg >= 0 ? '+' : '') + chg.toFixed(2) + '% 24h');
+    const sub = document.querySelector('#heroBtc .hm-sub');
+    if (sub) sub.className = 'hm-sub ' + (chg >= 0 ? 'green' : 'red');
+  }).catch(() => {});
+
+  // Market sentiment (Fear & Greed)
+  fetchFearGreed().then(r => {
+    const f = r?.data?.[0]; if (!f) return;
+    const v = parseInt(f.value);
+    const cls = v <= 44 ? 'red' : v <= 55 ? 'gold' : 'green';
+    setHeroValue('heroSentiment', String(v), cls, f.value_classification);
+  }).catch(() => {});
+
+  // AI confidence — derived from BTC composite technical score
+  fetchHistory('bitcoin', 90).then(({ prices, volumes }) => {
+    if (!prices || prices.length < 20) return;
+    const rsiArr = calcRSI(prices);
+    const { macdLine, signalLine } = calcMACD(prices);
+    const bb = calcBollinger(prices);
+    const curr = prices[prices.length - 1];
+    const ts = calcHubTechScore(
+      rsiArr[rsiArr.length - 1], macdLine[macdLine.length - 1], signalLine[signalLine.length - 1],
+      curr, bb.upper[bb.upper.length - 1], bb.lower[bb.lower.length - 1],
+      ema(prices, 20).slice(-1)[0], ema(prices, 50).slice(-1)[0], ema(prices, 200).slice(-1)[0]);
+    const conf = Math.round(Math.abs(ts.score - 50) * 2);
+    const cls = ts.score >= 55 ? 'green' : ts.score <= 45 ? 'red' : 'gold';
+    const dir = ts.score >= 55 ? 'Bullish bias' : ts.score <= 45 ? 'Bearish bias' : 'Neutral';
+    setHeroValue('heroConfidence', conf + '%', cls, dir);
+  }).catch(() => {});
+
+  // Best opportunity — quick scan across all coins (cached 5 min)
+  loadHeroBestOpportunity();
+}
+
+async function loadHeroBestOpportunity() {
+  try {
+    const ids = Object.keys(COINS).join(',');
+    const url = `${BASE}/coins/markets?vs_currency=usd&ids=${ids}&sparkline=true&price_change_percentage=24h`;
+    const markets = await apiFetch(url, 'mkts-spark', 5 * 60_000);
+    let best = null;
+    for (const c of markets) {
+      const prices = c.sparkline_in_7d?.price;
+      if (!prices || prices.length < 30) continue;
+      const rsi = calcRSI(prices)[prices.length - 1];
+      const { macdLine, signalLine } = calcMACD(prices);
+      const bb = calcBollinger(prices);
+      const curr = c.current_price;
+      let s = 0;
+      if (rsi < 30) s += 2; else if (rsi < 40) s += 1; else if (rsi > 70) s -= 2; else if (rsi > 60) s -= 1;
+      if (macdLine[macdLine.length - 1] > signalLine[signalLine.length - 1]) s += 1; else s -= 1;
+      if (curr < bb.lower[bb.lower.length - 1]) s += 1; else if (curr > bb.upper[bb.upper.length - 1]) s -= 1;
+      if (!best || Math.abs(s) > Math.abs(best.s)) best = { sym: (c.symbol || '').toUpperCase(), s };
+    }
+    if (best && best.s !== 0) {
+      setHeroValue('heroOpportunity', best.sym, best.s > 0 ? 'green' : 'red',
+        (best.s > 0 ? 'Long' : 'Short') + ' signal');
+    } else {
+      setHeroValue('heroOpportunity', '—', '', 'No strong signal');
+    }
+  } catch (e) { /* leave placeholder */ }
+}
+
+function heroAnalyze() {
+  switchTab('calc');
+  const panel = document.querySelector('.right-panel');
+  if (panel) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  analyze();
+}
+
+function heroSignals() {
+  switchTab('hub');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  runHubAnalysis();
 }
 
 function setRiskProfile(profile) {
@@ -2096,7 +2214,18 @@ async function runHubAnalysis() {
     })
     .catch(() => { hubState.news = null; renderNewsImpactCard([]); });
 
-  await Promise.allSettled([futuresP, tokP, onchainP, newsP]);
+  // Sentiment: the Hub loads its own (Fear & Greed + community + news) so it
+  // works when opened directly, without needing the Calculator tab first.
+  const sentP = (async () => {
+    try { await loadSentiment(coinId); } catch (e) { /* keep going */ }
+    renderHubSentCard({
+      fg: state.sentiment?.fg,
+      community: state.sentiment?.community,
+      newsSentiment: state.sentiment?.newsSentiment,
+    });
+  })();
+
+  await Promise.allSettled([futuresP, tokP, onchainP, newsP, sentP]);
   if (statusLbl) statusLbl.textContent = `Analysis complete for ${COINS[coinId]?.name || coinId}`;
   if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Full Analysis'; }
 }
@@ -2239,8 +2368,9 @@ function renderHubSentCard(data) {
   const fgData = data?.fg;
   const commData = data?.community;
   const ns = data?.newsSentiment;
+  const hasData = !!(fgData?.length || commData?.up != null || ns);
 
-  let fgHtml = '<div class="hub-unavail">Fear &amp; Greed: run calculator first</div>';
+  let fgHtml = '<div class="hub-metric-row"><span>Fear &amp; Greed</span><span class="neutral-text">Loading…</span></div>';
   if (fgData?.length) {
     const cur = parseInt(fgData[0].value);
     const label = fgData[0].value_classification;
@@ -2278,7 +2408,7 @@ function renderHubSentCard(data) {
     <div class="hub-divider"></div>
     <div class="hub-sent-section-label">News Analysis</div>
     ${newsHtml}
-    <div class="hub-note">Run analysis on Calculator tab first to load sentiment data.</div>`;
+    ${hasData ? '' : '<div class="hub-note">Sentiment data is loading — it will populate momentarily.</div>'}`;
 }
 
 // ── Render: News Impact Card ───────────────────────────────────────
@@ -2293,17 +2423,18 @@ function renderNewsImpactCard(newsItems) {
   }
 
   const items = newsItems.slice(0, 6).map(item => {
-    const sc = item._sent || classifyHeadline(item.title || '');
+    const rawTitle = item.title || '';
+    const sc = item._sent || classifyHeadline(rawTitle);
     const impactCls = sc === 'pos' ? 'green' : sc === 'neg' ? 'red' : 'neutral-text';
     const impactLabel = sc === 'pos' ? 'Bullish' : sc === 'neg' ? 'Bearish' : 'Neutral';
-    const impactScore = sc === 'pos' ? Math.floor(Math.random() * 30 + 50) : sc === 'neg' ? Math.floor(Math.random() * 30 + 50) : Math.floor(Math.random() * 20 + 20);
-    const title = (item.title || '').slice(0, 75) + ((item.title || '').length > 75 ? '…' : '');
-    const href = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
+    const impactScore = headlineImpact(rawTitle);
+    const title = escapeHtml(rawTitle.slice(0, 75) + (rawTitle.length > 75 ? '…' : ''));
+    const href = item.url ? ` href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer"` : '';
     const time = formatTimeAgo(item.published_on || 0);
     return `<a class="hub-news-item"${href}>
       <div class="hub-news-top">
-        <span class="hub-news-impact ${impactCls}">${impactLabel}</span>
-        <span class="hub-news-source">${item.source || ''}</span>
+        <span class="hub-news-impact ${impactCls}">${impactLabel} ${impactScore}</span>
+        <span class="hub-news-source">${escapeHtml(item.source || '')}</span>
         <span class="hub-news-time">${time}</span>
       </div>
       <div class="hub-news-title">${title}</div>
@@ -2451,7 +2582,7 @@ function renderRiskCard(techData) {
     <div class="hub-divider"></div>
     <div class="hub-metric-row"><span>Rec. Stop Loss</span><span class="red">${fmtUSD(slRecommended)} (1.5× ATR below)</span></div>
     <div class="hub-metric-row"><span>Rec. Take Profit</span><span class="green">${fmtUSD(tpRecommended)} (2× ATR above)</span></div>
-    <div class="hub-metric-row"><span>Risk:Reward</span><span class="accent">1 : 1.33</span></div>
+    <div class="hub-metric-row"><span>Risk:Reward</span><span class="accent">1 : ${(curr > slRecommended ? (tpRecommended - curr) / (curr - slRecommended) : 1.33).toFixed(2)}</span></div>
     <div class="hub-divider"></div>
     <div class="hub-metric-row"><span>Position Size (2% risk, $1k)</span><span class="accent">$${posSize2pct}</span></div>
     <div class="hub-note">Position sizing based on 2% portfolio risk rule. Adjust for your capital.</div>`;
