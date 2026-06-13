@@ -1457,3 +1457,109 @@ input, select, button { font-family: inherit; }
 .green { color: var(--green); }
 .red   { color: var(--red); }
 .gold  { color: var(--gold); }
+
+/* ═══════════════════════════════════════════════════════
+   ADVANCED TECHNICAL ANALYSIS (Calculator page)
+═══════════════════════════════════════════════════════ */
+.adv-score-row {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 14px;
+}
+.adv-score-badge {
+  flex-shrink: 0;
+  width: 60px; height: 60px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border: 2px solid var(--accent);
+  border-radius: 50%;
+  font-family: var(--mono); font-size: 20px; font-weight: 700;
+  line-height: 1;
+}
+.adv-score-badge small { font-size: 9px; font-weight: 400; color: var(--text-lo); }
+.adv-score-title { font-size: 13px; font-weight: 700; color: var(--text-hi); }
+.adv-score-sub   { font-size: 11px; color: var(--text-lo); margin-top: 2px; }
+
+.adv-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;
+}
+.adv-metric {
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  padding: 8px 10px;
+}
+.adv-m-label { font-size: 10px; color: var(--text-lo); text-transform: uppercase; letter-spacing: .04em; }
+.adv-m-val   { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text-hi); }
+.adv-m-val small { font-size: 10px; opacity: .8; font-weight: 400; }
+.adv-m-val.green  { color: var(--green); }
+.adv-m-val.red    { color: var(--red); }
+.adv-m-val.accent { color: var(--accent); }
+.adv-m-val.gold   { color: var(--gold); }
+
+.adv-divider { height: 1px; background: var(--border); margin: 12px 0; }
+
+.adv-sr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.adv-sr-head {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  margin-bottom: 6px;
+}
+.adv-sr-head.green { color: var(--green); }
+.adv-sr-head.red   { color: var(--red); }
+.adv-sr-lvl {
+  font-family: var(--mono); font-size: 13px; font-weight: 600;
+  padding: 3px 0;
+}
+.adv-sr-lvl.green { color: var(--green); }
+.adv-sr-lvl.red   { color: var(--red); }
+.adv-sr-lvl.muted { color: var(--text-lo); }
+
+.adv-signals { display: flex; flex-wrap: wrap; gap: 6px; }
+
+@media (max-width: 560px) {
+  .adv-grid { grid-template-columns: 1fr; }
+}
+
+/* ═══════════════════════════════════════════════════════
+   DESIGN POLISH
+═══════════════════════════════════════════════════════ */
+.card {
+  background: linear-gradient(180deg, #111C2E 0%, var(--card) 60%);
+  box-shadow: 0 1px 2px rgba(0,0,0,.3);
+  transition: border-color .2s, box-shadow .25s, transform .25s;
+}
+.card:hover {
+  border-color: var(--border2);
+  box-shadow: 0 8px 24px rgba(0,0,0,.28);
+}
+/* Accent marker before each card heading */
+.card-heading::before {
+  content: '';
+  display: inline-block;
+  width: 3px; height: 12px;
+  margin-right: 8px;
+  vertical-align: -1px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent), #7C3AED);
+}
+.card-heading .heading-sub::before { content: none; }
+
+/* Primary buttons: subtle glow + lift */
+.btn-analyze, .btn-hub-analyze, .btn-analyze-once {
+  box-shadow: 0 4px 14px rgba(0,212,255,.22);
+  transition: opacity .2s, transform .12s, box-shadow .2s;
+}
+.btn-analyze:hover, .btn-hub-analyze:hover, .btn-analyze-once:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(0,212,255,.34);
+  opacity: 1;
+}
+
+/* Page tabs: smoother active state */
+.page-tab { transition: color .2s, border-color .2s, background .2s; }
+
+/* Score ring subtle pulse on render */
+.score-ring { box-shadow: 0 0 0 1px var(--border), 0 0 40px -8px var(--score-color, var(--accent)); }
+
+/* Smooth fade-in for hub cards as they progressively fill */
+.hub-inner-card, .adv-tech-card { animation: cardFade .35s ease both; }
+@keyframes cardFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
