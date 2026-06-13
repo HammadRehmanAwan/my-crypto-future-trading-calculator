@@ -26,27 +26,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ─── Coin → Binance symbol mapping ─────────────────────────────────
+# ─── Coin → OKX perpetual swap instId ──────────────────────────────
+# OKX public market data API works from US servers; Binance fapi is geo-blocked.
 
-BINANCE_SYMBOLS = {
-    "bitcoin":       "BTCUSDT",
-    "ethereum":      "ETHUSDT",
-    "binancecoin":   "BNBUSDT",
-    "solana":        "SOLUSDT",
-    "ripple":        "XRPUSDT",
-    "cardano":       "ADAUSDT",
-    "avalanche-2":   "AVAXUSDT",
-    "dogecoin":      "DOGEUSDT",
-    "polkadot":      "DOTUSDT",
-    "matic-network": "MATICUSDT",
-    "chainlink":     "LINKUSDT",
-    "uniswap":       "UNIUSDT",
-    "litecoin":      "LTCUSDT",
-    "cosmos":        "ATOMUSDT",
-    "filecoin":      "FILUSDT",
+OKX_INST_IDS = {
+    "bitcoin":       "BTC-USDT-SWAP",
+    "ethereum":      "ETH-USDT-SWAP",
+    "binancecoin":   "BNB-USDT-SWAP",
+    "solana":        "SOL-USDT-SWAP",
+    "ripple":        "XRP-USDT-SWAP",
+    "cardano":       "ADA-USDT-SWAP",
+    "avalanche-2":   "AVAX-USDT-SWAP",
+    "dogecoin":      "DOGE-USDT-SWAP",
+    "polkadot":      "DOT-USDT-SWAP",
+    "matic-network": "MATIC-USDT-SWAP",
+    "chainlink":     "LINK-USDT-SWAP",
+    "uniswap":       "UNI-USDT-SWAP",
+    "litecoin":      "LTC-USDT-SWAP",
+    "cosmos":        "ATOM-USDT-SWAP",
+    "filecoin":      "FIL-USDT-SWAP",
 }
 
-BINANCE_BASE = "https://fapi.binance.com"
+OKX_BASE = "https://www.okx.com"
 
 # ─── Simple in-memory cache ─────────────────────────────────────────
 
@@ -177,87 +178,104 @@ async def get_news():
 @app.get("/futures/{coin_id}")
 async def get_futures(coin_id: str):
     coin_id = coin_id.lower()
-    symbol = BINANCE_SYMBOLS.get(coin_id)
-    if not symbol:
-        return JSONResponse({"error": f"No Binance symbol for {coin_id}"}, status_code=404)
+    inst_id = OKX_INST_IDS.get(coin_id)
+    if not inst_id:
+        return JSONResponse({"error": f"No futures data for {coin_id}"}, status_code=404)
 
     cached = cache_get(f"futures-{coin_id}", 60)
     if cached is not None:
         return cached
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        reqs = [
-            client.get(f"{BINANCE_BASE}/fapi/v1/openInterest", params={"symbol": symbol}),
-            client.get(f"{BINANCE_BASE}/fapi/v1/fundingRate", params={"symbol": symbol, "limit": 1}),
-            client.get(f"{BINANCE_BASE}/futures/data/globalLongShortAccountRatio",
-                       params={"symbol": symbol, "period": "5m", "limit": 1}),
-            client.get(f"{BINANCE_BASE}/futures/data/topLongShortPositionRatio",
-                       params={"symbol": symbol, "period": "5m", "limit": 1}),
-            client.get(f"{BINANCE_BASE}/futures/data/takerlongshortRatio",
-                       params={"symbol": symbol, "period": "5m", "limit": 1}),
-            client.get(f"{BINANCE_BASE}/fapi/v1/ticker/24hr", params={"symbol": symbol}),
-        ]
-        responses = await asyncio.gather(*reqs, return_exceptions=True)
-
-    def safe_json(resp, default=None):
+    def safe_float(val, default=0.0):
         try:
-            if isinstance(resp, Exception):
+            return float(val) if val is not None else default
+        except (TypeError, ValueError):
+            return default
+
+    def safe_list_item(data, default=None):
+        if isinstance(data, list) and data:
+            return data[0]
+        return default or {}
+
+    def safe_okx(resp, default=None):
+        try:
+            if isinstance(resp, Exception) or resp.status_code != 200:
                 return default
-            if resp.status_code != 200:
+            body = resp.json()
+            if body.get("code") != "0":
                 return default
-            return resp.json()
+            return body.get("data", default)
         except Exception:
             return default
 
-    oi_data       = safe_json(responses[0], {})
-    fr_data       = safe_json(responses[1], [{}])
-    ls_data       = safe_json(responses[2], [{}])
-    top_ls_data   = safe_json(responses[3], [{}])
-    taker_data    = safe_json(responses[4], [{}])
-    ticker_data   = safe_json(responses[5], {})
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        responses = await asyncio.gather(
+            # Ticker: last price, 24h vol, price change
+            client.get(f"{OKX_BASE}/api/v5/market/ticker", params={"instId": inst_id}),
+            # Funding rate
+            client.get(f"{OKX_BASE}/api/v5/public/funding-rate", params={"instId": inst_id}),
+            # Open interest (in USD)
+            client.get(f"{OKX_BASE}/api/v5/public/open-interest",
+                       params={"instType": "SWAP", "instId": inst_id}),
+            # Long/Short account ratio (public endpoint, no auth needed)
+            client.get(f"{OKX_BASE}/api/v5/rubik/stat/contracts/long-short-account-ratio",
+                       params={"ccy": inst_id.split("-")[0], "period": "5m", "limit": "1"}),
+            return_exceptions=True,
+        )
 
-    fr_list    = fr_data if isinstance(fr_data, list) else [{}]
-    ls_list    = ls_data if isinstance(ls_data, list) else [{}]
-    taker_list = taker_data if isinstance(taker_data, list) else [{}]
+    ticker_list = safe_okx(responses[0], [])
+    fr_list     = safe_okx(responses[1], [])
+    oi_list     = safe_okx(responses[2], [])
+    ls_list     = safe_okx(responses[3], [])
 
-    open_interest = float(oi_data.get("openInterest", 0)) if oi_data else 0
-    # openInterest from Binance is in contracts (base asset units), multiply by mark price
-    mark_price = float(ticker_data.get("lastPrice", 0)) if ticker_data else 0
-    oi_usd = open_interest * mark_price
+    ticker = safe_list_item(ticker_list)
+    fr     = safe_list_item(fr_list)
+    oi     = safe_list_item(oi_list)
+    ls     = safe_list_item(ls_list)
 
-    funding_rate = float(fr_list[0].get("fundingRate", 0)) if fr_list else 0
-    ls_entry     = ls_list[0] if ls_list else {}
-    ls_ratio     = float(ls_entry.get("longShortRatio", 1.0)) if ls_entry else 1.0
+    last_price     = safe_float(ticker.get("last"))
+    vol_24h_ccy    = safe_float(ticker.get("volCcy24h"))   # volume in quote currency (USDT)
+    open_24h       = safe_float(ticker.get("open24h"))
+    price_change   = ((last_price - open_24h) / open_24h * 100) if open_24h else 0.0
 
-    taker_entry          = taker_list[0] if taker_list else {}
-    taker_buy_sell_ratio = float(taker_entry.get("buySellRatio", 0.5)) if taker_entry else 0.5
+    funding_rate   = safe_float(fr.get("fundingRate"))     # e.g. 0.0001 = 0.01%/8h
 
-    volume_24h       = float(ticker_data.get("quoteVolume", 0)) if ticker_data else 0
-    price_change_pct = float(ticker_data.get("priceChangePercent", 0)) if ticker_data else 0
+    # OKX oiCcy = OI in base currency; oiUsd = OI in USD (if present)
+    oi_usd         = safe_float(oi.get("oiUsd") or oi.get("oiCcy", 0)) * (
+        last_price if not oi.get("oiUsd") else 1.0
+    )
+
+    # Long/Short ratio — OKX returns longShortRatio directly
+    ls_ratio       = safe_float(ls.get("longShortRatio"), 1.0)
+    long_pct       = round(ls_ratio / (1 + ls_ratio) * 100, 1) if ls_ratio else 50.0
+    short_pct      = round(100 - long_pct, 1)
 
     # Derived signals
-    long_squeeze_risk  = min(100, max(0, (ls_ratio - 1) * 40 + max(0,  funding_rate) * 500))
-    short_squeeze_risk = min(100, max(0, (1 - ls_ratio) * 40 + max(0, -funding_rate) * 500))
+    fr_pct = funding_rate * 100   # as percentage
+    long_squeeze_risk  = round(min(100, max(0, (ls_ratio - 1) * 40 + max(0,  fr_pct) * 50)), 1)
+    short_squeeze_risk = round(min(100, max(0, (1 - ls_ratio) * 40 + max(0, -fr_pct) * 50)), 1)
 
-    if ls_ratio > 1.05 and funding_rate > 0 and taker_buy_sell_ratio > 0.5:
+    if ls_ratio > 1.1 and funding_rate > 0:
         market_bias = "Bullish"
-    elif ls_ratio < 0.95 and funding_rate < 0 and taker_buy_sell_ratio < 0.5:
+    elif ls_ratio < 0.9 and funding_rate < 0:
         market_bias = "Bearish"
     else:
         market_bias = "Neutral"
 
     result = {
-        "coin_id":             coin_id,
-        "symbol":              symbol,
-        "open_interest":       oi_usd,
-        "funding_rate":        funding_rate,
-        "ls_ratio":            ls_ratio,
-        "taker_buy_sell_ratio": taker_buy_sell_ratio,
-        "volume_24h":          volume_24h,
-        "price_change_pct":    price_change_pct,
-        "long_squeeze_risk":   long_squeeze_risk,
-        "short_squeeze_risk":  short_squeeze_risk,
-        "market_bias":         market_bias,
+        "coin_id":              coin_id,
+        "inst_id":              inst_id,
+        "source":               "OKX",
+        "open_interest":        round(oi_usd, 0),
+        "funding_rate":         funding_rate,
+        "ls_ratio":             round(ls_ratio, 3),
+        "long_pct":             long_pct,
+        "short_pct":            short_pct,
+        "volume_24h":           round(vol_24h_ccy, 0),
+        "price_change_pct":     round(price_change, 2),
+        "long_squeeze_risk":    long_squeeze_risk,
+        "short_squeeze_risk":   short_squeeze_risk,
+        "market_bias":          market_bias,
     }
     cache_set(f"futures-{coin_id}", result)
     return result
