@@ -147,10 +147,53 @@ async function fetchCoinCommunity(coinId) {
   return apiFetch(url, `comm-${coinId}`, SENT_TTL);
 }
 
-// Fetch news via our backend proxy (avoids CryptoCompare browser key requirement)
+// Fetch crypto news. Tries CryptoCompare directly in the browser (its public
+// news API sends permissive CORS headers), then the backend proxy, then a
+// Hacker News fallback — so news shows even when the Render backend is down.
 async function fetchCryptoNews() {
-  if (!BACKEND_URL) return null;
-  return backendFetch(`${BACKEND_URL}/news`, 'news-proxy', SENT_TTL);
+  const cached = state.cache['news-proxy'];
+  if (cached && Date.now() - cached.ts < SENT_TTL) return cached.data;
+
+  // 1) CryptoCompare directly
+  try {
+    const r = await fetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN&sortOrder=latest');
+    if (r.ok) {
+      const j = await r.json();
+      const raw = Array.isArray(j.Data) ? j.Data : [];
+      const items = raw
+        .filter(a => a.title && a.published_on)
+        .slice(0, 30)
+        .map(a => ({ title: a.title, url: a.url || '', source: a.source || '', published_on: a.published_on }));
+      if (items.length) { state.cache['news-proxy'] = { data: items, ts: Date.now() }; return items; }
+    }
+  } catch (e) { /* CORS/network — try next source */ }
+
+  // 2) Backend proxy (if reachable)
+  if (BACKEND_URL) {
+    try {
+      return await backendFetch(`${BACKEND_URL}/news`, 'news-proxy', SENT_TTL, { retries: 0, timeoutMs: 10_000 });
+    } catch (e) { /* fall through */ }
+  }
+
+  // 3) Hacker News fallback (CORS-friendly)
+  try {
+    const cutoff = Math.floor(Date.now() / 1000) - 7 * 24 * 3600;
+    const r = await fetch(`https://hn.algolia.com/api/v1/search_by_date?query=bitcoin%20ethereum%20crypto%20blockchain&tags=story&hitsPerPage=20&numericFilters=created_at_i%3E${cutoff}`);
+    if (r.ok) {
+      const j = await r.json();
+      const items = (j.hits || [])
+        .filter(h => h.title && h.created_at_i)
+        .map(h => ({
+          title: h.title,
+          url: h.url || `https://news.ycombinator.com/item?id=${h.objectID}`,
+          source: h.url ? h.url.split('/')[2].replace('www.', '') : 'Hacker News',
+          published_on: h.created_at_i,
+        }));
+      if (items.length) { state.cache['news-proxy'] = { data: items, ts: Date.now() }; return items; }
+    }
+  } catch (e) { /* give up */ }
+
+  return null;
 }
 
 // Module-level sentiment lexicon shared by all scoring functions
@@ -1748,6 +1791,170 @@ function detectNarratives(coinId, newsItems) {
   return results.sort((a, b) => b.score - a.score);
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// CLIENT-SIDE DATA (no backend needed — direct public APIs)
+// These make the Intelligence Hub work even when the Render proxy is
+// asleep or down. The backend remains an optional fallback.
+// ═══════════════════════════════════════════════════════════════════
+
+// Coin → OKX perpetual swap instId (public API, CORS-enabled, no geo-block)
+const OKX_INST = {
+  bitcoin: 'BTC-USDT-SWAP', ethereum: 'ETH-USDT-SWAP', binancecoin: 'BNB-USDT-SWAP',
+  solana: 'SOL-USDT-SWAP', ripple: 'XRP-USDT-SWAP', cardano: 'ADA-USDT-SWAP',
+  'avalanche-2': 'AVAX-USDT-SWAP', dogecoin: 'DOGE-USDT-SWAP', polkadot: 'DOT-USDT-SWAP',
+  'matic-network': 'MATIC-USDT-SWAP', chainlink: 'LINK-USDT-SWAP', uniswap: 'UNI-USDT-SWAP',
+  litecoin: 'LTC-USDT-SWAP', cosmos: 'ATOM-USDT-SWAP', filecoin: 'FIL-USDT-SWAP',
+};
+
+// Fetch futures intelligence straight from OKX in the browser.
+async function fetchFuturesDirect(coinId) {
+  const inst = OKX_INST[coinId];
+  if (!inst) throw new Error('No futures market for this coin');
+  const OKX = 'https://www.okx.com';
+  const sf = (v, d = 0) => { const n = parseFloat(v); return isFinite(n) ? n : d; };
+  const get = async (url) => {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    const b = await r.json();
+    return b.code === '0' ? (b.data || []) : null;
+  };
+
+  const [tk, fr, oi, ls] = await Promise.all([
+    get(`${OKX}/api/v5/market/ticker?instId=${inst}`),
+    get(`${OKX}/api/v5/public/funding-rate?instId=${inst}`),
+    get(`${OKX}/api/v5/public/open-interest?instType=SWAP&instId=${inst}`),
+    get(`${OKX}/api/v5/rubik/stat/contracts/long-short-account-ratio?ccy=${inst.split('-')[0]}&period=5m&limit=1`).catch(() => null),
+  ]);
+
+  if (!tk || !tk[0]) throw new Error('OKX ticker unavailable');
+  const t = tk[0], f = (fr && fr[0]) || {}, o = (oi && oi[0]) || {};
+
+  // rubik long-short-account-ratio returns rows of [ts, ratio]
+  let lsRatio = 1;
+  if (ls && ls[0]) lsRatio = sf(Array.isArray(ls[0]) ? ls[0][1] : ls[0].longShortRatio, 1) || 1;
+
+  const last     = sf(t.last);
+  const vol      = sf(t.volCcy24h);
+  const open24   = sf(t.open24h);
+  const priceChg = open24 ? (last - open24) / open24 * 100 : 0;
+  const funding  = sf(f.fundingRate);
+  const oiUsd    = o.oiUsd ? sf(o.oiUsd) : sf(o.oiCcy) * last;
+  const longPct  = lsRatio ? Math.round(lsRatio / (1 + lsRatio) * 100) : 50;
+  const frPct    = funding * 100;
+  const longSqueeze  = Math.round(Math.min(100, Math.max(0, (lsRatio - 1) * 40 + Math.max(0,  frPct) * 50)));
+  const shortSqueeze = Math.round(Math.min(100, Math.max(0, (1 - lsRatio) * 40 + Math.max(0, -frPct) * 50)));
+  const bias = (lsRatio > 1.1 && funding > 0) ? 'Bullish'
+             : (lsRatio < 0.9 && funding < 0) ? 'Bearish' : 'Neutral';
+
+  return {
+    coin_id: coinId, source: 'OKX', open_interest: Math.round(oiUsd),
+    funding_rate: funding, ls_ratio: +lsRatio.toFixed(3), long_pct: longPct,
+    short_pct: 100 - longPct, volume_24h: Math.round(vol),
+    price_change_pct: +priceChg.toFixed(2), long_squeeze_risk: longSqueeze,
+    short_squeeze_risk: shortSqueeze, market_bias: bias,
+  };
+}
+
+// Single CoinGecko call with everything we need (cached 10 min).
+async function fetchCoinFull(coinId) {
+  const url = `${BASE}/coins/${coinId}?localization=false&tickers=false&market_data=true&community_data=true&developer_data=true`;
+  return apiFetch(url, `coinfull-${coinId}`, 600_000);
+}
+
+function deriveTokenomics(coinId, data) {
+  const md = data.market_data || {};
+  const market_cap = md.market_cap?.usd || 0;
+  const fdv  = md.fully_diluted_valuation?.usd || 0;
+  const circ = md.circulating_supply || 0;
+  const total = md.total_supply || circ || 1;
+  const max   = md.max_supply || total || 1;
+  const circulation_ratio = max > 0 ? circ / max : 1;
+  const fdv_mc_ratio = market_cap > 0 ? fdv / market_cap : 1;
+  const ath_chg = md.ath_change_percentage?.usd || 0;
+  let score = 70;
+  if (fdv_mc_ratio > 5) score -= 25; else if (fdv_mc_ratio > 3) score -= 15; else if (fdv_mc_ratio > 2) score -= 8;
+  if (circulation_ratio < 0.3) score -= 15; else if (circulation_ratio < 0.5) score -= 8;
+  if ((md.price_change_percentage_1y || 0) < -50) score -= 10;
+  score = Math.max(0, Math.min(100, score));
+  return {
+    coin_id: coinId, market_cap, fdv, circulating_supply: circ, total_supply: total,
+    max_supply: max, circulation_ratio: +circulation_ratio.toFixed(4),
+    fdv_mc_ratio: +fdv_mc_ratio.toFixed(4), ath_change_percentage: +ath_chg.toFixed(2),
+    tokenomics_score: score,
+  };
+}
+
+async function deriveOnchain(coinId, data) {
+  const dev = data.developer_data || {}, comm = data.community_data || {}, md = data.market_data || {};
+  const github = dev.commit_count_4_weeks || 0;
+  const reddit = comm.reddit_active_accounts_48h || 0;
+  const market_cap = md.market_cap?.usd || 1;
+  const volume = md.total_volume?.usd || 0;
+  const vmc = market_cap > 0 ? volume / market_cap : 0;
+  let acc = 50, dist = 50;
+  if (github > 100) acc += 15; else if (github > 30) acc += 8;
+  if (reddit > 5000) acc += 10; else if (reddit > 1000) acc += 5;
+  if (vmc > 0.15) { acc -= 10; dist += 15; } else if (vmc > 0.05) dist += 5;
+  acc = Math.max(0, Math.min(100, acc)); dist = Math.max(0, Math.min(100, dist));
+
+  let btcTx = null, btcHash = null;
+  if (coinId === 'bitcoin') {
+    try {
+      const [tx, hr] = await Promise.all([
+        fetch('https://blockchain.info/q/24hrtransactioncount?cors=true').then(r => r.ok ? r.text() : null),
+        fetch('https://blockchain.info/q/hashrate?cors=true').then(r => r.ok ? r.text() : null),
+      ]);
+      if (tx) btcTx = parseInt(tx.trim());
+      if (hr) btcHash = parseFloat(hr.trim()) * 1e9;
+    } catch (e) { /* CORS or network — skip */ }
+  }
+
+  return {
+    coin_id: coinId, github_commits_4w: github, reddit_active_48h: reddit,
+    volume_mc_ratio: +vmc.toFixed(6), accumulation_score: acc, distribution_score: dist,
+    btc_transactions_24h: btcTx, btc_hash_rate: btcHash,
+  };
+}
+
+// ── Client-side AI assistant knowledge base ────────────────────────
+const CHAT_KB = {
+  rsi: 'RSI (Relative Strength Index) measures momentum on a 0–100 scale. Below 30 = oversold (possible bounce), above 70 = overbought (possible pullback). Best combined with trend and volume.',
+  macd: 'MACD shows momentum direction. MACD line crossing above its signal line is bullish; crossing below is bearish. The histogram shows the gap between them.',
+  funding: 'Funding rate is the periodic payment between longs and shorts in perpetual futures. Positive = longs pay shorts (bullish crowding); negative = shorts pay longs (short-squeeze risk). Extreme positive rates often precede corrections.',
+  ema: 'EMA (Exponential Moving Average) weights recent prices more. Key periods: 20 (short), 50 (medium), 200 (macro). Price above all EMAs = strong uptrend; EMA20 crossing EMA50 up = golden cross.',
+  bollinger: 'Bollinger Bands = 20-period SMA ± 2 standard deviations. Touching the upper band = potentially overbought, lower band = oversold. A band squeeze often precedes a big breakout.',
+  support: 'Support is a price area where buyers historically step in. Strong support comes from high-volume zones, prior swing lows, or moving averages. Breaking below often triggers more selling.',
+  resistance: 'Resistance is where sellers historically emerge. Breaking above it on high volume is bullish; old resistance often becomes new support after a breakout.',
+  liquidation: 'Liquidation occurs when a leveraged position can no longer meet margin. Large liquidation clusters act as price magnets, and cascades cause rapid spikes.',
+  'open interest': 'Open Interest is the total value of outstanding futures contracts. Rising OI + rising price = bullish; rising OI + falling price = bearish; falling OI = positions unwinding.',
+  'long squeeze': 'A long squeeze forces over-leveraged longs to close, cascading the price down. Signs: very high L/S ratio, high positive funding, high OI.',
+  'short squeeze': 'A short squeeze forces shorts to cover, rallying the price in a feedback loop. Signs: very low L/S ratio, negative funding, high OI.',
+  atr: 'ATR (Average True Range) measures volatility as the average range over N periods. Higher ATR = more volatility. Common rule: place stops 1.5–2× ATR from entry.',
+  vwap: 'VWAP (Volume Weighted Average Price) is the volume-weighted average. Price above VWAP = bullish intraday bias; below = bearish. It acts as dynamic support/resistance.',
+};
+
+function localChatResponse(message, context) {
+  const m = (message || '').toLowerCase();
+  for (const [kw, ex] of Object.entries(CHAT_KB)) {
+    if (m.includes(kw)) return ex;
+  }
+  const coin = context?.coinName || '';
+  const price = context?.currentPrice;
+  const analysis = context?.analysis;
+  if (coin && (m.includes('price') || m.includes('worth') || m.includes('trading'))) {
+    if (price) return `${coin} is currently around $${Number(price).toLocaleString('en-US', { maximumFractionDigits: 2 })}. Trend: ${analysis?.trend || 'unknown'}. Always use risk management.`;
+    return `Run the analysis first and I'll have ${coin}'s live price and trend.`;
+  }
+  if (m.includes('signal') || m.includes('should i') || m.includes('buy') || m.includes('sell')) {
+    if (analysis) return `For ${coin}: RSI ${analysis.rsi != null ? Number(analysis.rsi).toFixed(1) : 'n/a'}, MACD ${analysis.macd || 'n/a'}, trend ${analysis.trend || 'n/a'}. Educational only — not financial advice.`;
+    return 'Run a full analysis on the Intelligence Hub first, then I can give coin-specific signals. Meanwhile, ask me about RSI, MACD, funding rates, support/resistance, and more.';
+  }
+  if (m.includes('hi') || m.includes('hello') || m.includes('hey')) {
+    return 'Hi! Ask me about RSI, MACD, Bollinger Bands, funding rates, open interest, long/short squeezes, ATR, VWAP, or support & resistance — or run an analysis for coin-specific insight.';
+  }
+  return 'I can explain crypto trading concepts — try: RSI, MACD, Bollinger Bands, funding rates, open interest, long/short squeeze, ATR, VWAP, or support and resistance levels.';
+}
+
 // ── Hub Analysis Orchestrator ──────────────────────────────────────
 
 // Recompute and render the master AI Trading Score from whatever data is in.
@@ -1857,19 +2064,26 @@ async function runHubAnalysis() {
 
   if (statusLbl) statusLbl.textContent = 'Loading live market data…';
 
-  // ── Phase 2: slow backend calls — render each card as it resolves ──
-  // Fail fast (1 retry) so a single dead endpoint never stalls the page.
-  const opts = { retries: 1, timeoutMs: 25_000 };
+  // ── Phase 2: live data direct from public APIs (backend = fallback) ──
+  const backendOpts = { retries: 0, timeoutMs: 12_000 };
 
-  const futuresP = backendFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000, opts)
+  // Futures: OKX directly in the browser; fall back to the Render proxy.
+  const futuresP = fetchFuturesDirect(coinId)
+    .catch(() => backendFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000, backendOpts))
     .then(d => { hubState.futures = d; renderHubFuturesCard(d); renderHubMasterScore(); })
     .catch(() => { hubState.futures = null; renderHubFuturesCard(null); });
 
-  const tokP = backendFetch(`${BACKEND_URL}/tokenomics/${coinId}`, `hub-tok-${coinId}`, 600_000, opts)
+  // Tokenomics + on-chain: one CoinGecko call, derived locally.
+  const coinFullP = fetchCoinFull(coinId);
+  const tokP = coinFullP
+    .then(d => deriveTokenomics(coinId, d))
+    .catch(() => backendFetch(`${BACKEND_URL}/tokenomics/${coinId}`, `hub-tok-${coinId}`, 600_000, backendOpts))
     .then(d => { hubState.tokenomics = d; renderTokenomicsCard(d); })
     .catch(() => { hubState.tokenomics = null; renderTokenomicsCard(null); });
 
-  const onchainP = backendFetch(`${BACKEND_URL}/onchain/${coinId}`, `hub-onchain-${coinId}`, 600_000, opts)
+  const onchainP = coinFullP
+    .then(d => deriveOnchain(coinId, d))
+    .catch(() => backendFetch(`${BACKEND_URL}/onchain/${coinId}`, `hub-onchain-${coinId}`, 600_000, backendOpts))
     .then(d => { hubState.onchain = d; renderOnChainCard(d); })
     .catch(() => { hubState.onchain = null; renderOnChainCard(null); });
 
@@ -2287,20 +2501,24 @@ async function sendChat() {
       } : null,
     };
 
-    const data = await backendFetch(`${BACKEND_URL}/chat`, null, 0, {
-      method: 'POST',
-      body: { message: msg, context },
-    });
-    const reply = data.response || data.message || 'Sorry, I could not generate a response.';
+    // Always have an instant client-side answer ready.
+    const local = localChatResponse(msg, context);
+    let reply = local;
+    // Optionally enhance with the backend LLM if it's reachable (short timeout).
+    try {
+      const data = await backendFetch(`${BACKEND_URL}/chat`, null, 0, {
+        method: 'POST', body: { message: msg, context }, retries: 0, timeoutMs: 6_000,
+      });
+      reply = data.response || data.message || local;
+    } catch (e) { /* backend down — use local KB answer */ }
 
-    // Remove loader and add real response
     const loadEl = document.getElementById(loadId);
     if (loadEl) loadEl.remove();
     addChatMessage(reply, false);
   } catch (e) {
     const loadEl = document.getElementById(loadId);
     if (loadEl) loadEl.remove();
-    addChatMessage('Sorry, I could not connect to the AI backend. Please try again later.', false);
+    addChatMessage(localChatResponse(msg, context), false);
   }
 }
 
