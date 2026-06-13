@@ -605,7 +605,3 @@ async def _favicon():
 
 # Gradio AI calculator at /ai  (does NOT override the HTML frontend at /)
 app = gr.mount_gradio_app(_fastapi, demo, path="/ai")
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=7860)
