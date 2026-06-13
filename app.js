@@ -2012,19 +2012,31 @@ const NARRATIVES = {
   'DePIN':          { coinIds: ['filecoin'], keywords: ['depin', 'physical infrastructure', 'storage', 'data', 'mining', 'fil'] },
   'Gaming / NFT':   { coinIds: [], keywords: ['gaming', 'gamefi', 'nft', 'metaverse', 'play-to-earn', 'web3 game'] },
   'RWA':            { coinIds: [], keywords: ['rwa', 'real world assets', 'tokenization', 'real estate', 'bonds', 'tokenized'] },
+  'Infrastructure': { coinIds: ['chainlink', 'cosmos', 'polkadot', 'filecoin'], keywords: ['infrastructure', 'oracle', 'interoperability', 'validator', 'node', 'middleware', 'staking', 'bridge', 'rpc'] },
 };
 
+// Detect active narratives + momentum. Momentum compares keyword hits in the
+// last 24h vs older articles → rising / steady / cooling.
 function detectNarratives(coinId, newsItems) {
+  const items = newsItems || [];
+  const recentCut = Math.floor(Date.now() / 1000) - 24 * 3600;
   const results = [];
-  const titleText = (newsItems || []).map(n => (n.title || '').toLowerCase()).join(' ');
 
   for (const [name, cfg] of Object.entries(NARRATIVES)) {
-    let score = 0;
-    if (cfg.coinIds.includes(coinId)) score += 30;
-    for (const kw of cfg.keywords) {
-      if (titleText.includes(kw)) score += 15;
+    let score = cfg.coinIds.includes(coinId) ? 30 : 0;
+    let recentHits = 0, olderHits = 0;
+    for (const it of items) {
+      const tt = (it.title || '').toLowerCase();
+      if (cfg.keywords.some(kw => tt.includes(kw))) {
+        score += 15;
+        if ((it.published_on || 0) >= recentCut) recentHits++; else olderHits++;
+      }
     }
-    if (score > 0) results.push({ name, score: Math.min(100, score) });
+    if (score > 0) {
+      const momentum = (recentHits > olderHits && recentHits > 0) ? 'rising'
+        : (olderHits > recentHits) ? 'cooling' : 'steady';
+      results.push({ name, score: Math.min(100, score), momentum });
+    }
   }
   return results.sort((a, b) => b.score - a.score);
 }
@@ -2630,6 +2642,22 @@ async function runHubAnalysis() {
     renderHubMasterScore();  // sentiment now feeds the AI Intelligence Dashboard
     progress['Sentiment Analysis'] = 'done';
     renderHubProgress(progress);
+
+    // Optional FinBERT enhancement (HuggingFace via backend) — non-blocking.
+    // Upgrades the News sentiment dimension from keyword → FinBERT when warm.
+    const heads = state.sentiment?.headlines;
+    if (BACKEND_URL && heads?.length) {
+      const text = heads.slice(0, 5).join('. ').slice(0, 500);
+      backendFetch(`${BACKEND_URL}/sentiment?text=${encodeURIComponent(text)}`, null, 0, { retries: 0, timeoutMs: 6_000 })
+        .then(r => {
+          if (r && (r.scores || r.label) && r.source === 'finbert') {
+            state.sentiment.finbert = r;
+            renderHubSentCard({ fg: state.sentiment.fg, community: state.sentiment.community, newsSentiment: state.sentiment.newsSentiment });
+            renderHubMasterScore();
+          }
+        })
+        .catch(() => { /* backend asleep — keyword engine stays */ });
+    }
   })();
 
   await Promise.allSettled([futuresP, orderFlowP, tokP, onchainP, newsP, sentP]);
@@ -2973,20 +3001,66 @@ function renderWhaleCard() {
 
 // ── Render: Market Sentiment Card (Hub) ───────────────────────────
 
+// Multi-dimensional sentiment engine: News, Social, Retail, Institutional,
+// Overall. Each 0–100 (50 neutral, higher = more bullish). Retail and
+// Institutional are labeled proxies derived from available market data.
+function computeSentimentDimensions() {
+  const s = state.sentiment, fut = hubState.futures, oc = hubState.onchain;
+  const dims = [];
+  const fg = s?.fg?.length ? parseInt(s.fg[0].value) : null;
+
+  // News — FinBERT when the backend enhanced it, otherwise the keyword engine
+  if (s?.finbert?.scores) {
+    const sc = s.finbert.scores;
+    dims.push({ key: 'News', score: Math.round(clamp(50 + ((sc.positive || 0) - (sc.negative || 0)) * 50, 0, 100)), src: 'FinBERT (HF)', est: false });
+  } else if (s?.newsSentiment) {
+    const ns = s.newsSentiment;
+    dims.push({ key: 'News', score: Math.round(clamp(50 + (ns.positive - ns.negative) * 50, 0, 100)), src: 'keyword engine', est: false });
+  }
+  // Social — community votes (+ reddit activity context)
+  if (s?.community?.up != null) {
+    dims.push({ key: 'Social', score: Math.round(clamp(s.community.up, 0, 100)), src: 'community votes', est: false });
+  } else if (oc?.reddit_active_48h != null && s?.newsSentiment) {
+    dims.push({ key: 'Social', score: Math.round(clamp(50 + (s.newsSentiment.positive - s.newsSentiment.negative) * 40, 0, 100)), src: 'reddit + news', est: true });
+  }
+  // Retail (proxy) — Fear & Greed + funding crowding + long/short positioning
+  if (fg != null || fut) {
+    let acc = 0, parts = 0;
+    if (fg != null) { acc += fg; parts++; }
+    if (fut) {
+      acc += clamp(50 + (fut.funding_rate * 100) * 1500, 0, 100); parts++;
+      acc += clamp(50 + (fut.ls_ratio - 1) * 40, 0, 100); parts++;
+    }
+    dims.push({ key: 'Retail', score: Math.round(clamp(parts ? acc / parts : 50, 0, 100)), src: 'F&G · funding · L/S', est: true });
+  }
+  // Institutional (proxy) — on-chain accumulation + contrarian fear-buying
+  if (oc?.accumulation_score != null || fg != null) {
+    const a = oc?.accumulation_score ?? 50;
+    const fade = fg != null ? (100 - fg) : 50;
+    dims.push({ key: 'Institutional', score: Math.round(clamp(0.6 * a + 0.4 * fade, 0, 100)), src: 'on-chain · fear-fade', est: true });
+  }
+  // Overall — weighted blend of available dimensions
+  if (dims.length) {
+    const w = { News: 0.30, Social: 0.20, Retail: 0.25, Institutional: 0.25 };
+    let tw = 0, acc = 0;
+    for (const d of dims) { const ww = w[d.key] || 0.2; acc += d.score * ww; tw += ww; }
+    dims.push({ key: 'Overall', score: Math.round(acc / (tw || 1)), src: 'weighted blend', est: false, overall: true });
+  }
+  return dims;
+}
+
 function renderHubSentCard(data) {
   const card = document.getElementById('hubSentHubCard');
   if (!card) return;
-
   const fgData = data?.fg;
-  const commData = data?.community;
-  const ns = data?.newsSentiment;
-  const hasData = !!(fgData?.length || commData?.up != null || ns);
+  const dims = computeSentimentDimensions();
+  const hasData = !!(fgData?.length || dims.length);
 
   let fgHtml = '<div class="hub-metric-row"><span>Fear &amp; Greed</span><span class="neutral-text">Loading…</span></div>';
   if (fgData?.length) {
     const cur = parseInt(fgData[0].value);
     const label = fgData[0].value_classification;
-    const color = cur <= 44 ? '#FF3D3D' : cur <= 55 ? '#F7C948' : '#00E887';
+    const color = cur <= 44 ? '#FF5252' : cur <= 55 ? '#F7C948' : '#00E676';
     fgHtml = `
       <div class="hub-metric-row"><span>Fear &amp; Greed</span><span style="color:${color};font-weight:700">${cur} — ${label}</span></div>
       <div class="fg-bar-track" style="margin:6px 0">
@@ -2994,32 +3068,27 @@ function renderHubSentCard(data) {
       </div>`;
   }
 
-  let commHtml = '<div class="hub-metric-row"><span>Community</span><span class="neutral-text">No data</span></div>';
-  if (commData?.up != null) {
-    commHtml = `<div class="hub-metric-row"><span>Community Bull</span><span class="green">${commData.up.toFixed(1)}%</span></div>
-      <div class="hub-metric-row"><span>Community Bear</span><span class="red">${commData.down.toFixed(1)}%</span></div>`;
-  }
-
-  let newsHtml = '<div class="hub-metric-row"><span>News Sentiment</span><span class="neutral-text">No data</span></div>';
-  if (ns) {
-    const pos = (ns.positive * 100).toFixed(0);
-    const neg = (ns.negative * 100).toFixed(0);
-    const cls = ns.positive > 0.5 ? 'green' : ns.negative > 0.5 ? 'red' : 'neutral-text';
-    newsHtml = `<div class="hub-metric-row"><span>News Positive</span><span class="green">${pos}%</span></div>
-      <div class="hub-metric-row"><span>News Negative</span><span class="red">${neg}%</span></div>
-      <div class="hub-metric-row"><span>Overall</span><span class="${cls}">${ns.positive > 0.5 ? 'Positive' : ns.negative > 0.5 ? 'Negative' : 'Neutral'}</span></div>`;
-  }
+  const dimBar = (d) => {
+    const c = d.score >= 58 ? 'green' : d.score >= 43 ? 'gold' : 'red';
+    const bg = d.score >= 58 ? 'var(--green)' : d.score >= 43 ? 'var(--gold)' : 'var(--red)';
+    return `<div class="sent-dim ${d.overall ? 'overall' : ''}">
+      <div class="sent-dim-top">
+        <span class="sent-dim-lbl">${d.key}${d.est ? ' <span class="est-mini">est</span>' : ''}</span>
+        <span class="sent-dim-val ${c}">${d.score}</span>
+      </div>
+      <div class="sent-dim-track"><div class="sent-dim-fill" style="width:${d.score}%;background:${bg}"></div></div>
+      <div class="sent-dim-src">${d.src}</div>
+    </div>`;
+  };
+  const dimsHtml = dims.length ? dims.map(dimBar).join('') : '<div class="hub-unavail">Sentiment is loading…</div>';
 
   card.innerHTML = `
-    <h3 class="card-heading">Market Sentiment</h3>
+    <h3 class="card-heading">Market Sentiment <span class="heading-sub">— multi-source engine</span></h3>
     <div class="hub-sent-section-label">Fear &amp; Greed</div>
     ${fgHtml}
     <div class="hub-divider"></div>
-    <div class="hub-sent-section-label">Community</div>
-    ${commHtml}
-    <div class="hub-divider"></div>
-    <div class="hub-sent-section-label">News Analysis</div>
-    ${newsHtml}
+    <div class="hub-sent-section-label">Sentiment Engine <span class="sent-src">News · Social · Retail · Institutional</span></div>
+    <div class="sent-dims">${dimsHtml}</div>
     ${hasData ? '' : '<div class="hub-note">Sentiment data is loading — it will populate momentarily.</div>'}`;
 }
 
@@ -3040,9 +3109,13 @@ function renderNewsImpactCard(newsItems) {
     const impactCls = sc === 'pos' ? 'green' : sc === 'neg' ? 'red' : 'neutral-text';
     const impactLabel = sc === 'pos' ? 'Bullish' : sc === 'neg' ? 'Bearish' : 'Neutral';
     const impactScore = headlineImpact(rawTitle);
-    const title = escapeHtml(rawTitle.slice(0, 75) + (rawTitle.length > 75 ? '…' : ''));
+    const assets = detectAffectedAssets(rawTitle);
+    const summary = escapeHtml(articleSummary(item, assets, sc, impactScore));
+    const title = escapeHtml(rawTitle.slice(0, 90) + (rawTitle.length > 90 ? '…' : ''));
     const href = item.url ? ` href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer"` : '';
     const time = formatTimeAgo(item.published_on || 0);
+    const chips = assets.length
+      ? `<div class="news-assets">${assets.map(a => `<span class="news-asset-chip">${a}</span>`).join('')}</div>` : '';
     return `<a class="hub-news-item"${href}>
       <div class="hub-news-top">
         <span class="hub-news-impact ${impactCls}">${impactLabel} ${impactScore}</span>
@@ -3050,10 +3123,38 @@ function renderNewsImpactCard(newsItems) {
         <span class="hub-news-time">${time}</span>
       </div>
       <div class="hub-news-title">${title}</div>
+      ${chips}
+      <div class="news-summary">${summary}</div>
     </a>`;
   }).join('');
 
-  card.innerHTML = `<h3 class="card-heading">News Impact <span class="heading-sub">— Last 3 days</span></h3>${items}`;
+  card.innerHTML = `<h3 class="card-heading">News Impact <span class="heading-sub">— headline · impact · affected assets · summary</span></h3>${items}`;
+}
+
+// Detect which supported assets a headline references. Coin names match
+// case-insensitively; tickers must appear as standalone uppercase tokens
+// (so "link"/"dot" as ordinary words don't trigger false positives).
+function detectAffectedAssets(title) {
+  const raw = title || '';
+  const lower = raw.toLowerCase();
+  const hits = new Set();
+  for (const c of Object.values(COINS)) {
+    const name = c.name.replace(/\s*\(.*\)/, '').toLowerCase();
+    if (lower.includes(name)) hits.add(c.sym);
+    else if (new RegExp(`\\b${c.sym}\\b`).test(raw)) hits.add(c.sym);
+  }
+  return [...hits].slice(0, 4);
+}
+
+// Templated one-line takeaway for an article (deterministic auto-summary).
+function articleSummary(item, assets, sc, impact) {
+  const label = sc === 'pos' ? 'bullish' : sc === 'neg' ? 'bearish' : 'neutral';
+  const a = assets.length ? assets.join(', ') : 'the broader market';
+  const lean = sc === 'pos' ? `could support ${a} near-term`
+    : sc === 'neg' ? `may pressure ${a} short-term`
+    : `is unlikely to move ${a} on its own`;
+  const sev = impact >= 70 ? 'High-impact' : impact >= 45 ? 'Moderate-impact' : 'Low-impact';
+  return `${sev} ${label} item — ${lean}.`;
 }
 
 // ── Render: Narrative Detection Card ──────────────────────────────
@@ -3069,7 +3170,10 @@ function renderNarrativeCard(narratives, coinId) {
 
   const tagsHtml = narratives.map(n => {
     const intensity = n.score >= 70 ? 'hot' : n.score >= 40 ? 'warm' : 'cool';
-    return `<span class="narrative-tag narrative-${intensity}">${n.name} <span class="narr-score">${n.score}</span></span>`;
+    const mo = n.momentum === 'rising' ? '<span class="narr-mo up">▲ rising</span>'
+      : n.momentum === 'cooling' ? '<span class="narr-mo down">▼ cooling</span>'
+      : '<span class="narr-mo flat">— steady</span>';
+    return `<span class="narrative-tag narrative-${intensity}">${n.name} <span class="narr-score">${n.score}</span> ${mo}</span>`;
   }).join('');
 
   const coinName = COINS[coinId]?.name || coinId;
