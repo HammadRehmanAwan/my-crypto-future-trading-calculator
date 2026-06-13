@@ -69,6 +69,56 @@ async function apiFetch(url, key, ttl = 60_000) {
   return data;
 }
 
+// Render's free tier sleeps after ~15 min idle; the first request after that
+// returns a 502/503 from the router (or takes ~50s to cold-boot). Wrap backend
+// calls with a per-attempt timeout and retry the gateway errors so a sleeping
+// service gets woken and retried instead of failing permanently.
+async function backendFetch(url, key, ttl = 60_000, { method = 'GET', body = null, retries = 3, timeoutMs = 60_000 } = {}) {
+  if (key) {
+    const hit = state.cache[key];
+    if (hit && Date.now() - hit.ts < ttl) return hit.data;
+  }
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const opts = { method, signal: ctrl.signal };
+      if (body != null) {
+        opts.headers = { 'Content-Type': 'application/json' };
+        opts.body = JSON.stringify(body);
+      }
+      const r = await fetch(url, opts);
+      clearTimeout(timer);
+      // 502/503/504 mean the dyno is still waking up — back off and retry.
+      if ((r.status === 502 || r.status === 503 || r.status === 504) && attempt < retries) {
+        await new Promise(res => setTimeout(res, 2500 * (attempt + 1)));
+        continue;
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      if (key) state.cache[key] = { data, ts: Date.now() };
+      return data;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      if (attempt < retries) {
+        await new Promise(res => setTimeout(res, 2500 * (attempt + 1)));
+        continue;
+      }
+    }
+  }
+  throw lastErr || new Error('backend unreachable');
+}
+
+// Best-effort wake-up ping so the first real call lands on a warm dyno.
+function wakeBackend() {
+  if (!BACKEND_URL) return;
+  const ctrl = new AbortController();
+  setTimeout(() => ctrl.abort(), 60_000);
+  fetch(`${BACKEND_URL}/health`, { signal: ctrl.signal }).catch(() => {});
+}
+
 async function fetchHistory(coinId, days) {
   const url = `${BASE}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
   const raw = await apiFetch(url, `h-${coinId}-${days}`);
@@ -100,7 +150,7 @@ async function fetchCoinCommunity(coinId) {
 // Fetch news via our backend proxy (avoids CryptoCompare browser key requirement)
 async function fetchCryptoNews() {
   if (!BACKEND_URL) return null;
-  return apiFetch(`${BACKEND_URL}/news`, 'news-proxy', SENT_TTL);
+  return backendFetch(`${BACKEND_URL}/news`, 'news-proxy', SENT_TTL);
 }
 
 // Module-level sentiment lexicon shared by all scoring functions
@@ -1637,7 +1687,8 @@ async function runHubAnalysis() {
   const btn = document.getElementById('hubAnalyzeBtn');
   const statusLbl = document.getElementById('hubStatusLabel');
   if (btn) { btn.disabled = true; btn.textContent = 'Analyzing…'; }
-  if (statusLbl) statusLbl.textContent = 'Fetching data…';
+  if (statusLbl) statusLbl.textContent = 'Fetching data… (first load may take ~30s while the backend wakes up)';
+  wakeBackend();
 
   const coinId = document.getElementById('hubCoinSelect')?.value || 'bitcoin';
   hubState.coinId = coinId;
@@ -1657,9 +1708,9 @@ async function runHubAnalysis() {
     // Fetch price history + parallel backend calls
     const [histRes, futuresRes, tokRes, onchainRes, newsRes] = await Promise.allSettled([
       fetchHistory(coinId, 90),
-      apiFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000),
-      apiFetch(`${BACKEND_URL}/tokenomics/${coinId}`, `hub-tok-${coinId}`, 600_000),
-      apiFetch(`${BACKEND_URL}/onchain/${coinId}`, `hub-onchain-${coinId}`, 600_000),
+      backendFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000),
+      backendFetch(`${BACKEND_URL}/tokenomics/${coinId}`, `hub-tok-${coinId}`, 600_000),
+      backendFetch(`${BACKEND_URL}/onchain/${coinId}`, `hub-onchain-${coinId}`, 600_000),
       fetchCryptoNews(),
     ]);
 
@@ -2162,12 +2213,10 @@ async function sendChat() {
       } : null,
     };
 
-    const res = await fetch(`${BACKEND_URL}/chat`, {
+    const data = await backendFetch(`${BACKEND_URL}/chat`, null, 0, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: msg, context }),
+      body: { message: msg, context },
     });
-    const data = await res.json();
     const reply = data.response || data.message || 'Sorry, I could not generate a response.';
 
     // Remove loader and add real response
