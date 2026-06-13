@@ -2039,3 +2039,40 @@ input, select, button { font-family: inherit; }
 .hub-prog-step.active { color: var(--primary); border-color: rgba(79,140,255,.4); background: var(--primary-d); }
 .hub-prog-step.done { color: var(--green); border-color: rgba(0,230,118,.35); background: var(--green-d); }
 .hp-spin { width: 11px; height: 11px; border: 2px solid var(--border2); border-top-color: var(--primary); border-radius: 50%; display: inline-block; animation: spin .7s linear infinite; }
+
+/* ═══════════════════════════════════════════════════════
+   PHASE 6 — News intelligence / Sentiment engine / Narratives
+═══════════════════════════════════════════════════════ */
+
+/* ─── News Impact: affected assets + auto-summary ─── */
+.news-assets { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0 3px; }
+.news-asset-chip {
+  font-size: 9px; font-weight: 700; letter-spacing: .03em;
+  color: var(--primary); background: var(--primary-d);
+  border: 1px solid rgba(79,140,255,.28);
+  padding: 1px 7px; border-radius: 10px;
+}
+.news-summary { font-size: 11px; color: var(--text-lo); line-height: 1.45; font-style: italic; margin-top: 2px; }
+
+/* ─── Sentiment Engine dimension bars ─── */
+.sent-dims { display: flex; flex-direction: column; gap: 10px; }
+.sent-dim.overall { padding-top: 10px; border-top: 1px dashed var(--border2); }
+.sent-dim-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.sent-dim-lbl { font-size: 12px; font-weight: 600; color: var(--text); }
+.sent-dim.overall .sent-dim-lbl { font-weight: 800; color: var(--text-hi); }
+.est-mini {
+  font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--gold); background: var(--gold-d); border: 1px solid rgba(255,184,0,.3);
+  padding: 0 5px; border-radius: 8px; vertical-align: middle;
+}
+.sent-dim-val { font-family: var(--mono); font-size: 13px; font-weight: 700; }
+.sent-dim-val.green { color: var(--green); } .sent-dim-val.red { color: var(--red); } .sent-dim-val.gold { color: var(--gold); }
+.sent-dim-track { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.sent-dim-fill { height: 100%; border-radius: 4px; transition: width .6s ease; }
+.sent-dim-src { font-size: 9px; color: var(--text-lo); margin-top: 3px; }
+
+/* ─── Narrative momentum ─── */
+.narr-mo { font-size: 9px; font-weight: 700; padding: 0 5px; border-radius: 8px; margin-left: 2px; }
+.narr-mo.up   { color: var(--green); background: var(--green-d); }
+.narr-mo.down { color: var(--red);   background: var(--red-d); }
+.narr-mo.flat { color: var(--text-lo); background: rgba(255,255,255,.04); }

@@ -493,8 +493,9 @@ async def get_sentiment(text: str = Query(..., max_length=512)):
     if hf_token:
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
+                # ProsusAI/finbert — purpose-built financial sentiment model.
                 r = await client.post(
-                    "https://api-inference.huggingface.co/models/cardiffnlp/twitter-roberta-base-sentiment-latest",
+                    "https://api-inference.huggingface.co/models/ProsusAI/finbert",
                     headers={"Authorization": f"Bearer {hf_token}"},
                     json={"inputs": text[:512]},
                 )
@@ -509,7 +510,7 @@ async def get_sentiment(text: str = Query(..., max_length=512)):
                         return {
                             "label":  label,
                             "scores": {label_map.get(s["label"], s["label"]): s["score"] for s in scores},
-                            "source": "hf-roberta",
+                            "source": "finbert",
                         }
         except Exception:
             pass
