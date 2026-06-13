@@ -898,8 +898,8 @@ async function loadCoin(coinId, days) {
   clearLoadError();
   loader.classList.add('visible');
   try {
-    const { dates, prices } = await fetchHistory(coinId, days);
-    state.prices = prices; state.dates = dates;
+    const { dates, prices, volumes } = await fetchHistory(coinId, days);
+    state.prices = prices; state.dates = dates; state.volumes = volumes;
     const curr   = prices[prices.length - 1];
     const wkAgo  = prices[Math.max(0, prices.length - 8)];
     const chg7d  = (curr - wkAgo) / wkAgo * 100;
@@ -946,6 +946,8 @@ async function loadCoin(coinId, days) {
       chg7d >= 0 ? badge('Price trended UP this week ↑', 'green')
       : badge('Price trended DOWN this week ↓', 'red');
 
+    renderCalcAdvTech(prices, volumes);
+
     const horizon  = parseInt(document.getElementById('horizon').value) || 7;
     const forecast = holtForecast(prices, horizon);
     buildChart(dates, prices, bb, forecast, days, horizon);
@@ -972,6 +974,71 @@ async function loadCoin(coinId, days) {
     return;
   }
   loader.classList.remove('visible');
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ADVANCED TECHNICAL ANALYSIS (Calculator page)
+// ═══════════════════════════════════════════════════════════════════
+
+function renderCalcAdvTech(prices, volumes) {
+  const body = document.getElementById('advTechBody');
+  if (!body) return;
+  if (!prices || prices.length < 20) {
+    body.innerHTML = '<div class="hub-unavail">Not enough price history for advanced analysis.</div>';
+    return;
+  }
+
+  const curr   = prices[prices.length - 1];
+  const e20    = ema(prices, 20).slice(-1)[0];
+  const e50    = ema(prices, 50).slice(-1)[0];
+  const e200   = ema(prices, 200).slice(-1)[0];
+  const atr    = calcATR(prices);
+  const vwap   = calcVWAP(prices, volumes);
+  const sr     = calcSupportResistance(prices);
+  const trend  = calcTrendStrength(prices);
+
+  const rsiArr = calcRSI(prices);
+  const { macdLine, signalLine } = calcMACD(prices);
+  const bb     = calcBollinger(prices);
+  const techScore = calcHubTechScore(
+    rsiArr.slice(-1)[0], macdLine.slice(-1)[0], signalLine.slice(-1)[0],
+    curr, bb.upper.slice(-1)[0], bb.lower.slice(-1)[0], e20, e50, e200);
+
+  const scoreColor = techScore.score >= 60 ? 'var(--green)' : techScore.score >= 45 ? 'var(--gold)' : 'var(--red)';
+  const maRow = (label, val) => `<div class="adv-metric"><span class="adv-m-label">${label}</span><span class="adv-m-val ${curr > val ? 'green' : 'red'}">${fmtUSD(val)} <small>${curr > val ? '▲ above' : '▼ below'}</small></span></div>`;
+
+  const srHtml = `
+    <div class="adv-sr-grid">
+      <div>
+        <div class="adv-sr-head green">Support</div>
+        ${sr.supports.length ? sr.supports.map(s => `<div class="adv-sr-lvl green">${fmtUSD(s)}</div>`).join('') : '<div class="adv-sr-lvl muted">—</div>'}
+      </div>
+      <div>
+        <div class="adv-sr-head red">Resistance</div>
+        ${sr.resistances.length ? sr.resistances.map(r => `<div class="adv-sr-lvl red">${fmtUSD(r)}</div>`).join('') : '<div class="adv-sr-lvl muted">—</div>'}
+      </div>
+    </div>`;
+
+  body.innerHTML = `
+    <div class="adv-score-row">
+      <div class="adv-score-badge" style="border-color:${scoreColor};color:${scoreColor}">${techScore.score}<small>/100</small></div>
+      <div class="adv-score-text">
+        <div class="adv-score-title">Technical Score</div>
+        <div class="adv-score-sub">${trend.direction} trend &middot; strength ${trend.strength}/100</div>
+      </div>
+    </div>
+    <div class="adv-grid">
+      ${maRow('EMA 20', e20)}
+      ${maRow('EMA 50', e50)}
+      ${maRow('EMA 200', e200)}
+      <div class="adv-metric"><span class="adv-m-label">VWAP (14d)</span><span class="adv-m-val ${curr > vwap ? 'green' : 'red'}">${fmtUSD(vwap)}</span></div>
+      <div class="adv-metric"><span class="adv-m-label">ATR (14)</span><span class="adv-m-val accent">${fmtUSD(atr)} <small>${(atr/curr*100).toFixed(2)}%</small></span></div>
+      <div class="adv-metric"><span class="adv-m-label">Volatility</span><span class="adv-m-val ${(atr/curr*100) > 5 ? 'red' : (atr/curr*100) > 2.5 ? 'gold' : 'green'}">${(atr/curr*100) > 5 ? 'High' : (atr/curr*100) > 2.5 ? 'Moderate' : 'Low'}</span></div>
+    </div>
+    <div class="adv-divider"></div>
+    ${srHtml}
+    <div class="adv-divider"></div>
+    <div class="adv-signals">${techScore.signals.map(s => `<span class="signal-pill-${s.c === 'green' ? 'bull' : s.c === 'red' ? 'bear' : 'neu'}">${s.k}: ${s.v}</span>`).join('')}</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1683,11 +1750,35 @@ function detectNarratives(coinId, newsItems) {
 
 // ── Hub Analysis Orchestrator ──────────────────────────────────────
 
+// Recompute and render the master AI Trading Score from whatever data is in.
+function renderHubMasterScore() {
+  const techData = hubState.analysis;
+  let masterScore = 50;
+  const breakdown = [];
+  if (techData) {
+    masterScore = (masterScore + techData.techScore.score) / 2;
+    breakdown.push({ label: 'Technical', score: techData.techScore.score });
+  }
+  if (hubState.futures) {
+    const f = hubState.futures;
+    const futScore = f.ls_ratio > 1.1 && f.funding_rate > 0
+      ? Math.min(80, 50 + (f.ls_ratio - 1) * 30)
+      : f.ls_ratio < 0.9 && f.funding_rate < 0
+      ? Math.max(20, 50 - (1 - f.ls_ratio) * 30)
+      : 50;
+    masterScore = (masterScore + futScore) / 2;
+    breakdown.push({ label: 'Futures', score: Math.round(futScore) });
+  }
+  masterScore = Math.min(100, Math.max(0, Math.round(masterScore)));
+  breakdown.push({ label: 'Master', score: masterScore });
+  renderTradingScore(masterScore, breakdown);
+}
+
 async function runHubAnalysis() {
   const btn = document.getElementById('hubAnalyzeBtn');
   const statusLbl = document.getElementById('hubStatusLabel');
   if (btn) { btn.disabled = true; btn.textContent = 'Analyzing…'; }
-  if (statusLbl) statusLbl.textContent = 'Fetching data… (first load may take ~30s while the backend wakes up)';
+  if (statusLbl) statusLbl.textContent = 'Computing technicals…';
   wakeBackend();
 
   const coinId = document.getElementById('hubCoinSelect')?.value || 'bitcoin';
@@ -1704,111 +1795,95 @@ async function runHubAnalysis() {
     }
   });
 
+  // ── Phase 1: price history + technicals (fast, no slow backend) ──
   try {
-    // Fetch price history + parallel backend calls
-    const [histRes, futuresRes, tokRes, onchainRes, newsRes] = await Promise.allSettled([
-      fetchHistory(coinId, 90),
-      backendFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000),
-      backendFetch(`${BACKEND_URL}/tokenomics/${coinId}`, `hub-tok-${coinId}`, 600_000),
-      backendFetch(`${BACKEND_URL}/onchain/${coinId}`, `hub-onchain-${coinId}`, 600_000),
-      fetchCryptoNews(),
-    ]);
-
-    // Price data
-    if (histRes.status === 'fulfilled') {
-      hubState.prices  = histRes.value.prices;
-      hubState.volumes = histRes.value.volumes;
-      hubState.dates   = histRes.value.dates;
-    }
-
-    hubState.futures   = futuresRes.status   === 'fulfilled' ? futuresRes.value   : null;
-    hubState.tokenomics = tokRes.status      === 'fulfilled' ? tokRes.value       : null;
-    hubState.onchain   = onchainRes.status   === 'fulfilled' ? onchainRes.value   : null;
-    hubState.news      = newsRes.status      === 'fulfilled' ? newsRes.value      : null;
-
-    const prices  = hubState.prices  || [];
-    const volumes = hubState.volumes || [];
-
-    // Compute technical indicators
-    let techData = null;
-    if (prices.length >= 20) {
-      const rsiArr              = calcRSI(prices);
-      const { macdLine, signalLine } = calcMACD(prices);
-      const bb                  = calcBollinger(prices);
-      const ema20Arr            = ema(prices, 20);
-      const ema50Arr            = ema(prices, 50);
-      const ema200Arr           = ema(prices, 200);
-      const atr                 = calcATR(prices);
-      const vwap                = calcVWAP(prices, volumes);
-      const sr                  = calcSupportResistance(prices);
-      const trend               = calcTrendStrength(prices);
-
-      const curr    = prices[prices.length - 1];
-      const rsiNow  = rsiArr[rsiArr.length - 1];
-      const macdNow = macdLine[macdLine.length - 1];
-      const sigNow  = signalLine[signalLine.length - 1];
-      const bbU     = bb.upper[bb.upper.length - 1];
-      const bbL     = bb.lower[bb.lower.length - 1];
-      const bbM     = bb.mid[bb.mid.length - 1];
-      const e20     = ema20Arr[ema20Arr.length - 1];
-      const e50     = ema50Arr[ema50Arr.length - 1];
-      const e200    = ema200Arr[ema200Arr.length - 1];
-
-      const techScore = calcHubTechScore(rsiNow, macdNow, sigNow, curr, bbU, bbL, e20, e50, e200);
-
-      techData = {
-        curr, rsi: rsiNow, macd: macdNow, sig: sigNow,
-        bbU, bbL, bbM, ema20: e20, ema50: e50, ema200: e200,
-        atr, vwap, sr, trend, techScore,
-        prices, volumes,
-      };
-    }
-
-    hubState.analysis = techData;
-
-    // Compute master score
-    let masterScore = 50;
-    const breakdown = [];
-    if (techData) {
-      masterScore = (masterScore + techData.techScore.score) / 2;
-      breakdown.push({ label: 'Technical', score: techData.techScore.score });
-    }
-    if (hubState.futures) {
-      const f = hubState.futures;
-      const futScore = f.ls_ratio > 1.1 && f.funding_rate > 0
-        ? Math.min(80, 50 + (f.ls_ratio - 1) * 30)
-        : f.ls_ratio < 0.9 && f.funding_rate < 0
-        ? Math.max(20, 50 - (1 - f.ls_ratio) * 30)
-        : 50;
-      masterScore = (masterScore + futScore) / 2;
-      breakdown.push({ label: 'Futures', score: Math.round(futScore) });
-    }
-    masterScore = Math.min(100, Math.max(0, Math.round(masterScore)));
-    breakdown.push({ label: 'Master', score: masterScore });
-
-    // Render all cards
-    renderTradingScore(masterScore, breakdown);
-    if (techData) renderHubTechCard(techData);
-    renderHubFuturesCard(hubState.futures);
-    renderHubSentCard({
-      fg: state.sentiment?.fg,
-      community: state.sentiment?.community,
-      newsSentiment: state.sentiment?.newsSentiment,
-    });
-    const processedNews = Array.isArray(hubState.news)
-      ? hubState.news.slice(0, 6).map(n => ({ ...n, _sent: classifyHeadline(n.title || '') }))
-      : [];
-    renderNewsImpactCard(processedNews);
-    renderNarrativeCard(detectNarratives(coinId, processedNews), coinId);
-    renderTokenomicsCard(hubState.tokenomics);
-    renderOnChainCard(hubState.onchain);
-    renderRiskCard(techData);
-
-    if (statusLbl) statusLbl.textContent = `Analysis complete for ${COINS[coinId]?.name || coinId}`;
+    const hist = await fetchHistory(coinId, 90);
+    hubState.prices  = hist.prices;
+    hubState.volumes = hist.volumes;
+    hubState.dates   = hist.dates;
   } catch (e) {
-    if (statusLbl) statusLbl.textContent = `Error: ${e.message}`;
+    if (statusLbl) statusLbl.textContent = `Could not load price data: ${e.message}`;
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Full Analysis'; }
+    return;
   }
 
+  const prices  = hubState.prices  || [];
+  const volumes = hubState.volumes || [];
+
+  let techData = null;
+  if (prices.length >= 20) {
+    const rsiArr              = calcRSI(prices);
+    const { macdLine, signalLine } = calcMACD(prices);
+    const bb                  = calcBollinger(prices);
+    const ema20Arr            = ema(prices, 20);
+    const ema50Arr            = ema(prices, 50);
+    const ema200Arr           = ema(prices, 200);
+    const atr                 = calcATR(prices);
+    const vwap                = calcVWAP(prices, volumes);
+    const sr                  = calcSupportResistance(prices);
+    const trend               = calcTrendStrength(prices);
+
+    const curr    = prices[prices.length - 1];
+    const rsiNow  = rsiArr[rsiArr.length - 1];
+    const macdNow = macdLine[macdLine.length - 1];
+    const sigNow  = signalLine[signalLine.length - 1];
+    const bbU     = bb.upper[bb.upper.length - 1];
+    const bbL     = bb.lower[bb.lower.length - 1];
+    const bbM     = bb.mid[bb.mid.length - 1];
+    const e20     = ema20Arr[ema20Arr.length - 1];
+    const e50     = ema50Arr[ema50Arr.length - 1];
+    const e200    = ema200Arr[ema200Arr.length - 1];
+
+    const techScore = calcHubTechScore(rsiNow, macdNow, sigNow, curr, bbU, bbL, e20, e50, e200);
+    techData = {
+      curr, rsi: rsiNow, macd: macdNow, sig: sigNow,
+      bbU, bbL, bbM, ema20: e20, ema50: e50, ema200: e200,
+      atr, vwap, sr, trend, techScore, prices, volumes,
+    };
+  }
+  hubState.analysis = techData;
+
+  // Render everything that does NOT depend on the slow backend right away.
+  renderHubMasterScore();
+  if (techData) renderHubTechCard(techData);
+  renderRiskCard(techData);
+  renderHubSentCard({
+    fg: state.sentiment?.fg,
+    community: state.sentiment?.community,
+    newsSentiment: state.sentiment?.newsSentiment,
+  });
+  // Narratives without news yet (category match); refreshed when news lands.
+  renderNarrativeCard(detectNarratives(coinId, []), coinId);
+
+  if (statusLbl) statusLbl.textContent = 'Loading live market data…';
+
+  // ── Phase 2: slow backend calls — render each card as it resolves ──
+  // Fail fast (1 retry) so a single dead endpoint never stalls the page.
+  const opts = { retries: 1, timeoutMs: 25_000 };
+
+  const futuresP = backendFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000, opts)
+    .then(d => { hubState.futures = d; renderHubFuturesCard(d); renderHubMasterScore(); })
+    .catch(() => { hubState.futures = null; renderHubFuturesCard(null); });
+
+  const tokP = backendFetch(`${BACKEND_URL}/tokenomics/${coinId}`, `hub-tok-${coinId}`, 600_000, opts)
+    .then(d => { hubState.tokenomics = d; renderTokenomicsCard(d); })
+    .catch(() => { hubState.tokenomics = null; renderTokenomicsCard(null); });
+
+  const onchainP = backendFetch(`${BACKEND_URL}/onchain/${coinId}`, `hub-onchain-${coinId}`, 600_000, opts)
+    .then(d => { hubState.onchain = d; renderOnChainCard(d); })
+    .catch(() => { hubState.onchain = null; renderOnChainCard(null); });
+
+  const newsP = fetchCryptoNews()
+    .then(d => {
+      hubState.news = d;
+      const processed = Array.isArray(d) ? d.slice(0, 6).map(n => ({ ...n, _sent: classifyHeadline(n.title || '') })) : [];
+      renderNewsImpactCard(processed);
+      renderNarrativeCard(detectNarratives(coinId, processed), coinId);
+    })
+    .catch(() => { hubState.news = null; renderNewsImpactCard([]); });
+
+  await Promise.allSettled([futuresP, tokP, onchainP, newsP]);
+  if (statusLbl) statusLbl.textContent = `Analysis complete for ${COINS[coinId]?.name || coinId}`;
   if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Full Analysis'; }
 }
 
@@ -1916,7 +1991,7 @@ function renderHubFuturesCard(futures) {
   const biasClass = f.market_bias === 'Bullish' ? 'green' : f.market_bias === 'Bearish' ? 'red' : 'neutral-text';
 
   card.innerHTML = `
-    <h3 class="card-heading">Futures Intelligence <span class="heading-sub">— Binance Perpetuals</span></h3>
+    <h3 class="card-heading">Futures Intelligence <span class="heading-sub">— OKX Perpetuals</span></h3>
     <div class="hub-metric-row"><span>Open Interest</span><span class="accent">${f.open_interest ? '$' + (f.open_interest / 1e9).toFixed(2) + 'B' : '—'}</span></div>
     <div class="hub-metric-row"><span>Funding Rate</span><span style="color:${fundColor}">${f.funding_rate != null ? (f.funding_rate * 100).toFixed(4) + '%' : '—'}</span></div>
     <div class="hub-metric-row"><span>Market Bias</span><span class="${biasClass}">${f.market_bias || '—'}</span></div>
@@ -1938,8 +2013,7 @@ function renderHubFuturesCard(futures) {
       <div class="fm-label">Short Squeeze Risk</div>
       <div class="fm-bar-wrap"><div class="fm-bar green" style="width:${Math.min(100,f.short_squeeze_risk||0)}%"></div></div>
       <div class="fm-val green">${(f.short_squeeze_risk || 0).toFixed(0)}/100</div>
-    </div>
-    <div class="hub-metric-row"><span>Taker Buy/Sell Ratio</span><span class="${(f.taker_buy_sell_ratio||0.5) > 0.5 ? 'green' : 'red'}">${f.taker_buy_sell_ratio != null ? f.taker_buy_sell_ratio.toFixed(3) : '—'}</span></div>`;
+    </div>`;
 }
 
 // ── Render: Market Sentiment Card (Hub) ───────────────────────────
