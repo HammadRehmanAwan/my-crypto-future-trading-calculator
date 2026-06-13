@@ -78,6 +78,7 @@
 <nav class="page-tabs">
   <button class="page-tab active" id="tabCalc" onclick="switchTab('calc')">Calculator</button>
   <button class="page-tab" id="tabDash" onclick="switchTab('dash')">Portfolio Dashboard</button>
+  <button class="page-tab" id="tabHub" onclick="switchTab('hub')">Intelligence Hub</button>
 </nav>
 
 <!-- ─── MAIN ─── -->
@@ -341,6 +342,87 @@
   </div>
 
   <div class="dash-disclaimer">Signals are based on technical analysis and statistical forecasting. For educational purposes only &mdash; not financial advice.</div>
+</section>
+
+<!-- ─── INTELLIGENCE HUB VIEW ─── -->
+<section class="hub-view" id="hubView" style="display:none">
+
+  <!-- Hub controls -->
+  <div class="card hub-controls">
+    <div class="hub-ctrl-row">
+      <select id="hubCoinSelect" class="coin-select hub-coin-select"></select>
+      <span class="hub-status-label" id="hubStatusLabel">Select a coin and click Analyze</span>
+      <button class="btn-hub-analyze" id="hubAnalyzeBtn" onclick="runHubAnalysis()">&#9889; Run Full Analysis</button>
+    </div>
+  </div>
+
+  <!-- AI Trading Score (full width) -->
+  <div class="card hub-score-card" id="hubScoreCard">
+    <div class="hub-score-placeholder">
+      <div class="score-ring-placeholder">?</div>
+      <div class="score-placeholder-text">Run analysis to see your AI Trading Score</div>
+    </div>
+  </div>
+
+  <!-- 3-column grid: Tech, Futures, Sentiment -->
+  <div class="hub-grid-3">
+    <div class="card hub-inner-card" id="hubTechCard">
+      <h3 class="card-heading">Technical Analysis</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubFuturesCard">
+      <h3 class="card-heading">Futures Intelligence</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubSentHubCard">
+      <h3 class="card-heading">Market Sentiment</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+  </div>
+
+  <!-- 3-column grid: News, Narratives, Tokenomics -->
+  <div class="hub-grid-3">
+    <div class="card hub-inner-card" id="hubNewsCard">
+      <h3 class="card-heading">News Impact</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubNarrCard">
+      <h3 class="card-heading">Narrative Detection</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubTokCard">
+      <h3 class="card-heading">Tokenomics</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+  </div>
+
+  <!-- 2-column grid: On-Chain, Risk -->
+  <div class="hub-grid-2">
+    <div class="card hub-inner-card" id="hubOnChainCard">
+      <h3 class="card-heading">On-Chain Analytics</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubRiskCard">
+      <h3 class="card-heading">Risk Dashboard</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+  </div>
+
+  <!-- AI Chat (full width) -->
+  <div class="card hub-chat-card" id="hubChatCard">
+    <h3 class="card-heading">AI Crypto Assistant <span class="heading-sub">&mdash; Ask anything about crypto trading</span></h3>
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-msg assistant">
+        <div class="chat-bubble">Hello! I am your AI crypto trading assistant. Ask me about RSI, MACD, funding rates, support/resistance, liquidation risks, or any crypto concept. Run an analysis first for coin-specific insights!</div>
+      </div>
+    </div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" class="chat-input" placeholder="Ask about RSI, funding rates, support levels..." onkeydown="if(event.key==='Enter')sendChat()" />
+      <button class="btn-chat-send" onclick="sendChat()">Send</button>
+    </div>
+  </div>
+
+  <div class="dash-disclaimer">Intelligence Hub uses Binance Futures API, CoinGecko data, and AI models for educational analysis only. Not financial advice.</div>
 </section>
 
 <footer class="footer">
