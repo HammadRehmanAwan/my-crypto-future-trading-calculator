@@ -1178,6 +1178,8 @@ async function analyze() {
 
   renderResults(m, curr, fcst, horizon, chgF);
   renderSignal(score, signals, dir);
+  state.lastTrade = { m, curr, dir, score, horizon, chgF, lev };
+  renderTradeCoach();
   btn.disabled = false; btn.textContent = 'Analyze Trade';
 }
 
@@ -1267,7 +1269,7 @@ function renderSignal(score, signals, dir) {
 
 function selectCoin(coinId) {
   state.coin = coinId;
-  document.getElementById('coinSelect').value = coinId;
+  syncCoinSelectors(coinId);
   state._autoRan = false;
   loadCoin(coinId, state.days);
 }
@@ -1293,7 +1295,28 @@ function init() {
     opt.value = id; opt.textContent = c.name;
     sel.appendChild(opt);
   });
-  sel.addEventListener('change', e => { state.coin = e.target.value; state._autoRan = false; loadCoin(e.target.value, state.days); });
+  sel.addEventListener('change', e => {
+    state.coin = e.target.value; state._autoRan = false;
+    syncCoinSelectors(e.target.value);
+    loadCoin(e.target.value, state.days);
+  });
+
+  // Guided-wizard coin selector — mirrors the chart's selector both ways.
+  const wizSel = document.getElementById('wizCoinSelect');
+  if (wizSel) {
+    Object.entries(COINS).forEach(([id, c]) => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = c.name;
+      wizSel.appendChild(opt);
+    });
+    wizSel.value = state.coin;
+    wizSel.addEventListener('change', e => {
+      state.coin = e.target.value; state._autoRan = false;
+      syncCoinSelectors(e.target.value);
+      loadCoin(e.target.value, state.days);
+    });
+  }
+  wizRender();
 
   // Populate hub coin selector
   const hubSel = document.getElementById('hubCoinSelect');
@@ -1564,6 +1587,103 @@ function heroSignals() {
   switchTab('hub');
   window.scrollTo({ top: 0, behavior: 'smooth' });
   runHubAnalysis();
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CALCULATOR WIZARD  (guided 5-step flow over the existing inputs)
+// ═══════════════════════════════════════════════════════════════════
+
+let wizStep = 1;
+const WIZ_MAX = 5;
+
+function wizRender() {
+  document.querySelectorAll('.wiz-step').forEach(s => s.classList.toggle('active', +s.dataset.step === wizStep));
+  document.querySelectorAll('.wiz-dot').forEach(d => {
+    const n = +d.dataset.step;
+    d.classList.toggle('active', n === wizStep);
+    d.classList.toggle('done', n < wizStep);
+  });
+  const back = document.getElementById('wizBack');
+  const next = document.getElementById('wizNext');
+  const ab   = document.getElementById('analyzeBtn');
+  if (back) back.style.visibility = wizStep === 1 ? 'hidden' : 'visible';
+  if (next) next.style.display = wizStep < WIZ_MAX ? '' : 'none';
+  if (ab)   ab.style.display   = wizStep < WIZ_MAX ? 'none' : '';
+}
+
+function wizGo(dir) {
+  wizStep = Math.min(WIZ_MAX, Math.max(1, wizStep + dir));
+  wizRender();
+}
+
+// Keep the chart's coin <select> and the wizard's coin <select> in lockstep.
+function syncCoinSelectors(id) {
+  const a = document.getElementById('coinSelect');    if (a && a.value !== id) a.value = id;
+  const b = document.getElementById('wizCoinSelect'); if (b && b.value !== id) b.value = id;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AI TRADE COACH  (actionable, rule-based feedback on the last trade)
+// ═══════════════════════════════════════════════════════════════════
+
+function renderTradeCoach() {
+  const card = document.getElementById('coachCard');
+  if (!card) return;
+  const lt = state.lastTrade;
+  if (!lt) { card.style.display = 'none'; return; }
+  const { m, dir, score, lev } = lt;
+  const tips = [];
+
+  if (m.rr != null) {
+    if (m.rr < 1) tips.push({ c: 'red', t: `Your risk/reward is 1:${m.rr.toFixed(2)} — you're risking more than you stand to gain. Tighten your stop-loss or extend your take-profit to reach at least 1:2.` });
+    else if (m.rr < 2) tips.push({ c: 'gold', t: `Risk/reward is 1:${m.rr.toFixed(2)}. Strong trades target 1:2 or better — nudge your take-profit higher or your stop-loss tighter.` });
+    else tips.push({ c: 'green', t: `Healthy 1:${m.rr.toFixed(2)} risk/reward — for every $1 risked you target $${m.rr.toFixed(2)}.` });
+  } else {
+    tips.push({ c: 'gold', t: `Set both a take-profit and a stop-loss so the coach can grade your risk/reward ratio.` });
+  }
+
+  if (m.liqDist < 5) tips.push({ c: 'red', t: `Liquidation is only ${m.liqDist.toFixed(1)}% away — a small adverse move wipes your margin. Lower leverage (currently ${lev}×) or add margin.` });
+  else if (m.liqDist < 12) tips.push({ c: 'gold', t: `Liquidation sits ${m.liqDist.toFixed(1)}% away — manageable, but watch volatility around news.` });
+  else tips.push({ c: 'green', t: `Comfortable ${m.liqDist.toFixed(1)}% buffer to your liquidation price.` });
+
+  if (lev > 25) tips.push({ c: 'red', t: `${lev}× is very aggressive. Most disciplined traders stay under 10–20×. Consider reducing it.` });
+  else if (lev > 10) tips.push({ c: 'gold', t: `${lev}× is elevated — make sure your stop-loss is set before entering.` });
+
+  if (!m.sl) tips.push({ c: 'red', t: `No stop-loss defined. Always set your exit before entering — it's the single most important risk control.` });
+
+  if (score !== 0) {
+    const aligned = (score > 0 && dir === 'Long') || (score < 0 && dir === 'Short');
+    if (!aligned) tips.push({ c: 'gold', t: `You chose ${dir}, but the composite signal leans the other way (${score > 0 ? '+' : ''}${score}). This is a counter-trend trade — size down.` });
+    else tips.push({ c: 'green', t: `Your ${dir} direction aligns with the composite signal (${score > 0 ? '+' : ''}${score}).` });
+  }
+
+  const reds = tips.filter(t => t.c === 'red').length;
+  const grade = reds >= 2 ? { t: 'High-Risk Setup', c: 'red' } : reds === 1 ? { t: 'Needs Adjustment', c: 'gold' } : { t: 'Well-Structured', c: 'green' };
+
+  card.style.display = 'block';
+  card.innerHTML = `
+    <div class="aidash-head"><h3 class="card-heading">AI Trade Coach</h3><span class="coach-grade ${grade.c}">${grade.t}</span></div>
+    <div class="coach-list">
+      ${tips.map(t => `<div class="coach-tip ${t.c}"><span class="coach-ico">${t.c === 'green' ? '✓' : t.c === 'red' ? '!' : '›'}</span><span>${t.t}</span></div>`).join('')}
+    </div>
+    <div class="hub-note">Coaching is rule-based on your inputs — educational only, not financial advice.</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// ANALYSIS PROGRESS  (ChatGPT-style reasoning checklist for the Hub)
+// ═══════════════════════════════════════════════════════════════════
+
+const HUB_STEPS = ['Price Data', 'Technical Indicators', 'Futures Metrics', 'Sentiment Analysis', 'AI Forecast', 'Signal Generation'];
+
+function renderHubProgress(progress) {
+  const el = document.getElementById('hubProgress');
+  if (!el) return;
+  el.style.display = 'flex';
+  el.innerHTML = HUB_STEPS.map(s => {
+    const st = progress[s] || 'pending';
+    const ico = st === 'done' ? '✓' : st === 'active' ? '<span class="hp-spin"></span>' : '○';
+    return `<div class="hub-prog-step ${st}"><span class="hp-ico">${ico}</span><span class="hp-lbl">${s}</span></div>`;
+  }).join('');
 }
 
 function setRiskProfile(profile) {
@@ -2366,6 +2486,11 @@ async function runHubAnalysis() {
   if (statusLbl) statusLbl.textContent = 'Computing technicals…';
   wakeBackend();
 
+  const progress = {};
+  HUB_STEPS.forEach(s => (progress[s] = 'pending'));
+  progress['Price Data'] = 'active';
+  renderHubProgress(progress);
+
   const coinId = document.getElementById('hubCoinSelect')?.value || 'bitcoin';
   hubState.coinId = coinId;
 
@@ -2387,6 +2512,9 @@ async function runHubAnalysis() {
     hubState.prices  = hist.prices;
     hubState.volumes = hist.volumes;
     hubState.dates   = hist.dates;
+    progress['Price Data'] = 'done';
+    progress['Technical Indicators'] = 'active';
+    renderHubProgress(progress);
   } catch (e) {
     if (statusLbl) statusLbl.textContent = `Could not load price data: ${e.message}`;
     if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Full Analysis'; }
@@ -2444,6 +2572,12 @@ async function runHubAnalysis() {
   renderLiquidationCard();
   renderWhaleCard();
 
+  progress['Technical Indicators'] = 'done';
+  progress['AI Forecast'] = 'done';            // Holt forecast computed in the model
+  progress['Futures Metrics'] = 'active';
+  progress['Sentiment Analysis'] = 'active';
+  renderHubProgress(progress);
+
   if (statusLbl) statusLbl.textContent = 'Loading live market data…';
 
   // ── Phase 2: live data direct from public APIs (backend = fallback) ──
@@ -2453,7 +2587,8 @@ async function runHubAnalysis() {
   const futuresP = fetchFuturesDirect(coinId)
     .catch(() => backendFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000, backendOpts))
     .then(d => { hubState.futures = d; renderHubFuturesCard(d); renderHubMasterScore(); renderLiquidationCard(); renderWhaleCard(); })
-    .catch(() => { hubState.futures = null; renderHubFuturesCard(null); });
+    .catch(() => { hubState.futures = null; renderHubFuturesCard(null); })
+    .finally(() => { progress['Futures Metrics'] = 'done'; renderHubProgress(progress); });
 
   // Live order flow + market structure (real OKX trades + order book).
   const orderFlowP = fetchOrderFlow(coinId)
@@ -2493,9 +2628,14 @@ async function runHubAnalysis() {
       newsSentiment: state.sentiment?.newsSentiment,
     });
     renderHubMasterScore();  // sentiment now feeds the AI Intelligence Dashboard
+    progress['Sentiment Analysis'] = 'done';
+    renderHubProgress(progress);
   })();
 
   await Promise.allSettled([futuresP, orderFlowP, tokP, onchainP, newsP, sentP]);
+  HUB_STEPS.forEach(s => { if (progress[s] !== 'done') progress[s] = 'done'; });
+  progress['Signal Generation'] = 'done';
+  renderHubProgress(progress);
   if (statusLbl) statusLbl.textContent = `Analysis complete for ${COINS[coinId]?.name || coinId}`;
   if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Full Analysis'; }
 }
