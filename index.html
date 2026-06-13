@@ -18,14 +18,21 @@
 
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <!-- Warm up the data-API origins so the first requests are faster -->
+  <link rel="preconnect" href="https://api.coingecko.com" crossorigin />
+  <link rel="preconnect" href="https://www.okx.com" crossorigin />
+  <link rel="dns-prefetch" href="https://api.alternative.me" />
+  <link rel="dns-prefetch" href="https://min-api.cryptocompare.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <!-- Libraries deferred so they never block first paint; they execute in
+       order before DOMContentLoaded, so app.js still sees Chart/emailjs/firebase. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <!-- Firebase compat SDK (v10) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -79,6 +86,7 @@
   <button class="page-tab active" id="tabCalc" onclick="switchTab('calc')">Dashboard</button>
   <button class="page-tab" id="tabDash" onclick="switchTab('dash')">Portfolio Dashboard</button>
   <button class="page-tab" id="tabHub" onclick="switchTab('hub')">Intelligence Hub</button>
+  <button class="page-tab" id="tabEdu" onclick="switchTab('edu')">Learn</button>
 </nav>
 
 <!-- ─── HERO ─── -->
@@ -534,6 +542,72 @@
   <div class="dash-disclaimer">Intelligence Hub uses OKX Futures API, CoinGecko data, and AI models for educational analysis only. Not financial advice.</div>
 </section>
 
+<!-- ─── EDUCATION & RISK MANAGEMENT VIEW ─── -->
+<section class="edu-view" id="eduView" style="display:none">
+  <div class="edu-hero">
+    <h2 class="edu-title">Education &amp; Risk Management</h2>
+    <p class="edu-sub">Master the fundamentals before you risk capital. Futures trading is high-risk — these principles help you survive long enough to succeed.</p>
+  </div>
+
+  <div class="edu-grid">
+    <!-- Risk Management Essentials -->
+    <div class="card edu-card">
+      <h3 class="card-heading">Risk Management Essentials</h3>
+      <ul class="edu-list">
+        <li><strong>Risk 1–2% per trade.</strong> Never put more than a small slice of your capital on a single position — survive losing streaks.</li>
+        <li><strong>Always set a stop-loss.</strong> Decide your exit before you enter. No stop = unlimited emotional risk.</li>
+        <li><strong>Target 1:2 reward-to-risk or better.</strong> Win less than half your trades and still come out ahead.</li>
+        <li><strong>Size down on counter-trend trades.</strong> Fighting the dominant trend needs smaller positions.</li>
+        <li><strong>Never add to a losing position</strong> hoping it recovers — that's how accounts blow up.</li>
+      </ul>
+    </div>
+
+    <!-- Leverage & Liquidation -->
+    <div class="card edu-card">
+      <h3 class="card-heading">Leverage &amp; Liquidation</h3>
+      <ul class="edu-list">
+        <li><strong>Leverage multiplies both ways.</strong> 10× turns a 1% move into 10% of your margin — profit <em>and</em> loss.</li>
+        <li><strong>Liquidation</strong> is forced closure when losses exhaust your margin. At 100× a ~1% adverse move wipes you out.</li>
+        <li><strong>Liquidation distance ≈ 1 / leverage.</strong> 5× ≈ 20% buffer; 25× ≈ 4%; 100× ≈ 1%.</li>
+        <li><strong>Lower leverage = more survivable.</strong> Most disciplined traders stay under 10–20×.</li>
+        <li><strong>Liquidation clusters act as magnets</strong> — price often hunts dense zones (see the Liquidation Heatmap).</li>
+      </ul>
+    </div>
+
+    <!-- Indicator Glossary -->
+    <div class="card edu-card">
+      <h3 class="card-heading">Indicator Glossary</h3>
+      <dl class="edu-gloss">
+        <dt>RSI (14)</dt><dd>Momentum 0–100. &lt;30 oversold (bounce potential), &gt;70 overbought (pullback risk).</dd>
+        <dt>MACD</dt><dd>Trend momentum. Line above signal = bullish; below = bearish.</dd>
+        <dt>Bollinger Bands</dt><dd>Volatility envelope. A squeeze often precedes a big move.</dd>
+        <dt>EMA 20/50/200</dt><dd>Trend structure. Price above all three = strong uptrend.</dd>
+        <dt>ATR</dt><dd>Average volatility — used to size stops (1.5–2× ATR).</dd>
+        <dt>Funding Rate</dt><dd>Perp payment between longs/shorts. Extreme positive often precedes corrections.</dd>
+        <dt>Open Interest</dt><dd>Total open contracts. Rising OI + rising price = conviction.</dd>
+        <dt>Long/Short Ratio</dt><dd>Crowd positioning — extremes set up squeezes.</dd>
+      </dl>
+    </div>
+
+    <!-- Common Mistakes -->
+    <div class="card edu-card">
+      <h3 class="card-heading">Common Mistakes to Avoid</h3>
+      <ul class="edu-list edu-list-bad">
+        <li><strong>Over-leveraging.</strong> The #1 account killer. High leverage feels powerful until one wick liquidates you.</li>
+        <li><strong>Revenge trading.</strong> Chasing losses with bigger size compounds the damage.</li>
+        <li><strong>No stop-loss / moving it.</strong> Widening a stop to "give it room" turns a small loss into a big one.</li>
+        <li><strong>FOMO entries.</strong> Buying after a vertical pump usually means buying the top.</li>
+        <li><strong>Ignoring funding &amp; sentiment.</strong> Crowded trades reverse violently.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="dash-disclaimer">Educational content only. Crypto futures trading can result in the loss of your entire investment. Not financial advice — always do your own research.</div>
+</section>
+
+<!-- ─── MOBILE STICKY ANALYZE ─── -->
+<button class="mobile-analyze show" id="mobileAnalyze" onclick="analyze()">&#9889; Analyze Trade</button>
+
 <!-- ─── MOBILE BOTTOM NAV ─── -->
 <nav class="bottom-nav" id="bottomNav">
   <button class="bn-item active" data-tab="calc" onclick="switchTab('calc')">
@@ -544,6 +618,9 @@
   </button>
   <button class="bn-item" data-tab="hub" onclick="switchTab('hub')">
     <span class="bn-ico">&#129504;</span><span class="bn-lbl">Hub</span>
+  </button>
+  <button class="bn-item" data-tab="edu" onclick="switchTab('edu')">
+    <span class="bn-ico">&#127891;</span><span class="bn-lbl">Learn</span>
   </button>
 </nav>
 
@@ -556,6 +633,6 @@
   <a href="#" onclick="document.getElementById('disclaimerBanner').style.display='flex';return false;">Disclaimer</a>
 </footer>
 
-<script src="app.js"></script>
+<script defer src="app.js"></script>
 </body>
 </html>

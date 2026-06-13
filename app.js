@@ -1480,20 +1480,25 @@ document.addEventListener('DOMContentLoaded', init);
 // ═══════════════════════════════════════════════════════════════════
 
 function switchTab(tab) {
-  const isCalc = tab === 'calc';
-  const isDash = tab === 'dash';
-  const isHub  = tab === 'hub';
-  document.getElementById('calcView').style.display = isCalc ? '' : 'none';
-  document.getElementById('dashView').style.display = isDash ? '' : 'none';
-  document.getElementById('hubView').style.display  = isHub  ? '' : 'none';
-  document.getElementById('tabCalc').classList.toggle('active', isCalc);
-  document.getElementById('tabDash').classList.toggle('active', isDash);
-  document.getElementById('tabHub').classList.toggle('active',  isHub);
+  const views = { calc: 'calcView', dash: 'dashView', hub: 'hubView', edu: 'eduView' };
+  const tabs  = { calc: 'tabCalc',  dash: 'tabDash',  hub: 'tabHub',  edu: 'tabEdu' };
+  for (const [k, id] of Object.entries(views)) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = k === tab ? '' : 'none';
+  }
+  for (const [k, id] of Object.entries(tabs)) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('active', k === tab);
+  }
   // Hero band is the landing experience — show it only on the default view.
   const hero = document.getElementById('heroSection');
-  if (hero) hero.style.display = isCalc ? '' : 'none';
+  if (hero) hero.style.display = tab === 'calc' ? '' : 'none';
+  // Sticky mobile analyze button is only relevant on the calculator view.
+  const ma = document.getElementById('mobileAnalyze');
+  if (ma) ma.classList.toggle('show', tab === 'calc');
   // Keep the mobile bottom-nav in sync.
   document.querySelectorAll('.bn-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 // ═══════════════════════════════════════════════════════════════════

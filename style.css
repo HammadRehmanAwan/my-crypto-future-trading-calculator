@@ -2076,3 +2076,72 @@ input, select, button { font-family: inherit; }
 .narr-mo.up   { color: var(--green); background: var(--green-d); }
 .narr-mo.down { color: var(--red);   background: var(--red-d); }
 .narr-mo.flat { color: var(--text-lo); background: rgba(255,255,255,.04); }
+
+/* ═══════════════════════════════════════════════════════
+   PHASE 7 — Education / Mobile polish / Performance
+═══════════════════════════════════════════════════════ */
+
+/* ─── Education view ─── */
+.edu-view { max-width: 1100px; margin: 0 auto; padding: 24px 20px; }
+.edu-hero { text-align: center; margin-bottom: 24px; }
+.edu-title {
+  font-size: clamp(24px, 4vw, 34px); font-weight: 800; letter-spacing: -.02em;
+  color: var(--text-hi); margin-bottom: 10px;
+}
+.edu-sub { font-size: 14px; color: var(--text-lo); max-width: 620px; margin: 0 auto; line-height: 1.6; }
+.edu-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 760px) { .edu-grid { grid-template-columns: 1fr; } }
+.edu-card { }
+.edu-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.edu-list li {
+  position: relative; padding-left: 22px; font-size: 13px; line-height: 1.55; color: var(--text);
+}
+.edu-list li::before { content: '✓'; position: absolute; left: 0; top: 0; color: var(--green); font-weight: 800; }
+.edu-list-bad li::before { content: '✕'; color: var(--red); }
+.edu-list strong { color: var(--text-hi); }
+.edu-gloss { display: flex; flex-direction: column; gap: 8px; }
+.edu-gloss dt { font-size: 12px; font-weight: 700; color: var(--primary); }
+.edu-gloss dd { font-size: 12px; color: var(--text-lo); line-height: 1.5; margin: 2px 0 6px; }
+
+/* ─── Sticky mobile analyze button ─── */
+.mobile-analyze { display: none; }
+@media (max-width: 760px) {
+  .mobile-analyze.show {
+    display: block;
+    position: fixed; left: 16px; right: 16px; bottom: 74px; z-index: 190;
+    padding: 14px; border: none; border-radius: 14px;
+    background: linear-gradient(135deg, var(--primary), #6AA0FF);
+    color: #fff; font-size: 15px; font-weight: 800;
+    box-shadow: 0 8px 26px rgba(79,140,255,.45);
+  }
+}
+
+/* ─── Mobile polish ─── */
+@media (max-width: 760px) {
+  /* Swipeable card decks for the Hub grids */
+  .hub-grid-3, .hub-grid-2 {
+    display: flex; gap: 12px;
+    overflow-x: auto; scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    margin: 0 -20px; padding: 0 20px;
+  }
+  .hub-grid-3::-webkit-scrollbar, .hub-grid-2::-webkit-scrollbar { display: none; }
+  .hub-grid-3 > .card, .hub-grid-2 > .card {
+    scroll-snap-align: center; flex: 0 0 86%; min-width: 86%;
+  }
+  /* Larger tap targets */
+  .tf-btn, .thresh-btn, .risk-btn { min-height: 38px; }
+  .dir-btn { padding: 12px 0; }
+  .page-tab { padding: 12px 16px; font-size: 12px; }
+  /* Responsive chart heights */
+  .chart-wrap { height: 240px; }
+  .tpe-radar-wrap { height: 230px; }
+  /* Hero metrics stack to 2-up comfortably */
+  .hero-inner { padding-top: 24px; }
+}
+
+/* Respect reduced-motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}
