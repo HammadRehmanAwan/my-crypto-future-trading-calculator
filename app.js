@@ -1115,6 +1115,17 @@ function init() {
     sel.appendChild(opt);
   });
   sel.addEventListener('change', e => { state.coin = e.target.value; state._autoRan = false; loadCoin(e.target.value, state.days); });
+
+  // Populate hub coin selector
+  const hubSel = document.getElementById('hubCoinSelect');
+  if (hubSel) {
+    Object.entries(COINS).forEach(([id, c]) => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = c.name;
+      hubSel.appendChild(opt);
+    });
+    hubSel.addEventListener('change', e => { hubState.coinId = e.target.value; });
+  }
   document.querySelectorAll('.tf-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
@@ -1267,10 +1278,14 @@ document.addEventListener('DOMContentLoaded', init);
 
 function switchTab(tab) {
   const isCalc = tab === 'calc';
+  const isDash = tab === 'dash';
+  const isHub  = tab === 'hub';
   document.getElementById('calcView').style.display = isCalc ? '' : 'none';
-  document.getElementById('dashView').style.display = isCalc ? 'none' : '';
+  document.getElementById('dashView').style.display = isDash ? '' : 'none';
+  document.getElementById('hubView').style.display  = isHub  ? '' : 'none';
   document.getElementById('tabCalc').classList.toggle('active', isCalc);
-  document.getElementById('tabDash').classList.toggle('active', !isCalc);
+  document.getElementById('tabDash').classList.toggle('active', isDash);
+  document.getElementById('tabHub').classList.toggle('active',  isHub);
 }
 
 function setRiskProfile(profile) {
