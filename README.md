@@ -2,7 +2,7 @@
 title: Crypto Futures Trading Calculator AI
 emoji: 📈
 colorFrom: blue
-colorTo: cyan
+colorTo: green
 sdk: docker
 app_port: 7860
 pinned: false
