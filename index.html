@@ -81,58 +81,45 @@
   <button class="page-tab" id="tabHub" onclick="switchTab('hub')">Intelligence Hub</button>
 </nav>
 
-<!-- ─── WHY FUTUREX ─── -->
-<div class="why-strip">
-  <div class="why-inner">
-    <div class="why-feat">
-      <div class="why-icon-wrap wi-accent">⚡</div>
-      <div>
-        <p class="why-title">Real-Time Prices</p>
-        <p class="why-sub">Live data &middot; 15 top coins</p>
+<!-- ─── HERO ─── -->
+<section class="hero" id="heroSection">
+  <div class="hero-glow"></div>
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <div class="hero-eyebrow"><span class="hero-dot"></span> Live market intelligence &middot; 15 assets</div>
+      <h1 class="hero-title">AI-Powered Crypto<br><span class="grad-text">Futures Intelligence</span></h1>
+      <p class="hero-sub">Combine technical indicators, futures data, market sentiment, whale activity, and AI forecasting into one trading decision engine.</p>
+      <div class="hero-cta">
+        <button class="btn-hero-primary" onclick="heroAnalyze()">&#9889; Analyze Market</button>
+        <button class="btn-hero-ghost" onclick="heroSignals()">&#128225; View Live Signals</button>
+      </div>
+      <div class="hero-trust">
+        <span class="trust-chip">&#10003; 100% Free</span>
+        <span class="trust-chip">&#10003; No signup</span>
+        <span class="trust-chip">&#10003; Real-time data</span>
+        <span class="trust-chip">&#10003; Amazon Chronos AI</span>
       </div>
     </div>
-    <div class="why-sep"></div>
-    <div class="why-feat">
-      <div class="why-icon-wrap wi-purple">🤖</div>
-      <div>
-        <p class="why-title">AI Price Forecast</p>
-        <p class="why-sub">Amazon Chronos model</p>
+    <div class="hero-metrics">
+      <div class="hero-metric" id="heroBtc">
+        <div class="hm-top"><span class="hm-icon">&#8383;</span><span class="hm-label">BTC Price</span></div>
+        <div class="hm-value">&mdash;</div><div class="hm-sub">&mdash;</div>
       </div>
-    </div>
-    <div class="why-sep"></div>
-    <div class="why-feat">
-      <div class="why-icon-wrap wi-green">📊</div>
-      <div>
-        <p class="why-title">Full TA Suite</p>
-        <p class="why-sub">RSI &middot; MACD &middot; EMA &middot; ATR &middot; BB</p>
+      <div class="hero-metric" id="heroSentiment">
+        <div class="hm-top"><span class="hm-icon">&#127777;</span><span class="hm-label">Market Sentiment</span></div>
+        <div class="hm-value">&mdash;</div><div class="hm-sub">Fear &amp; Greed</div>
       </div>
-    </div>
-    <div class="why-sep"></div>
-    <div class="why-feat">
-      <div class="why-icon-wrap wi-gold">🔍</div>
-      <div>
-        <p class="why-title">Futures Intelligence</p>
-        <p class="why-sub">Funding rates &middot; OI &middot; L/S ratio</p>
+      <div class="hero-metric" id="heroConfidence">
+        <div class="hm-top"><span class="hm-icon">&#129302;</span><span class="hm-label">AI Confidence</span></div>
+        <div class="hm-value">&mdash;</div><div class="hm-sub">BTC signal</div>
       </div>
-    </div>
-    <div class="why-sep"></div>
-    <div class="why-feat">
-      <div class="why-icon-wrap wi-red">🛡️</div>
-      <div>
-        <p class="why-title">Risk Calculator</p>
-        <p class="why-sub">Liquidation &middot; PnL &middot; ROE</p>
-      </div>
-    </div>
-    <div class="why-sep"></div>
-    <div class="why-feat">
-      <div class="why-icon-wrap wi-green">✅</div>
-      <div>
-        <p class="why-title">100% Free</p>
-        <p class="why-sub">No signup &middot; No ads</p>
+      <div class="hero-metric" id="heroOpportunity">
+        <div class="hm-top"><span class="hm-icon">&#127919;</span><span class="hm-label">Best Opportunity</span></div>
+        <div class="hm-value">&mdash;</div><div class="hm-sub">Top signal now</div>
       </div>
     </div>
   </div>
-</div>
+</section>
 
 <!-- ─── MAIN ─── -->
 <main class="layout" id="calcView">
@@ -485,6 +472,19 @@
 
   <div class="dash-disclaimer">Intelligence Hub uses OKX Futures API, CoinGecko data, and AI models for educational analysis only. Not financial advice.</div>
 </section>
+
+<!-- ─── MOBILE BOTTOM NAV ─── -->
+<nav class="bottom-nav" id="bottomNav">
+  <button class="bn-item active" data-tab="calc" onclick="switchTab('calc')">
+    <span class="bn-ico">&#128202;</span><span class="bn-lbl">Dashboard</span>
+  </button>
+  <button class="bn-item" data-tab="dash" onclick="switchTab('dash')">
+    <span class="bn-ico">&#128188;</span><span class="bn-lbl">Portfolio</span>
+  </button>
+  <button class="bn-item" data-tab="hub" onclick="switchTab('hub')">
+    <span class="bn-ico">&#129504;</span><span class="bn-lbl">Hub</span>
+  </button>
+</nav>
 
 <footer class="footer">
   Powered by
