@@ -207,53 +207,86 @@
 
     <!-- Calculator card -->
     <div class="card calc-card">
-      <h3 class="card-heading">Position Setup</h3>
-
-      <div class="form-group">
-        <label>Direction &mdash; Which way do you think the price will move?</label>
-        <div class="dir-toggle">
-          <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">&#9650; Long &mdash; Price will rise</button>
-          <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">&#9660; Short &mdash; Price will fall</button>
+      <div class="wiz-head">
+        <h3 class="card-heading">Guided Trade Setup</h3>
+        <div class="wiz-steps" id="wizSteps">
+          <span class="wiz-dot active" data-step="1">1</span>
+          <span class="wiz-dot" data-step="2">2</span>
+          <span class="wiz-dot" data-step="3">3</span>
+          <span class="wiz-dot" data-step="4">4</span>
+          <span class="wiz-dot" data-step="5">5</span>
         </div>
       </div>
 
-      <div class="form-group">
-        <label for="entryPrice">Entry Price (USD) <span class="hint">&mdash; 0 = live price</span></label>
-        <input type="number" id="entryPrice" value="0" min="0" step="0.01" oninput="this.dataset.userSet='1'" />
+      <!-- Step 1: Coin & Direction -->
+      <div class="wiz-step active" data-step="1">
+        <div class="wiz-step-title">Step 1 &middot; Coin &amp; direction</div>
+        <div class="form-group">
+          <label for="wizCoinSelect">Cryptocurrency</label>
+          <select id="wizCoinSelect" class="coin-select wiz-coin"></select>
+        </div>
+        <div class="form-group">
+          <label>Direction &mdash; Which way do you think the price will move?</label>
+          <div class="dir-toggle">
+            <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">&#9650; Long &mdash; Price will rise</button>
+            <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">&#9660; Short &mdash; Price will fall</button>
+          </div>
+        </div>
       </div>
 
-      <div class="form-group">
-        <label>Leverage &mdash; <span id="levDisplay" class="accent">10&times;</span> <span class="lev-risk-badge" id="levRiskBadge">Moderate Risk</span></label>
-        <input type="range" id="leverage" class="range-slider" min="1" max="125" value="10"
-               oninput="updateLeverage(this.value)" />
-        <div class="range-marks"><span>1&times;</span><span>25&times;</span><span>50&times;</span><span>100&times;</span><span>125&times;</span></div>
-        <div class="lev-hint" id="levHint">Multiplies both profits AND losses by 10&times;. A 1% price drop wipes 10% of your money.</div>
+      <!-- Step 2: Entry & Size -->
+      <div class="wiz-step" data-step="2">
+        <div class="wiz-step-title">Step 2 &middot; Entry price &amp; trade size</div>
+        <div class="form-group">
+          <label for="entryPrice">Entry Price (USD) <span class="hint">&mdash; 0 = live price</span></label>
+          <input type="number" id="entryPrice" value="0" min="0" step="0.01" oninput="this.dataset.userSet='1'" />
+        </div>
+        <div class="form-group">
+          <label for="posSize">Total Trade Size (USD) <span class="hint">&mdash; total value, not what you actually put in</span></label>
+          <input type="number" id="posSize" value="1000" min="1" />
+        </div>
       </div>
 
-      <div class="form-group">
-        <label for="posSize">Total Trade Size (USD) <span class="hint">&mdash; total value, not what you actually put in</span></label>
-        <input type="number" id="posSize" value="1000" min="1" />
+      <!-- Step 3: Leverage -->
+      <div class="wiz-step" data-step="3">
+        <div class="wiz-step-title">Step 3 &middot; Leverage</div>
+        <div class="form-group">
+          <label>Leverage &mdash; <span id="levDisplay" class="accent">10&times;</span> <span class="lev-risk-badge" id="levRiskBadge">Moderate Risk</span></label>
+          <input type="range" id="leverage" class="range-slider" min="1" max="125" value="10"
+                 oninput="updateLeverage(this.value)" />
+          <div class="range-marks"><span>1&times;</span><span>25&times;</span><span>50&times;</span><span>100&times;</span><span>125&times;</span></div>
+          <div class="lev-hint" id="levHint">Multiplies both profits AND losses by 10&times;. A 1% price drop wipes 10% of your money.</div>
+        </div>
       </div>
 
-      <div class="divider"><span>Risk Management</span></div>
-
-      <div class="form-group">
-        <label for="takeProfit">Take Profit Price (USD) <span class="hint">&mdash; price to auto-close with profit (0 = use AI forecast)</span></label>
-        <input type="number" id="takeProfit" value="0" min="0" step="0.01" />
+      <!-- Step 4: Stop Loss -->
+      <div class="wiz-step" data-step="4">
+        <div class="wiz-step-title">Step 4 &middot; Stop loss &amp; forecast window</div>
+        <div class="form-group">
+          <label for="stopLoss">Stop Loss Price (USD) <span class="hint">&mdash; price to auto-close to limit your loss (0 = skip)</span></label>
+          <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
+        </div>
+        <div class="form-group">
+          <label>Predict How Many Days Ahead &mdash; <span id="horizDisplay" class="accent">7 days</span></label>
+          <input type="range" id="horizon" class="range-slider" min="1" max="14" value="7"
+                 oninput="document.getElementById('horizDisplay').textContent=this.value+' days'" />
+        </div>
       </div>
 
-      <div class="form-group">
-        <label for="stopLoss">Stop Loss Price (USD) <span class="hint">&mdash; price to auto-close to limit your loss (0 = skip)</span></label>
-        <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
+      <!-- Step 5: Take Profit -->
+      <div class="wiz-step" data-step="5">
+        <div class="wiz-step-title">Step 5 &middot; Take profit &amp; analyze</div>
+        <div class="form-group">
+          <label for="takeProfit">Take Profit Price (USD) <span class="hint">&mdash; price to auto-close with profit (0 = use AI forecast)</span></label>
+          <input type="number" id="takeProfit" value="0" min="0" step="0.01" />
+        </div>
       </div>
 
-      <div class="form-group">
-        <label>Predict How Many Days Ahead &mdash; <span id="horizDisplay" class="accent">7 days</span></label>
-        <input type="range" id="horizon" class="range-slider" min="1" max="14" value="7"
-               oninput="document.getElementById('horizDisplay').textContent=this.value+' days'" />
+      <div class="wiz-nav">
+        <button class="wiz-back" id="wizBack" onclick="wizGo(-1)">&larr; Back</button>
+        <button class="wiz-next" id="wizNext" onclick="wizGo(1)">Next &rarr;</button>
+        <button id="analyzeBtn" class="btn-analyze" onclick="analyze()" style="display:none">Analyze Trade</button>
       </div>
-
-      <button id="analyzeBtn" class="btn-analyze" onclick="analyze()">Analyze Trade</button>
     </div>
 
     <!-- Results card -->
@@ -261,6 +294,9 @@
       <h3 class="card-heading">Trade Summary</h3>
       <div id="resultsBody"></div>
     </div>
+
+    <!-- AI Trade Coach card -->
+    <div class="card coach-card" id="coachCard" style="display:none"></div>
 
     <!-- Signal card -->
     <div class="card signal-card" id="signalCard" style="display:none">
@@ -402,6 +438,7 @@
       <span class="hub-status-label" id="hubStatusLabel">Select a coin and click Analyze</span>
       <button class="btn-hub-analyze" id="hubAnalyzeBtn" onclick="runHubAnalysis()">&#9889; Run Full Analysis</button>
     </div>
+    <div class="hub-progress" id="hubProgress" style="display:none"></div>
   </div>
 
   <!-- AI Intelligence Dashboard (full width) -->

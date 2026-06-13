@@ -1974,3 +1974,68 @@ input, select, button { font-family: inherit; }
 .whale-sig-ico.gold  { color: var(--gold);  border-color: rgba(255,184,0,0.3); }
 .whale-sig-ico.neutral-text { color: var(--text-lo); }
 .whale-sig-txt { color: var(--text); padding-top: 2px; }
+
+/* ═══════════════════════════════════════════════════════
+   PHASE 5 — Wizard / Trade Coach / Progress checklist
+═══════════════════════════════════════════════════════ */
+
+/* ─── Calculator wizard ─── */
+.wiz-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+.wiz-head .card-heading { margin-bottom: 0; }
+.wiz-steps { display: flex; align-items: center; gap: 6px; }
+.wiz-dot {
+  width: 24px; height: 24px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; font-family: var(--mono);
+  background: var(--bg2); border: 1px solid var(--border2); color: var(--text-lo);
+  transition: all .25s;
+}
+.wiz-dot.active { background: var(--primary-d); border-color: var(--primary); color: var(--primary); box-shadow: 0 0 12px rgba(79,140,255,.3); }
+.wiz-dot.done   { background: var(--green-d); border-color: var(--green); color: var(--green); }
+.wiz-dot.done::before { content: '✓'; }
+.wiz-dot.done { font-size: 0; }
+.wiz-dot.done::before { font-size: 12px; }
+
+.wiz-step { display: none; animation: cardFade .3s ease both; }
+.wiz-step.active { display: block; }
+.wiz-step-title { font-size: 12px; font-weight: 700; color: var(--primary); letter-spacing: .03em; margin-bottom: 12px; }
+.wiz-coin { width: 100%; }
+
+.wiz-nav { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.wiz-back, .wiz-next {
+  padding: 11px 20px; border-radius: var(--r-sm); cursor: pointer;
+  font-size: 14px; font-weight: 700; transition: all .18s;
+}
+.wiz-back { background: var(--bg2); border: 1px solid var(--border2); color: var(--text-lo); }
+.wiz-back:hover { border-color: var(--text-lo); color: var(--text); }
+.wiz-next { flex: 1; background: linear-gradient(135deg, var(--primary), #6AA0FF); border: none; color: #fff; box-shadow: 0 4px 14px rgba(79,140,255,.3); }
+.wiz-next:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(79,140,255,.42); }
+.wiz-nav .btn-analyze { flex: 1; margin-top: 0; }
+
+/* ─── AI Trade Coach ─── */
+.coach-grade { font-size: 11px; font-weight: 700; padding: 4px 12px; border-radius: 20px; }
+.coach-grade.green { color: var(--green); background: var(--green-d); border: 1px solid rgba(0,230,118,.3); }
+.coach-grade.gold  { color: var(--gold);  background: var(--gold-d);  border: 1px solid rgba(255,184,0,.3); }
+.coach-grade.red   { color: var(--red);   background: var(--red-d);   border: 1px solid rgba(255,82,82,.3); }
+.coach-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.coach-tip { display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.5; padding: 9px 11px; border-radius: var(--r-sm); }
+.coach-tip.green { background: var(--green-d); border: 1px solid rgba(0,230,118,.22); color: var(--text); }
+.coach-tip.gold  { background: var(--gold-d);  border: 1px solid rgba(255,184,0,.22); color: var(--text); }
+.coach-tip.red   { background: var(--red-d);   border: 1px solid rgba(255,82,82,.22); color: var(--text); }
+.coach-ico { flex-shrink: 0; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
+.coach-tip.green .coach-ico { background: var(--green); color: #04231a; }
+.coach-tip.gold  .coach-ico { background: var(--gold);  color: #2a1f00; }
+.coach-tip.red   .coach-ico { background: var(--red);   color: #2a0808; }
+
+/* ─── Hub progress checklist ─── */
+.hub-progress { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.hub-prog-step {
+  display: flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 600; color: var(--text-lo);
+  background: var(--bg2); border: 1px solid var(--border);
+  padding: 5px 11px; border-radius: 20px; transition: all .25s;
+}
+.hub-prog-step .hp-ico { font-size: 11px; display: inline-flex; }
+.hub-prog-step.active { color: var(--primary); border-color: rgba(79,140,255,.4); background: var(--primary-d); }
+.hub-prog-step.done { color: var(--green); border-color: rgba(0,230,118,.35); background: var(--green-d); }
+.hp-spin { width: 11px; height: 11px; border: 2px solid var(--border2); border-top-color: var(--primary); border-radius: 50%; display: inline-block; animation: spin .7s linear infinite; }
