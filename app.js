@@ -31,14 +31,11 @@ const COINS = {
 const TICKER_IDS = ['bitcoin','ethereum','binancecoin','solana','ripple','cardano','avalanche-2'];
 const BASE = 'https://api.coingecko.com/api/v3';
 
-// ─── BACKEND URL ────────────────────────────────────────────────────
-// When running on HF Space the page is served by the same FastAPI process
-// that also exposes /firebase-config and /news, so we use the current origin.
-// When running on GitHub Pages we point at the Render deployment.
-const _HF_ORIGIN = 'https://hammadrehman-crypto-futures-calculator.hf.space';
-const BACKEND_URL = (location.origin === _HF_ORIGIN)
-  ? _HF_ORIGIN
-  : 'https://my-crypto-future-trading-calculator.onrender.com';
+// ─── FIREBASE CONFIG ────────────────────────────────────────────────
+// Credentials are served from the backend so they never appear in source.
+// Set BACKEND_URL to wherever app.py is deployed (Render, HuggingFace, etc.)
+// and add the seven FIREBASE_* environment variables on that server.
+const BACKEND_URL = 'https://my-crypto-future-trading-calculator.onrender.com';
 // ────────────────────────────────────────────────────────────────────
 
 let _db   = null;
@@ -1118,6 +1115,17 @@ function init() {
     sel.appendChild(opt);
   });
   sel.addEventListener('change', e => { state.coin = e.target.value; state._autoRan = false; loadCoin(e.target.value, state.days); });
+
+  // Populate hub coin selector
+  const hubSel = document.getElementById('hubCoinSelect');
+  if (hubSel) {
+    Object.entries(COINS).forEach(([id, c]) => {
+      const opt = document.createElement('option');
+      opt.value = id; opt.textContent = c.name;
+      hubSel.appendChild(opt);
+    });
+    hubSel.addEventListener('change', e => { hubState.coinId = e.target.value; });
+  }
   document.querySelectorAll('.tf-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
@@ -1270,10 +1278,14 @@ document.addEventListener('DOMContentLoaded', init);
 
 function switchTab(tab) {
   const isCalc = tab === 'calc';
+  const isDash = tab === 'dash';
+  const isHub  = tab === 'hub';
   document.getElementById('calcView').style.display = isCalc ? '' : 'none';
-  document.getElementById('dashView').style.display = isCalc ? 'none' : '';
+  document.getElementById('dashView').style.display = isDash ? '' : 'none';
+  document.getElementById('hubView').style.display  = isHub  ? '' : 'none';
   document.getElementById('tabCalc').classList.toggle('active', isCalc);
-  document.getElementById('tabDash').classList.toggle('active', !isCalc);
+  document.getElementById('tabDash').classList.toggle('active', isDash);
+  document.getElementById('tabHub').classList.toggle('active',  isHub);
 }
 
 function setRiskProfile(profile) {
@@ -1463,3 +1475,709 @@ function renderDashboard(trades, capital, riskProfile) {
 
   document.getElementById('dashResults').style.display = 'block';
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// INTELLIGENCE HUB — Complete AI Analysis System
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Hub State ──────────────────────────────────────────────────────
+const hubState = {
+  coinId: 'bitcoin',
+  prices: null,
+  volumes: null,
+  dates: null,
+  futures: null,
+  tokenomics: null,
+  onchain: null,
+  news: null,
+  analysis: null,
+};
+
+// ── Cache TTLs ─────────────────────────────────────────────────────
+const HUB_CACHE = {};
+function hubCacheGet(key, ttl) {
+  const hit = HUB_CACHE[key];
+  if (hit && Date.now() - hit.ts < ttl) return hit.data;
+  return null;
+}
+function hubCacheSet(key, data) {
+  HUB_CACHE[key] = { data, ts: Date.now() };
+}
+
+// ── New Technical Indicators ───────────────────────────────────────
+
+function calcATR(prices, period = 14) {
+  if (prices.length < 2) return 0;
+  const changes = [];
+  for (let i = 1; i < prices.length; i++) {
+    changes.push(Math.abs(prices[i] - prices[i - 1]));
+  }
+  if (changes.length === 0) return 0;
+  // Smooth with EMA
+  const smoothed = ema(changes, period);
+  return smoothed[smoothed.length - 1] || 0;
+}
+
+function calcVWAP(prices, volumes, period = 14) {
+  const n = Math.min(period, prices.length, volumes ? volumes.length : prices.length);
+  if (n === 0) return prices[prices.length - 1] || 0;
+  const pSlice = prices.slice(-n);
+  const vSlice = volumes ? volumes.slice(-n) : new Array(n).fill(1);
+  let totalPV = 0, totalV = 0;
+  for (let i = 0; i < n; i++) {
+    totalPV += pSlice[i] * vSlice[i];
+    totalV  += vSlice[i];
+  }
+  return totalV > 0 ? totalPV / totalV : pSlice[pSlice.length - 1];
+}
+
+function calcSupportResistance(prices, lookback = 30) {
+  const slice = prices.slice(-Math.min(lookback, prices.length));
+  const locals = [];
+  for (let i = 1; i < slice.length - 1; i++) {
+    if (slice[i] < slice[i - 1] && slice[i] < slice[i + 1]) locals.push({ type: 'S', price: slice[i] });
+    if (slice[i] > slice[i - 1] && slice[i] > slice[i + 1]) locals.push({ type: 'R', price: slice[i] });
+  }
+  // Cluster within 2%
+  function cluster(arr) {
+    const groups = [];
+    for (const pt of arr) {
+      const grp = groups.find(g => Math.abs(g.avg - pt.price) / g.avg < 0.02);
+      if (grp) { grp.sum += pt.price; grp.count++; grp.avg = grp.sum / grp.count; }
+      else groups.push({ sum: pt.price, count: 1, avg: pt.price });
+    }
+    return groups.sort((a, b) => b.count - a.count).slice(0, 3).map(g => g.avg);
+  }
+  const supports    = cluster(locals.filter(l => l.type === 'S').sort((a, b) => b.price - a.price));
+  const resistances = cluster(locals.filter(l => l.type === 'R').sort((a, b) => a.price - b.price));
+  return { supports, resistances };
+}
+
+function calcTrendStrength(prices) {
+  if (prices.length < 10) return { strength: 50, direction: 'Sideways' };
+  const recent = prices.slice(-20);
+  const n = recent.length;
+  const mid = recent[Math.floor(n / 2)];
+  const last = recent[n - 1];
+  const first = recent[0];
+  const momentum = (last - first) / first * 100;
+  const strength = Math.min(100, Math.max(0, Math.abs(momentum) * 5));
+  const direction = momentum > 3 ? 'Bullish' : momentum < -3 ? 'Bearish' : 'Sideways';
+  return { strength: Math.round(strength), direction };
+}
+
+function calcHubTechScore(rsi, macdVal, sigVal, curr, bbU, bbL, ema20, ema50, ema200) {
+  let score = 50;
+  const signals = [];
+
+  // RSI (±15)
+  if (rsi < 30)       { score += 15; signals.push({ k: 'RSI', v: rsi.toFixed(1), c: 'green' }); }
+  else if (rsi < 45)  { score += 8;  signals.push({ k: 'RSI', v: rsi.toFixed(1), c: 'green' }); }
+  else if (rsi > 70)  { score -= 15; signals.push({ k: 'RSI', v: rsi.toFixed(1), c: 'red' }); }
+  else if (rsi > 55)  { score -= 8;  signals.push({ k: 'RSI', v: rsi.toFixed(1), c: 'red' }); }
+  else                  signals.push({ k: 'RSI', v: rsi.toFixed(1), c: 'neutral' });
+
+  // MACD (±10)
+  if (macdVal > sigVal)  { score += 10; signals.push({ k: 'MACD', v: 'Bull cross', c: 'green' }); }
+  else                   { score -= 10; signals.push({ k: 'MACD', v: 'Bear cross', c: 'red' }); }
+
+  // Bollinger (±10)
+  if (bbL && bbU) {
+    if (curr < bbL)       { score += 10; signals.push({ k: 'Bollinger', v: 'Below lower', c: 'green' }); }
+    else if (curr > bbU)  { score -= 10; signals.push({ k: 'Bollinger', v: 'Above upper', c: 'red' }); }
+    else                    signals.push({ k: 'Bollinger', v: 'Mid-band', c: 'neutral' });
+  }
+
+  // EMA trend (±5 each)
+  if (ema20 && ema50) {
+    if (curr > ema20 && curr > ema50) { score += 5; signals.push({ k: 'EMA 20/50', v: 'Price above', c: 'green' }); }
+    else if (curr < ema20 && curr < ema50) { score -= 5; signals.push({ k: 'EMA 20/50', v: 'Price below', c: 'red' }); }
+    else signals.push({ k: 'EMA 20/50', v: 'Mixed', c: 'neutral' });
+  }
+  if (ema200) {
+    if (curr > ema200) { score += 5; signals.push({ k: 'EMA 200', v: 'Above (bull)', c: 'green' }); }
+    else               { score -= 5; signals.push({ k: 'EMA 200', v: 'Below (bear)', c: 'red' }); }
+  }
+
+  score = Math.min(100, Math.max(0, Math.round(score)));
+  return { score, signals, raw: { rsi, macdVal, sigVal, curr, bbU, bbL, ema20, ema50, ema200 } };
+}
+
+// ── Narrative Detection ────────────────────────────────────────────
+
+const NARRATIVES = {
+  'AI Coins':       { coinIds: [], keywords: ['ai', 'artificial intelligence', 'machine learning', 'neural', 'llm', 'gpt'] },
+  'DeFi':           { coinIds: ['uniswap', 'cosmos'], keywords: ['defi', 'decentralized finance', 'yield', 'liquidity', 'protocol', 'swap', 'amm'] },
+  'Layer 1':        { coinIds: ['bitcoin', 'ethereum', 'solana', 'cardano', 'avalanche-2', 'cosmos'], keywords: ['layer 1', 'l1', 'blockchain', 'consensus', 'proof of stake', 'proof of work'] },
+  'Layer 2':        { coinIds: ['matic-network'], keywords: ['layer 2', 'l2', 'scaling', 'rollup', 'zk', 'optimistic', 'sidechain'] },
+  'Memecoins':      { coinIds: ['dogecoin'], keywords: ['meme', 'viral', 'community', 'dog', 'moon', 'doge', 'shib'] },
+  'DePIN':          { coinIds: ['filecoin'], keywords: ['depin', 'physical infrastructure', 'storage', 'data', 'mining', 'fil'] },
+  'Gaming / NFT':   { coinIds: [], keywords: ['gaming', 'gamefi', 'nft', 'metaverse', 'play-to-earn', 'web3 game'] },
+  'RWA':            { coinIds: [], keywords: ['rwa', 'real world assets', 'tokenization', 'real estate', 'bonds', 'tokenized'] },
+};
+
+function detectNarratives(coinId, newsItems) {
+  const results = [];
+  const titleText = (newsItems || []).map(n => (n.title || '').toLowerCase()).join(' ');
+
+  for (const [name, cfg] of Object.entries(NARRATIVES)) {
+    let score = 0;
+    if (cfg.coinIds.includes(coinId)) score += 30;
+    for (const kw of cfg.keywords) {
+      if (titleText.includes(kw)) score += 15;
+    }
+    if (score > 0) results.push({ name, score: Math.min(100, score) });
+  }
+  return results.sort((a, b) => b.score - a.score);
+}
+
+// ── Hub Analysis Orchestrator ──────────────────────────────────────
+
+async function runHubAnalysis() {
+  const btn = document.getElementById('hubAnalyzeBtn');
+  const statusLbl = document.getElementById('hubStatusLabel');
+  if (btn) { btn.disabled = true; btn.textContent = 'Analyzing…'; }
+  if (statusLbl) statusLbl.textContent = 'Fetching data…';
+
+  const coinId = document.getElementById('hubCoinSelect')?.value || 'bitcoin';
+  hubState.coinId = coinId;
+
+  // Reset cards to loading state
+  ['hubTechCard','hubFuturesCard','hubSentHubCard','hubNewsCard',
+   'hubNarrCard','hubTokCard','hubOnChainCard','hubRiskCard'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      const heading = el.querySelector('.card-heading');
+      const headingHTML = heading ? heading.outerHTML : '';
+      el.innerHTML = headingHTML + '<div class="hub-card-loader"><div class="spin"></div><span>Loading…</span></div>';
+    }
+  });
+
+  try {
+    // Fetch price history + parallel backend calls
+    const [histRes, futuresRes, tokRes, onchainRes, newsRes] = await Promise.allSettled([
+      fetchHistory(coinId, 90),
+      apiFetch(`${BACKEND_URL}/futures/${coinId}`, `hub-fut-${coinId}`, 60_000),
+      apiFetch(`${BACKEND_URL}/tokenomics/${coinId}`, `hub-tok-${coinId}`, 600_000),
+      apiFetch(`${BACKEND_URL}/onchain/${coinId}`, `hub-onchain-${coinId}`, 600_000),
+      fetchCryptoNews(),
+    ]);
+
+    // Price data
+    if (histRes.status === 'fulfilled') {
+      hubState.prices  = histRes.value.prices;
+      hubState.volumes = histRes.value.volumes;
+      hubState.dates   = histRes.value.dates;
+    }
+
+    hubState.futures   = futuresRes.status   === 'fulfilled' ? futuresRes.value   : null;
+    hubState.tokenomics = tokRes.status      === 'fulfilled' ? tokRes.value       : null;
+    hubState.onchain   = onchainRes.status   === 'fulfilled' ? onchainRes.value   : null;
+    hubState.news      = newsRes.status      === 'fulfilled' ? newsRes.value      : null;
+
+    const prices  = hubState.prices  || [];
+    const volumes = hubState.volumes || [];
+
+    // Compute technical indicators
+    let techData = null;
+    if (prices.length >= 20) {
+      const rsiArr              = calcRSI(prices);
+      const { macdLine, signalLine } = calcMACD(prices);
+      const bb                  = calcBollinger(prices);
+      const ema20Arr            = ema(prices, 20);
+      const ema50Arr            = ema(prices, 50);
+      const ema200Arr           = ema(prices, 200);
+      const atr                 = calcATR(prices);
+      const vwap                = calcVWAP(prices, volumes);
+      const sr                  = calcSupportResistance(prices);
+      const trend               = calcTrendStrength(prices);
+
+      const curr    = prices[prices.length - 1];
+      const rsiNow  = rsiArr[rsiArr.length - 1];
+      const macdNow = macdLine[macdLine.length - 1];
+      const sigNow  = signalLine[signalLine.length - 1];
+      const bbU     = bb.upper[bb.upper.length - 1];
+      const bbL     = bb.lower[bb.lower.length - 1];
+      const bbM     = bb.mid[bb.mid.length - 1];
+      const e20     = ema20Arr[ema20Arr.length - 1];
+      const e50     = ema50Arr[ema50Arr.length - 1];
+      const e200    = ema200Arr[ema200Arr.length - 1];
+
+      const techScore = calcHubTechScore(rsiNow, macdNow, sigNow, curr, bbU, bbL, e20, e50, e200);
+
+      techData = {
+        curr, rsi: rsiNow, macd: macdNow, sig: sigNow,
+        bbU, bbL, bbM, ema20: e20, ema50: e50, ema200: e200,
+        atr, vwap, sr, trend, techScore,
+        prices, volumes,
+      };
+    }
+
+    hubState.analysis = techData;
+
+    // Compute master score
+    let masterScore = 50;
+    const breakdown = [];
+    if (techData) {
+      masterScore = (masterScore + techData.techScore.score) / 2;
+      breakdown.push({ label: 'Technical', score: techData.techScore.score });
+    }
+    if (hubState.futures) {
+      const f = hubState.futures;
+      const futScore = f.ls_ratio > 1.1 && f.funding_rate > 0
+        ? Math.min(80, 50 + (f.ls_ratio - 1) * 30)
+        : f.ls_ratio < 0.9 && f.funding_rate < 0
+        ? Math.max(20, 50 - (1 - f.ls_ratio) * 30)
+        : 50;
+      masterScore = (masterScore + futScore) / 2;
+      breakdown.push({ label: 'Futures', score: Math.round(futScore) });
+    }
+    masterScore = Math.min(100, Math.max(0, Math.round(masterScore)));
+    breakdown.push({ label: 'Master', score: masterScore });
+
+    // Render all cards
+    renderTradingScore(masterScore, breakdown);
+    if (techData) renderHubTechCard(techData);
+    renderHubFuturesCard(hubState.futures);
+    renderHubSentCard({
+      fg: state.sentiment?.fg,
+      community: state.sentiment?.community,
+      newsSentiment: state.sentiment?.newsSentiment,
+    });
+    const processedNews = Array.isArray(hubState.news)
+      ? hubState.news.slice(0, 6).map(n => ({ ...n, _sent: classifyHeadline(n.title || '') }))
+      : [];
+    renderNewsImpactCard(processedNews);
+    renderNarrativeCard(detectNarratives(coinId, processedNews), coinId);
+    renderTokenomicsCard(hubState.tokenomics);
+    renderOnChainCard(hubState.onchain);
+    renderRiskCard(techData);
+
+    if (statusLbl) statusLbl.textContent = `Analysis complete for ${COINS[coinId]?.name || coinId}`;
+  } catch (e) {
+    if (statusLbl) statusLbl.textContent = `Error: ${e.message}`;
+  }
+
+  if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Full Analysis'; }
+}
+
+// ── Render: Trading Score ──────────────────────────────────────────
+
+function renderTradingScore(score, breakdown) {
+  const card = document.getElementById('hubScoreCard');
+  if (!card) return;
+
+  let signal, sigClass;
+  if (score >= 75)      { signal = 'Strong Buy';  sigClass = 'bull'; }
+  else if (score >= 60) { signal = 'Buy';         sigClass = 'bull'; }
+  else if (score >= 45) { signal = 'Neutral';     sigClass = 'neu'; }
+  else if (score >= 30) { signal = 'Sell';        sigClass = 'bear'; }
+  else                  { signal = 'Strong Sell'; sigClass = 'bear'; }
+
+  const color = score >= 60 ? '#00E887' : score >= 45 ? '#FFB800' : '#FF3D3D';
+
+  const barsHtml = breakdown.filter(b => b.label !== 'Master').map(b => `
+    <div class="score-breakdown-row">
+      <span class="score-bd-label">${b.label}</span>
+      <div class="score-bd-track">
+        <div class="score-bd-fill" style="width:${b.score}%;background:${b.score>=60?'#00E887':b.score>=45?'#FFB800':'#FF3D3D'}"></div>
+      </div>
+      <span class="score-bd-val">${b.score}</span>
+    </div>`).join('');
+
+  card.innerHTML = `
+    <div class="hub-score-layout">
+      <div class="score-ring-wrap">
+        <div class="score-ring" style="--score-color:${color}">
+          <div class="score-ring-inner">
+            <div class="score-number" style="color:${color}">${score}</div>
+            <div class="score-ring-label">/ 100</div>
+          </div>
+        </div>
+        <div class="score-signal signal-pill-${sigClass}">${signal}</div>
+      </div>
+      <div class="score-breakdown">
+        <div class="score-bd-title">Score Breakdown</div>
+        ${barsHtml}
+        <div class="score-note">AI Trading Score combines technical indicators, futures data, and market sentiment. Educational use only.</div>
+      </div>
+    </div>`;
+}
+
+// ── Render: Technical Analysis Card ───────────────────────────────
+
+function renderHubTechCard(data) {
+  const card = document.getElementById('hubTechCard');
+  if (!card) return;
+  const { curr, rsi, macd, sig, bbU, bbL, bbM, ema20, ema50, ema200, atr, vwap, sr, trend, techScore } = data;
+
+  const bbW = bbM ? ((bbU - bbL) / bbM * 100).toFixed(1) : '—';
+  const bbPos = bbL && bbU ? ((curr - bbL) / (bbU - bbL) * 100).toFixed(0) : 50;
+
+  const srHtml = `
+    <div class="hub-sr-row">
+      <div>
+        <div class="hub-sr-label green">Support Levels</div>
+        ${sr.supports.length ? sr.supports.map(s => `<div class="hub-metric-row"><span>S</span><span class="green">${fmtUSD(s)}</span></div>`).join('') : '<div class="hub-metric-row"><span>—</span></div>'}
+      </div>
+      <div>
+        <div class="hub-sr-label red">Resistance Levels</div>
+        ${sr.resistances.length ? sr.resistances.map(r => `<div class="hub-metric-row"><span>R</span><span class="red">${fmtUSD(r)}</span></div>`).join('') : '<div class="hub-metric-row"><span>—</span></div>'}
+      </div>
+    </div>`;
+
+  card.innerHTML = `
+    <h3 class="card-heading">Technical Analysis <span class="heading-sub">— ${COINS[hubState.coinId]?.name || ''}</span></h3>
+    <div class="hub-metric-row"><span>RSI (14)</span><span class="${rsi > 70 ? 'red' : rsi < 30 ? 'green' : 'accent'}">${rsi.toFixed(1)}</span></div>
+    <div class="hub-metric-row"><span>MACD</span><span class="${macd > sig ? 'green' : 'red'}">${macd > sig ? 'Bullish Cross' : 'Bearish Cross'} (${macd.toFixed(4)})</span></div>
+    <div class="hub-metric-row"><span>Bollinger Width</span><span class="accent">${bbW}%</span></div>
+    <div class="hub-metric-row"><span>BB Position</span><span class="${parseInt(bbPos) > 80 ? 'red' : parseInt(bbPos) < 20 ? 'green' : 'neutral-text'}">${bbPos}% of channel</span></div>
+    <div class="hub-metric-row"><span>EMA 20</span><span class="${curr > ema20 ? 'green' : 'red'}">${fmtUSD(ema20)} (price ${curr > ema20 ? 'above' : 'below'})</span></div>
+    <div class="hub-metric-row"><span>EMA 50</span><span class="${curr > ema50 ? 'green' : 'red'}">${fmtUSD(ema50)}</span></div>
+    <div class="hub-metric-row"><span>EMA 200</span><span class="${curr > ema200 ? 'green' : 'red'}">${fmtUSD(ema200)}</span></div>
+    <div class="hub-metric-row"><span>ATR (14)</span><span class="accent">${fmtUSD(atr)} (${(atr/curr*100).toFixed(2)}%)</span></div>
+    <div class="hub-metric-row"><span>VWAP (14d)</span><span class="${curr > vwap ? 'green' : 'red'}">${fmtUSD(vwap)}</span></div>
+    <div class="hub-metric-row"><span>Trend</span><span class="${trend.direction === 'Bullish' ? 'green' : trend.direction === 'Bearish' ? 'red' : 'neutral-text'}">${trend.direction} (strength: ${trend.strength}/100)</span></div>
+    <div class="hub-divider"></div>
+    ${srHtml}
+    <div class="hub-divider"></div>
+    <div class="hub-metric-row"><span>Tech Score</span><span style="color:${techScore.score>=60?'#00E887':techScore.score>=45?'#FFB800':'#FF3D3D'};font-weight:700">${techScore.score}/100</span></div>
+    <div class="hub-signals-list">${techScore.signals.map(s => `<span class="signal-pill-${s.c === 'green' ? 'bull' : s.c === 'red' ? 'bear' : 'neu'}">${s.k}: ${s.v}</span>`).join('')}</div>`;
+}
+
+// ── Render: Futures Intelligence Card ─────────────────────────────
+
+function renderHubFuturesCard(futures) {
+  const card = document.getElementById('hubFuturesCard');
+  if (!card) return;
+
+  if (!futures) {
+    card.innerHTML = `<h3 class="card-heading">Futures Intelligence</h3>
+      <div class="hub-unavail">Futures data unavailable — backend may be starting up. Try again in 30 seconds.</div>`;
+    return;
+  }
+
+  const f = futures;
+  const lsRatio = f.ls_ratio || 1;
+  const longPct = Math.round((lsRatio / (1 + lsRatio)) * 100);
+  const shortPct = 100 - longPct;
+  const fundColor = f.funding_rate > 0 ? '#00E887' : f.funding_rate < 0 ? '#FF3D3D' : '#FFB800';
+  const biasClass = f.market_bias === 'Bullish' ? 'green' : f.market_bias === 'Bearish' ? 'red' : 'neutral-text';
+
+  card.innerHTML = `
+    <h3 class="card-heading">Futures Intelligence <span class="heading-sub">— Binance Perpetuals</span></h3>
+    <div class="hub-metric-row"><span>Open Interest</span><span class="accent">${f.open_interest ? '$' + (f.open_interest / 1e9).toFixed(2) + 'B' : '—'}</span></div>
+    <div class="hub-metric-row"><span>Funding Rate</span><span style="color:${fundColor}">${f.funding_rate != null ? (f.funding_rate * 100).toFixed(4) + '%' : '—'}</span></div>
+    <div class="hub-metric-row"><span>Market Bias</span><span class="${biasClass}">${f.market_bias || '—'}</span></div>
+    <div class="hub-metric-row"><span>24h Volume</span><span class="accent">${f.volume_24h ? '$' + (f.volume_24h / 1e9).toFixed(2) + 'B' : '—'}</span></div>
+    <div class="hub-metric-row"><span>Price Change 24h</span><span class="${f.price_change_pct >= 0 ? 'green' : 'red'}">${f.price_change_pct != null ? fmtPct(f.price_change_pct) : '—'}</span></div>
+    <div class="hub-divider"></div>
+    <div class="ls-bar-label">Long / Short Ratio <span class="accent">${lsRatio.toFixed(2)}</span></div>
+    <div class="ls-bar">
+      <div class="ls-bar-long" style="width:${longPct}%">${longPct}% Long</div>
+      <div class="ls-bar-short" style="width:${shortPct}%">${shortPct}% Short</div>
+    </div>
+    <div class="hub-divider"></div>
+    <div class="futures-metric">
+      <div class="fm-label">Long Squeeze Risk</div>
+      <div class="fm-bar-wrap"><div class="fm-bar red" style="width:${Math.min(100,f.long_squeeze_risk||0)}%"></div></div>
+      <div class="fm-val red">${(f.long_squeeze_risk || 0).toFixed(0)}/100</div>
+    </div>
+    <div class="futures-metric">
+      <div class="fm-label">Short Squeeze Risk</div>
+      <div class="fm-bar-wrap"><div class="fm-bar green" style="width:${Math.min(100,f.short_squeeze_risk||0)}%"></div></div>
+      <div class="fm-val green">${(f.short_squeeze_risk || 0).toFixed(0)}/100</div>
+    </div>
+    <div class="hub-metric-row"><span>Taker Buy/Sell Ratio</span><span class="${(f.taker_buy_sell_ratio||0.5) > 0.5 ? 'green' : 'red'}">${f.taker_buy_sell_ratio != null ? f.taker_buy_sell_ratio.toFixed(3) : '—'}</span></div>`;
+}
+
+// ── Render: Market Sentiment Card (Hub) ───────────────────────────
+
+function renderHubSentCard(data) {
+  const card = document.getElementById('hubSentHubCard');
+  if (!card) return;
+
+  const fgData = data?.fg;
+  const commData = data?.community;
+  const ns = data?.newsSentiment;
+
+  let fgHtml = '<div class="hub-unavail">Fear &amp; Greed: run calculator first</div>';
+  if (fgData?.length) {
+    const cur = parseInt(fgData[0].value);
+    const label = fgData[0].value_classification;
+    const color = cur <= 44 ? '#FF3D3D' : cur <= 55 ? '#F7C948' : '#00E887';
+    fgHtml = `
+      <div class="hub-metric-row"><span>Fear &amp; Greed</span><span style="color:${color};font-weight:700">${cur} — ${label}</span></div>
+      <div class="fg-bar-track" style="margin:6px 0">
+        <div class="fg-bar-indicator" style="left:${cur}%"></div>
+      </div>`;
+  }
+
+  let commHtml = '<div class="hub-metric-row"><span>Community</span><span class="neutral-text">No data</span></div>';
+  if (commData?.up != null) {
+    commHtml = `<div class="hub-metric-row"><span>Community Bull</span><span class="green">${commData.up.toFixed(1)}%</span></div>
+      <div class="hub-metric-row"><span>Community Bear</span><span class="red">${commData.down.toFixed(1)}%</span></div>`;
+  }
+
+  let newsHtml = '<div class="hub-metric-row"><span>News Sentiment</span><span class="neutral-text">No data</span></div>';
+  if (ns) {
+    const pos = (ns.positive * 100).toFixed(0);
+    const neg = (ns.negative * 100).toFixed(0);
+    const cls = ns.positive > 0.5 ? 'green' : ns.negative > 0.5 ? 'red' : 'neutral-text';
+    newsHtml = `<div class="hub-metric-row"><span>News Positive</span><span class="green">${pos}%</span></div>
+      <div class="hub-metric-row"><span>News Negative</span><span class="red">${neg}%</span></div>
+      <div class="hub-metric-row"><span>Overall</span><span class="${cls}">${ns.positive > 0.5 ? 'Positive' : ns.negative > 0.5 ? 'Negative' : 'Neutral'}</span></div>`;
+  }
+
+  card.innerHTML = `
+    <h3 class="card-heading">Market Sentiment</h3>
+    <div class="hub-sent-section-label">Fear &amp; Greed</div>
+    ${fgHtml}
+    <div class="hub-divider"></div>
+    <div class="hub-sent-section-label">Community</div>
+    ${commHtml}
+    <div class="hub-divider"></div>
+    <div class="hub-sent-section-label">News Analysis</div>
+    ${newsHtml}
+    <div class="hub-note">Run analysis on Calculator tab first to load sentiment data.</div>`;
+}
+
+// ── Render: News Impact Card ───────────────────────────────────────
+
+function renderNewsImpactCard(newsItems) {
+  const card = document.getElementById('hubNewsCard');
+  if (!card) return;
+
+  if (!newsItems || newsItems.length === 0) {
+    card.innerHTML = `<h3 class="card-heading">News Impact</h3><div class="hub-unavail">No recent news available.</div>`;
+    return;
+  }
+
+  const items = newsItems.slice(0, 6).map(item => {
+    const sc = item._sent || classifyHeadline(item.title || '');
+    const impactCls = sc === 'pos' ? 'green' : sc === 'neg' ? 'red' : 'neutral-text';
+    const impactLabel = sc === 'pos' ? 'Bullish' : sc === 'neg' ? 'Bearish' : 'Neutral';
+    const impactScore = sc === 'pos' ? Math.floor(Math.random() * 30 + 50) : sc === 'neg' ? Math.floor(Math.random() * 30 + 50) : Math.floor(Math.random() * 20 + 20);
+    const title = (item.title || '').slice(0, 75) + ((item.title || '').length > 75 ? '…' : '');
+    const href = item.url ? ` href="${item.url}" target="_blank" rel="noopener noreferrer"` : '';
+    const time = formatTimeAgo(item.published_on || 0);
+    return `<a class="hub-news-item"${href}>
+      <div class="hub-news-top">
+        <span class="hub-news-impact ${impactCls}">${impactLabel}</span>
+        <span class="hub-news-source">${item.source || ''}</span>
+        <span class="hub-news-time">${time}</span>
+      </div>
+      <div class="hub-news-title">${title}</div>
+    </a>`;
+  }).join('');
+
+  card.innerHTML = `<h3 class="card-heading">News Impact <span class="heading-sub">— Last 3 days</span></h3>${items}`;
+}
+
+// ── Render: Narrative Detection Card ──────────────────────────────
+
+function renderNarrativeCard(narratives, coinId) {
+  const card = document.getElementById('hubNarrCard');
+  if (!card) return;
+
+  if (!narratives || narratives.length === 0) {
+    card.innerHTML = `<h3 class="card-heading">Narrative Detection</h3><div class="hub-unavail">No active narratives detected for ${COINS[coinId]?.name || coinId}.</div>`;
+    return;
+  }
+
+  const tagsHtml = narratives.map(n => {
+    const intensity = n.score >= 70 ? 'hot' : n.score >= 40 ? 'warm' : 'cool';
+    return `<span class="narrative-tag narrative-${intensity}">${n.name} <span class="narr-score">${n.score}</span></span>`;
+  }).join('');
+
+  const coinName = COINS[coinId]?.name || coinId;
+  card.innerHTML = `
+    <h3 class="card-heading">Narrative Detection <span class="heading-sub">— ${coinName}</span></h3>
+    <div class="narrative-intro">Active narratives driving ${coinName} interest:</div>
+    <div class="narrative-tags">${tagsHtml}</div>
+    <div class="hub-note">Score reflects coin-category match + recent news coverage. Higher = stronger narrative momentum.</div>`;
+}
+
+// ── Render: Tokenomics Card ────────────────────────────────────────
+
+function renderTokenomicsCard(data) {
+  const card = document.getElementById('hubTokCard');
+  if (!card) return;
+
+  if (!data) {
+    card.innerHTML = `<h3 class="card-heading">Tokenomics</h3><div class="hub-unavail">Tokenomics data unavailable.</div>`;
+    return;
+  }
+
+  const mcap = data.market_cap ? '$' + (data.market_cap / 1e9).toFixed(2) + 'B' : '—';
+  const fdv  = data.fdv        ? '$' + (data.fdv        / 1e9).toFixed(2) + 'B' : '—';
+  const fdvMcRatio = data.fdv && data.market_cap ? (data.fdv / data.market_cap).toFixed(2) : '—';
+  const circPct = data.circulation_ratio != null ? (data.circulation_ratio * 100).toFixed(1) + '%' : '—';
+  const score = data.tokenomics_score ?? 50;
+  const scoreColor = score >= 65 ? '#00E887' : score >= 45 ? '#FFB800' : '#FF3D3D';
+  const athDist = data.ath_change_percentage != null ? data.ath_change_percentage.toFixed(1) + '%' : '—';
+  const athColor = data.ath_change_percentage != null && data.ath_change_percentage > -20 ? '#00E887' : '#FF3D3D';
+
+  card.innerHTML = `
+    <h3 class="card-heading">Tokenomics <span class="heading-sub">— CoinGecko</span></h3>
+    <div class="hub-metric-row"><span>Market Cap</span><span class="accent">${mcap}</span></div>
+    <div class="hub-metric-row"><span>FDV</span><span class="neutral-text">${fdv}</span></div>
+    <div class="hub-metric-row"><span>FDV / MC Ratio</span><span class="${parseFloat(fdvMcRatio) > 3 ? 'red' : parseFloat(fdvMcRatio) > 1.5 ? 'gold' : 'green'}">${fdvMcRatio}</span></div>
+    <div class="hub-metric-row"><span>Circulating Supply</span><span class="accent">${circPct}</span></div>
+    <div class="hub-metric-row"><span>From ATH</span><span style="color:${athColor}">${athDist}</span></div>
+    <div class="hub-divider"></div>
+    <div class="hub-sent-section-label">Tokenomics Score</div>
+    <div class="tok-meter-wrap">
+      <div class="tok-meter"><div class="tok-meter-fill" style="width:${score}%;background:${scoreColor}"></div></div>
+      <span class="tok-score" style="color:${scoreColor}">${score}/100</span>
+    </div>
+    <div class="hub-note">${score >= 65 ? 'Healthy tokenomics — good supply distribution.' : score >= 45 ? 'Average tokenomics — some dilution risk.' : 'Weak tokenomics — high inflation or dilution risk.'}</div>`;
+}
+
+// ── Render: On-Chain Analytics Card ───────────────────────────────
+
+function renderOnChainCard(data) {
+  const card = document.getElementById('hubOnChainCard');
+  if (!card) return;
+
+  if (!data) {
+    card.innerHTML = `<h3 class="card-heading">On-Chain Analytics</h3><div class="hub-unavail">On-chain data unavailable.</div>`;
+    return;
+  }
+
+  const accScore = data.accumulation_score ?? 50;
+  const distScore = data.distribution_score ?? 50;
+  const accColor = accScore >= 60 ? '#00E887' : accScore >= 40 ? '#FFB800' : '#FF3D3D';
+  const distColor = distScore >= 60 ? '#FF3D3D' : distScore >= 40 ? '#FFB800' : '#00E887';
+
+  const githubHtml = data.github_commits_4w != null
+    ? `<div class="hub-metric-row"><span>GitHub Commits (4w)</span><span class="accent">${data.github_commits_4w}</span></div>` : '';
+  const redditHtml = data.reddit_active_48h != null
+    ? `<div class="hub-metric-row"><span>Reddit Active 48h</span><span class="accent">${data.reddit_active_48h}</span></div>` : '';
+  const txHtml = data.btc_transactions_24h != null
+    ? `<div class="hub-metric-row"><span>BTC Transactions 24h</span><span class="accent">${(data.btc_transactions_24h / 1000).toFixed(1)}k</span></div>` : '';
+  const hashHtml = data.btc_hash_rate != null
+    ? `<div class="hub-metric-row"><span>BTC Hash Rate</span><span class="accent">${(data.btc_hash_rate / 1e18).toFixed(2)} EH/s</span></div>` : '';
+
+  card.innerHTML = `
+    <h3 class="card-heading">On-Chain Analytics</h3>
+    <div class="onchain-scores-row">
+      <div class="onchain-stat">
+        <div class="os-label">Accumulation Score</div>
+        <div class="os-val" style="color:${accColor}">${accScore}/100</div>
+        <div class="os-bar-track"><div class="os-bar-fill" style="width:${accScore}%;background:${accColor}"></div></div>
+      </div>
+      <div class="onchain-stat">
+        <div class="os-label">Distribution Score</div>
+        <div class="os-val" style="color:${distColor}">${distScore}/100</div>
+        <div class="os-bar-track"><div class="os-bar-fill" style="width:${distScore}%;background:${distColor}"></div></div>
+      </div>
+    </div>
+    <div class="hub-divider"></div>
+    ${githubHtml}${redditHtml}${txHtml}${hashHtml}
+    <div class="hub-metric-row"><span>Volume/MC Ratio</span><span class="accent">${data.volume_mc_ratio != null ? data.volume_mc_ratio.toFixed(4) : '—'}</span></div>`;
+}
+
+// ── Render: Risk Dashboard Card ────────────────────────────────────
+
+function renderRiskCard(techData) {
+  const card = document.getElementById('hubRiskCard');
+  if (!card) return;
+
+  if (!techData) {
+    card.innerHTML = `<h3 class="card-heading">Risk Dashboard</h3><div class="hub-unavail">Price data needed for risk analysis.</div>`;
+    return;
+  }
+
+  const { curr, atr, prices } = techData;
+  const volScore = Math.min(100, Math.round(atr / curr * 100 * 20));
+  const slRecommended = curr - 1.5 * atr;
+  const tpRecommended = curr + 2.0 * atr;
+  const riskRating = volScore < 30 ? 'Low' : volScore < 60 ? 'Medium' : 'High';
+  const riskColor  = riskRating === 'Low' ? '#00E887' : riskRating === 'Medium' ? '#FFB800' : '#FF3D3D';
+
+  // Position sizing: risk 2% of portfolio per trade
+  const posSize2pct = curr > 0 ? (1000 * 0.02 / (1.5 * atr / curr * 100) * 100).toFixed(0) : '—';
+
+  card.innerHTML = `
+    <h3 class="card-heading">Risk Dashboard</h3>
+    <div class="hub-metric-row"><span>Current Price</span><span class="accent">${fmtUSD(curr)}</span></div>
+    <div class="hub-metric-row"><span>ATR (Volatility)</span><span class="accent">${fmtUSD(atr)} (${(atr/curr*100).toFixed(2)}%/day)</span></div>
+    <div class="hub-divider"></div>
+    <div class="risk-meter-wrap">
+      <div class="hub-sent-section-label">Volatility Score</div>
+      <div class="risk-meter"><div class="risk-meter-fill" style="width:${volScore}%;background:${riskColor}"></div></div>
+      <div class="hub-metric-row"><span>Risk Level</span><span style="color:${riskColor};font-weight:700">${riskRating} (${volScore}/100)</span></div>
+    </div>
+    <div class="hub-divider"></div>
+    <div class="hub-metric-row"><span>Rec. Stop Loss</span><span class="red">${fmtUSD(slRecommended)} (1.5× ATR below)</span></div>
+    <div class="hub-metric-row"><span>Rec. Take Profit</span><span class="green">${fmtUSD(tpRecommended)} (2× ATR above)</span></div>
+    <div class="hub-metric-row"><span>Risk:Reward</span><span class="accent">1 : 1.33</span></div>
+    <div class="hub-divider"></div>
+    <div class="hub-metric-row"><span>Position Size (2% risk, $1k)</span><span class="accent">$${posSize2pct}</span></div>
+    <div class="hub-note">Position sizing based on 2% portfolio risk rule. Adjust for your capital.</div>`;
+}
+
+// ── AI Chat ────────────────────────────────────────────────────────
+
+function addChatMessage(text, isUser) {
+  const container = document.getElementById('chatMessages');
+  if (!container) return;
+  const div = document.createElement('div');
+  div.className = `chat-msg ${isUser ? 'user' : 'assistant'}`;
+  div.innerHTML = `<div class="chat-bubble">${text}</div>`;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  if (!input) return;
+  const msg = input.value.trim();
+  if (!msg) return;
+  input.value = '';
+  addChatMessage(msg, true);
+
+  // Loading indicator
+  const loadId = 'chat-load-' + Date.now();
+  const container = document.getElementById('chatMessages');
+  if (container) {
+    const loadDiv = document.createElement('div');
+    loadDiv.className = 'chat-msg assistant';
+    loadDiv.id = loadId;
+    loadDiv.innerHTML = '<div class="chat-bubble"><div class="spin" style="width:14px;height:14px;border-width:2px;display:inline-block"></div></div>';
+    container.appendChild(loadDiv);
+    container.scrollTop = container.scrollHeight;
+  }
+
+  try {
+    const context = {
+      coin: hubState.coinId,
+      coinName: COINS[hubState.coinId]?.name || hubState.coinId,
+      currentPrice: hubState.prices ? hubState.prices[hubState.prices.length - 1] : null,
+      analysis: hubState.analysis ? {
+        rsi: hubState.analysis.rsi,
+        macd: hubState.analysis.macd > hubState.analysis.sig ? 'Bullish' : 'Bearish',
+        trend: hubState.analysis.trend?.direction,
+      } : null,
+    };
+
+    const res = await fetch(`${BACKEND_URL}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, context }),
+    });
+    const data = await res.json();
+    const reply = data.response || data.message || 'Sorry, I could not generate a response.';
+
+    // Remove loader and add real response
+    const loadEl = document.getElementById(loadId);
+    if (loadEl) loadEl.remove();
+    addChatMessage(reply, false);
+  } catch (e) {
+    const loadEl = document.getElementById(loadId);
+    if (loadEl) loadEl.remove();
+    addChatMessage('Sorry, I could not connect to the AI backend. Please try again later.', false);
+  }
+}
+
