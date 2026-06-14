@@ -2744,7 +2744,7 @@ function renderAIIntelligenceDashboard(model) {
       <div class="aidash-main">
         <div class="aidash-stats">
           ${stat('Confidence', confidence + '%', confidence >= 66 ? 'High conviction' : confidence >= 40 ? 'Moderate' : 'Low — mixed signals', confidence >= 66 ? 'green' : confidence >= 40 ? 'gold' : 'red')}
-          ${stat('Trend Strength', trendStrength + '/100', trendDir || '—', trendDir === 'Bullish' ? 'green' : trendDir === 'Bearish' ? 'red' : '')}
+          ${stat('Price Momentum', trendStrength + '/100', (trendDir || '—') + ' · 20-period', trendDir === 'Bullish' ? 'green' : trendDir === 'Bearish' ? 'red' : '')}
           ${stat('Expected Move', expStr, expSub, expCls)}
           ${stat('Time Horizon', horizon + 'd', 'forecast window', 'accent')}
         </div>
@@ -2755,7 +2755,7 @@ function renderAIIntelligenceDashboard(model) {
     <div class="aidash-breakdown">
       <div class="score-bd-title">Signal Breakdown</div>
       ${breakdown}
-      <div class="score-note">AI Trading Score synthesizes technical indicators, futures positioning, market sentiment, and statistical forecast. Educational use only — not financial advice.</div>
+      <div class="score-note">AI Trading Score synthesizes technical indicators, futures positioning, market sentiment, and statistical forecast. <strong>Price Momentum</strong> is an independent measure of recent price direction — it can diverge from the overall score when oversold/overbought conditions or other factors offset the trend. Educational use only — not financial advice.</div>
     </div>`;
 }
 
@@ -3305,14 +3305,14 @@ function renderRiskCard(techData) {
   const posSize2pct = curr > 0 ? (1000 * 0.02 / (1.5 * atr / curr * 100) * 100).toFixed(0) : '—';
 
   card.innerHTML = `
-    <h3 class="card-heading">Risk Dashboard</h3>
+    <h3 class="card-heading">Risk Dashboard <span class="heading-sub">— ATR-based volatility sizing</span></h3>
     <div class="hub-metric-row"><span>Current Price</span><span class="accent">${fmtUSD(curr)}</span></div>
-    <div class="hub-metric-row"><span>ATR (Volatility)</span><span class="accent">${fmtUSD(atr)} (${(atr/curr*100).toFixed(2)}%/day)</span></div>
+    <div class="hub-metric-row"><span>Daily ATR</span><span class="accent">${fmtUSD(atr)} (${(atr/curr*100).toFixed(2)}% of price)</span></div>
     <div class="hub-divider"></div>
     <div class="risk-meter-wrap">
-      <div class="hub-sent-section-label">Volatility Score</div>
+      <div class="hub-sent-section-label">Volatility Risk <span style="font-size:10px;opacity:.6;font-weight:400">(independent of directional signal)</span></div>
       <div class="risk-meter"><div class="risk-meter-fill" style="width:${volScore}%;background:${riskColor}"></div></div>
-      <div class="hub-metric-row"><span>Risk Level</span><span style="color:${riskColor};font-weight:700">${riskRating} (${volScore}/100)</span></div>
+      <div class="hub-metric-row"><span>ATR Volatility</span><span style="color:${riskColor};font-weight:700">${riskRating} (${volScore}/100)</span></div>
     </div>
     <div class="hub-divider"></div>
     <div class="hub-metric-row"><span>Rec. Stop Loss</span><span class="red">${fmtUSD(slRecommended)} (1.5× ATR below)</span></div>
@@ -3320,7 +3320,7 @@ function renderRiskCard(techData) {
     <div class="hub-metric-row"><span>Risk:Reward</span><span class="accent">1 : ${(curr > slRecommended ? (tpRecommended - curr) / (curr - slRecommended) : 1.33).toFixed(2)}</span></div>
     <div class="hub-divider"></div>
     <div class="hub-metric-row"><span>Position Size (2% risk, $1k)</span><span class="accent">$${posSize2pct}</span></div>
-    <div class="hub-note">Position sizing based on 2% portfolio risk rule. Adjust for your capital.</div>`;
+    <div class="hub-note">Volatility Risk measures daily price swing size via ATR — not directional signal strength. A low volatility score means tight price swings, which is independent of whether the trend is bullish or bearish. Position sizing based on 2% portfolio risk rule.</div>`;
 }
 
 // ── AI Chat ────────────────────────────────────────────────────────
