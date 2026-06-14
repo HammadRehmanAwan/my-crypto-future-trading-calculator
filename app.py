@@ -6,6 +6,7 @@ Powered by Amazon Chronos-T5-Small (Hugging Face) + CoinGecko API
 import warnings
 warnings.filterwarnings("ignore")
 
+import os
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -564,7 +565,7 @@ _fastapi.add_middleware(
         "https://hammadrehmanawan.github.io",
         "https://hammadrehman-crypto-futures-calculator.hf.space",
     ],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
 
@@ -601,6 +602,263 @@ async def _css():
 @_fastapi.get("/favicon.svg", include_in_schema=False)
 async def _favicon():
     return FileResponse("favicon.svg")
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# AI CHAT  — mirrors the Render backend's /chat so the Space is self-sufficient.
+# Rule-based KB first (instant), then an HF Inference model cascade with live
+# market-context injection. Uses `requests` (already a dependency); HF_TOKEN
+# stays server-side. Sync def → FastAPI runs it in a threadpool.
+# ──────────────────────────────────────────────────────────────────────────────
+
+_CHAT_KB = {
+    "rsi": (
+        "RSI (Relative Strength Index) measures price momentum on a 0–100 scale. "
+        "Below 30 = oversold (potential buy signal), above 70 = overbought (potential sell signal). "
+        "RSI works best combined with trend and volume analysis."
+    ),
+    "macd": (
+        "MACD (Moving Average Convergence Divergence) shows momentum direction. "
+        "When the MACD line crosses above the signal line it's a bullish signal (buy). "
+        "When it crosses below, it's bearish (sell). The histogram shows the distance between them."
+    ),
+    "funding": (
+        "Funding rate is a periodic payment between long and short traders in perpetual futures. "
+        "Positive funding → longs pay shorts (bullish bias, long crowding risk). "
+        "Negative funding → shorts pay longs (bearish bias, short squeeze risk). "
+        "Extreme positive rates often precede corrections."
+    ),
+    "ema": (
+        "EMA (Exponential Moving Average) gives more weight to recent prices. "
+        "Common periods: 20 (short-term trend), 50 (medium), 200 (long-term/macro). "
+        "Price above all EMAs = strong uptrend. EMA 20 crossing EMA 50 (golden cross) = bullish signal."
+    ),
+    "bollinger": (
+        "Bollinger Bands show volatility using a 20-period SMA ± 2 standard deviations. "
+        "Price touching the upper band = potentially overbought. Lower band = potentially oversold. "
+        "Band squeeze (narrow) often precedes a large breakout move."
+    ),
+    "support": (
+        "Support levels are price areas where buyers historically step in, preventing further declines. "
+        "Strong support comes from high-volume price zones, previous swing lows, or moving averages. "
+        "Breaking below support often triggers stop-losses and further selling."
+    ),
+    "resistance": (
+        "Resistance levels are price areas where sellers historically emerge, capping advances. "
+        "Breaking above resistance with high volume is a bullish breakout signal. "
+        "Old resistance often becomes new support once price breaks through."
+    ),
+    "liquidation": (
+        "Liquidation happens when a leveraged position can no longer meet margin requirements. "
+        "Large liquidation clusters (liquidation heatmaps) act as price magnets. "
+        "Cascade liquidations can cause rapid price spikes in either direction."
+    ),
+    "open interest": (
+        "Open Interest is the total value of all outstanding futures contracts. "
+        "Rising OI with rising price = bullish (new money entering longs). "
+        "Rising OI with falling price = bearish (new shorts being added). "
+        "Falling OI with any price move = position unwinding (less conviction)."
+    ),
+    "long squeeze": (
+        "A long squeeze occurs when overleveraged long positions are forced to close. "
+        "Triggered by a price drop that hits stop-losses, causing cascading liquidations downward. "
+        "Signs: very high L/S ratio, high positive funding, high OI — watch for sudden reversals."
+    ),
+    "short squeeze": (
+        "A short squeeze occurs when heavily shorted assets rally, forcing shorts to cover. "
+        "This creates a feedback loop: more buying → higher prices → more short covering. "
+        "Signs: very low L/S ratio, negative funding, high OI. Can produce explosive upward moves."
+    ),
+    "atr": (
+        "ATR (Average True Range) measures market volatility as the average price range over N periods. "
+        "High ATR = high volatility. Used for position sizing and stop-loss placement. "
+        "A common rule: place stops 1.5–2× ATR away from entry to avoid noise."
+    ),
+    "vwap": (
+        "VWAP (Volume Weighted Average Price) is the average price weighted by trading volume. "
+        "Institutions often use VWAP as a benchmark. Price above VWAP = bullish intraday bias. "
+        "Price below VWAP = bearish. VWAP acts as dynamic support/resistance."
+    ),
+}
+
+
+def _rule_based_response(message: str, context: dict):
+    msg_lower = message.lower()
+    for keyword, explanation in _CHAT_KB.items():
+        if keyword in msg_lower:
+            return explanation
+
+    coin_name = context.get("coinName", "")
+    price = context.get("currentPrice")
+    analysis = context.get("analysis")
+
+    if coin_name and ("price" in msg_lower or "worth" in msg_lower or "trading" in msg_lower):
+        if price:
+            trend = analysis.get("trend", "unknown") if analysis else "unknown"
+            return (f"{coin_name} is currently trading at ${price:,.2f}. "
+                    f"Current trend direction: {trend}. Always use risk management when trading.")
+        return f"I don't have the current price for {coin_name}. Please run the full analysis first."
+
+    if "signal" in msg_lower or "should i" in msg_lower or "buy" in msg_lower or "sell" in msg_lower:
+        if analysis:
+            rsi = analysis.get("rsi", 50)
+            macd = analysis.get("macd", "Unknown")
+            trend = analysis.get("trend", "Unknown")
+            return (f"For {coin_name}: RSI is {rsi:.1f} "
+                    f"({('oversold' if rsi < 30 else 'overbought' if rsi > 70 else 'neutral')}), "
+                    f"MACD is {macd}, trend is {trend}. Educational analysis only — not financial advice.")
+        return ("I need analysis data first. Please run a full analysis on the Intelligence Hub tab. "
+                "I can also explain indicators like RSI, MACD and funding rates — just ask!")
+    return None
+
+
+# HF Inference model cascade (tried in order; first to respond wins). 7B models
+# give the richest answers but may be cold on the free tier — we fall back to a
+# smaller model and finally to the rule-based KB so chat never dies.
+_HF_CHAT_MODELS = [
+    "Qwen/Qwen2.5-7B-Instruct",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "microsoft/Phi-4-mini-instruct",
+    "Qwen/Qwen2.5-0.5B-Instruct",
+]
+
+
+def _fmt_num(v):
+    try:
+        return f"{float(v):,.0f}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_system_prompt(context: dict) -> str:
+    coin = context.get("coinName") or "the crypto market"
+    lines = [
+        "You are FutureX AI, an expert crypto futures trading assistant.",
+        "Answer using the LIVE platform data below. Be concise (under 130 words),",
+        "specific, and practical. Always mention risk. This is educational analysis,",
+        "not financial advice — never tell the user to definitively buy or sell.",
+        f"Asset in focus: {coin}.",
+    ]
+    data = []
+    price = context.get("currentPrice")
+    if price:
+        try:
+            data.append(f"Price ${float(price):,.2f}")
+        except (TypeError, ValueError):
+            pass
+    if context.get("rsi") is not None:
+        data.append(f"RSI(14) {context['rsi']}")
+    if context.get("macd"):
+        data.append(f"MACD {context['macd']}")
+    if context.get("trend"):
+        data.append(f"Trend {context['trend']}")
+    if context.get("techScore") is not None:
+        data.append(f"Tech score {context['techScore']}/100")
+    fr = context.get("funding")
+    if fr is not None:
+        try:
+            data.append(f"Funding {float(fr) * 100:.4f}%")
+        except (TypeError, ValueError):
+            pass
+    oi = _fmt_num(context.get("openInterest"))
+    if oi:
+        data.append(f"Open interest ${oi}")
+    if context.get("lsRatio") is not None:
+        data.append(f"Long/Short ratio {context['lsRatio']}")
+    if context.get("marketBias"):
+        data.append(f"Futures bias {context['marketBias']}")
+    if context.get("fearGreed"):
+        data.append(f"Fear&Greed {context['fearGreed']}")
+    if context.get("forecast"):
+        data.append(f"7d forecast {context['forecast']}")
+    if context.get("portfolio"):
+        data.append(f"User portfolio: {context['portfolio']}")
+    if data:
+        lines.append("LIVE DATA — " + "; ".join(data) + ".")
+    return " ".join(lines)
+
+
+def _format_prompt(model: str, system: str, user: str) -> str:
+    m = model.lower()
+    if "qwen" in m:
+        return (f"<|im_start|>system\n{system}<|im_end|>\n"
+                f"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n")
+    if "mistral" in m:
+        return f"<s>[INST] {system}\n\n{user} [/INST]"
+    if "phi" in m:
+        return f"<|system|>{system}<|end|><|user|>{user}<|end|><|assistant|>"
+    return f"{system}\n\nUser: {user}\nAssistant:"
+
+
+def _clean_llm_text(text: str) -> str:
+    if not text:
+        return ""
+    for tok in ("<|im_end|>", "<|im_start|>", "<|end|>", "<|system|>",
+                "<|user|>", "<|assistant|>", "[/INST]", "[INST]", "</s>", "<s>"):
+        text = text.replace(tok, " ")
+    for cut in ("\nUser:", "\nUSER:", "<|"):
+        if cut in text:
+            text = text.split(cut)[0]
+    return text.strip()
+
+
+@_fastapi.post("/chat", include_in_schema=False)
+def _chat(body: dict):
+    message = (body.get("message") or "").strip()
+    context = body.get("context") or {}
+    if not message:
+        return {"response": "Please send a message."}
+
+    rule_resp = _rule_based_response(message, context)
+    msg_lower = message.lower()
+    wants_llm = any(k in msg_lower for k in (
+        "portfolio", "rebalance", "outlook", "summary", "summar", "review",
+        "should i", "what happens", "drop", "crash", "risky", "diversif",
+        "analyze", "analyse", "my ", "overall", "right now",
+    ))
+    if rule_resp and not wants_llm:
+        return {"response": rule_resp, "source": "kb"}
+
+    hf_token = os.environ.get("HF_TOKEN", "")
+    if hf_token:
+        system_prompt = _build_system_prompt(context)
+        for model in _HF_CHAT_MODELS:
+            try:
+                r = requests.post(
+                    f"https://api-inference.huggingface.co/models/{model}",
+                    headers={"Authorization": f"Bearer {hf_token}"},
+                    json={
+                        "inputs": _format_prompt(model, system_prompt, message),
+                        "parameters": {
+                            "max_new_tokens": 220,
+                            "temperature": 0.6,
+                            "top_p": 0.9,
+                            "do_sample": True,
+                            "return_full_text": False,
+                        },
+                        "options": {"wait_for_model": False},
+                    },
+                    timeout=18,
+                )
+                if r.status_code == 200:
+                    rj = r.json()
+                    if isinstance(rj, list) and rj:
+                        text = _clean_llm_text(rj[0].get("generated_text", ""))
+                        if text:
+                            return {"response": text, "source": "llm", "model": model}
+                # 503 = model loading, 404 = unavailable → try the next one.
+            except Exception:
+                continue
+
+    if rule_resp:
+        return {"response": rule_resp, "source": "kb"}
+
+    return {
+        "response": ("I can help explain crypto trading concepts! Try asking me about: "
+                     "RSI, MACD, Bollinger Bands, funding rates, open interest, "
+                     "long/short squeeze, ATR, VWAP, support and resistance levels."),
+        "source": "fallback",
+    }
 
 
 # Gradio AI calculator at /ai  (does NOT override the HTML frontend at /)
