@@ -812,6 +812,379 @@ async def chat(body: dict):
     }
 
 
+# ════════════════════════════════════════════════════════════════════
+# ENSEMBLE FORECAST  (5-minute cache)
+# 5-model pure-Python forecasting engine: chronos_bolt, chronos_2,
+# timesfm, lstm, xgboost
+# ════════════════════════════════════════════════════════════════════
+
+# ── Helper: pure-Python math primitives ─────────────────────────────
+
+def _clamp_f(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _ema_py(vals: list, n: int) -> list:
+    """Return list of EMA values same length as vals (warm-up via SMA)."""
+    if not vals or n <= 0:
+        return list(vals)
+    k = 2.0 / (n + 1)
+    result = []
+    sma = sum(vals[:n]) / n if len(vals) >= n else sum(vals) / len(vals)
+    for i, v in enumerate(vals):
+        if i < n:
+            # during warm-up use running average
+            result.append(sum(vals[:i + 1]) / (i + 1))
+        elif i == n:
+            result.append(sma)
+        else:
+            result.append(v * k + result[-1] * (1 - k))
+    return result
+
+
+def _rsi_py(prices: list, n: int = 14) -> float:
+    """RSI over last n+1 prices."""
+    if len(prices) < n + 1:
+        return 50.0
+    gains, losses = [], []
+    for i in range(1, n + 1):
+        diff = prices[-(n + 1 - i + 1)] - prices[-(n + 1 - i + 1) - 1] if False else 0
+        # simpler: iterate last n changes
+    deltas = [prices[i] - prices[i - 1] for i in range(max(1, len(prices) - n), len(prices))]
+    gains = [d for d in deltas if d > 0]
+    losses = [-d for d in deltas if d < 0]
+    avg_gain = sum(gains) / n if gains else 0.0
+    avg_loss = sum(losses) / n if losses else 0.0
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1 + rs))
+
+
+def _macd_py(prices: list):
+    """Return (macd_val, signal_val) tuple using EMA-12, EMA-26, signal-9."""
+    if len(prices) < 26:
+        return 0.0, 0.0
+    ema12 = _ema_py(prices, 12)
+    ema26 = _ema_py(prices, 26)
+    macd_line = [ema12[i] - ema26[i] for i in range(len(prices))]
+    signal_line = _ema_py(macd_line, 9)
+    return macd_line[-1], signal_line[-1]
+
+
+def _atr_py(prices: list, n: int = 14) -> float:
+    """Simplified ATR: mean of abs daily changes over last n periods."""
+    if len(prices) < 2:
+        return 0.0
+    changes = [abs(prices[i] - prices[i - 1]) for i in range(max(1, len(prices) - n), len(prices))]
+    return sum(changes) / len(changes) if changes else 0.0
+
+
+def _ols_slope(vals: list) -> float:
+    """OLS linear regression slope (units per step)."""
+    n = len(vals)
+    if n < 2:
+        return 0.0
+    xs = list(range(n))
+    mx = sum(xs) / n
+    my = sum(vals) / n
+    num = sum((xs[i] - mx) * (vals[i] - my) for i in range(n))
+    den = sum((xs[i] - mx) ** 2 for i in range(n))
+    return num / den if den else 0.0
+
+
+def _score(pct: float) -> float:
+    """Convert % change to -1..+1."""
+    return _clamp_f(pct / 10.0, -1.0, 1.0)
+
+
+# ── Regime detection ─────────────────────────────────────────────────
+
+def _detect_regime_ens(prices: list) -> str:
+    if len(prices) < 50:
+        return "sideways"
+    e9  = _ema_py(prices, 9)[-1]
+    e21 = _ema_py(prices, 21)[-1]
+    e50 = _ema_py(prices, 50)[-1]
+    price = prices[-1]
+    p20 = prices[-21] if len(prices) >= 21 else prices[0]
+    mom20 = (price - p20) / p20 * 100 if p20 else 0.0
+    if price > e9 > e21 > e50 and mom20 > 3.0:
+        return "bull"
+    if price < e9 < e21 < e50 and mom20 < -3.0:
+        return "bear"
+    return "sideways"
+
+
+# ── Individual forecasting models ────────────────────────────────────
+
+def _model_chronos_bolt(prices: list) -> float:
+    """Short-window ETS (alpha=0.55, 10-day window), slight amplification ×1.1."""
+    window = prices[-10:] if len(prices) >= 10 else prices
+    if not window:
+        return 0.0
+    alpha = 0.55
+    level = window[0]
+    for p in window[1:]:
+        level = alpha * p + (1 - alpha) * level
+    forecast = level * 1.1
+    pct = (forecast - prices[-1]) / prices[-1] * 100 if prices[-1] else 0.0
+    return _clamp_f(pct, -20.0, 20.0)
+
+
+def _model_chronos_2(prices: list) -> float:
+    """Damped Holt-Winters (alpha=0.30, beta=0.08, phi=0.88, 30-day window),
+    7-day damped trend extrapolation."""
+    window = prices[-30:] if len(prices) >= 30 else prices
+    if len(window) < 2:
+        return 0.0
+    alpha, beta, phi = 0.30, 0.08, 0.88
+    level = window[0]
+    trend = window[1] - window[0]
+    for p in window[1:]:
+        prev_level = level
+        level = alpha * p + (1 - alpha) * (prev_level + phi * trend)
+        trend = beta * (level - prev_level) + (1 - beta) * phi * trend
+    # 7-day damped extrapolation
+    forecast_price = level
+    damp = 1.0
+    for _ in range(7):
+        damp *= phi
+        forecast_price += damp * trend
+    pct = (forecast_price - prices[-1]) / prices[-1] * 100 if prices[-1] else 0.0
+    return _clamp_f(pct, -25.0, 25.0)
+
+
+def _model_timesfm(prices: list) -> float:
+    """OLS linear regression slope on 60-day window × 7 days, clamped ±25%."""
+    window = prices[-60:] if len(prices) >= 60 else prices
+    if len(window) < 2:
+        return 0.0
+    slope = _ols_slope(window)
+    forecast_price = prices[-1] + slope * 7
+    pct = (forecast_price - prices[-1]) / prices[-1] * 100 if prices[-1] else 0.0
+    return _clamp_f(pct, -25.0, 25.0)
+
+
+def _model_lstm(prices: list, rsi: float, macd_v: float, sig_v: float) -> float:
+    """Exponentially-weighted memory on last 20 prices + RSI/MACD boosts."""
+    window = prices[-20:] if len(prices) >= 20 else prices
+    if not window:
+        return 0.0
+    n = len(window)
+    weights = [0.5 ** (n - 1 - i) for i in range(n)]
+    total_w = sum(weights)
+    weighted_price = sum(weights[i] * window[i] for i in range(n)) / total_w if total_w else window[-1]
+    pct = (weighted_price - prices[-1]) / prices[-1] * 100 if prices[-1] else 0.0
+    # RSI reversal boosts
+    if rsi < 28:
+        pct += 4.5
+    elif rsi > 72:
+        pct -= 4.5
+    elif rsi < 36:
+        pct += 2.0
+    elif rsi > 65:
+        pct -= 2.0
+    # MACD direction bonus
+    if macd_v > sig_v:
+        pct += 1.5
+    elif macd_v < sig_v:
+        pct -= 1.5
+    return _clamp_f(pct, -20.0, 20.0)
+
+
+def _model_xgboost(prices: list, rsi: float, macd_v: float, sig_v: float,
+                   atr: float, e9: float, e21: float, e50: float) -> float:
+    """Feature-weighted scoring combining RSI, MACD, EMA alignment, volatility,
+    returns, and momentum."""
+    price = prices[-1] if prices else 0.0
+
+    # RSI feature (weight 0.22)
+    rsi_val = (50 - rsi) * 0.30
+
+    # MACD feature (weight 0.18)
+    macd_val = 3.0 if macd_v > sig_v else -3.0
+
+    # EMA alignment feature (weight 0.25), centered at -6
+    ema_val = 0.0
+    if price > e9:
+        ema_val += 2
+    if price > e21:
+        ema_val += 3
+    if price > e50:
+        ema_val += 5
+    if e9 > e21:
+        ema_val += 2
+    ema_val -= 6  # center
+
+    # Volatility feature (weight 0.10): negative ATR pct, capped at -5
+    atr_pct = atr / price * 100 if price else 0.0
+    vol_val = max(-5.0, -atr_pct * 0.5)
+
+    # Return feature (weight 0.15)
+    p7  = prices[-8]  if len(prices) >= 8  else prices[0]
+    p14 = prices[-15] if len(prices) >= 15 else prices[0]
+    ret7  = (price - p7)  / p7  * 100 if p7  else 0.0
+    ret14 = (price - p14) / p14 * 100 if p14 else 0.0
+    ret_val = ret7 * 0.4 + ret14 * 0.2
+
+    # Momentum feature (weight 0.10): OLS slope over last 14 prices × 14d × 0.3
+    mom_window = prices[-14:] if len(prices) >= 14 else prices
+    slope = _ols_slope(mom_window)
+    mom_val = _clamp_f(slope * 14 / prices[-1] * 100 * 0.3 if prices[-1] else 0.0, -10.0, 10.0)
+
+    score = (rsi_val * 0.22 + macd_val * 0.18 + ema_val * 0.25
+             + vol_val * 0.10 + ret_val * 0.15 + mom_val * 0.10) * 10
+    return _clamp_f(score, -20.0, 20.0)
+
+
+# ── Endpoint ─────────────────────────────────────────────────────────
+
+@app.get("/ensemble-forecast/{coin_id}")
+async def ensemble_forecast(coin_id: str):
+    coin_id = coin_id.lower()
+
+    cached = cache_get(f"ensemble-{coin_id}", 300)
+    if cached is not None:
+        return cached
+
+    # Fetch 90 days of daily prices from CoinGecko
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart",
+                params={"vs_currency": "usd", "days": "90", "interval": "daily"},
+                headers={"User-Agent": "FutureX/1.0"},
+            )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=502)
+
+    if r.status_code != 200:
+        return JSONResponse(
+            {"error": f"CoinGecko returned {r.status_code}"}, status_code=502
+        )
+
+    try:
+        raw = r.json()
+        prices = [p[1] for p in raw.get("prices", [])]
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to parse prices: {e}"}, status_code=502)
+
+    if len(prices) < 15:
+        return JSONResponse({"error": "Insufficient price history"}, status_code=502)
+
+    # ── Compute shared indicators ────────────────────────────────────
+    price  = prices[-1]
+    rsi    = _rsi_py(prices)
+    macd_v, sig_v = _macd_py(prices)
+    atr    = _atr_py(prices)
+    atr_pct = atr / price * 100 if price else 0.0
+
+    e9_series  = _ema_py(prices, 9)
+    e21_series = _ema_py(prices, 21)
+    e50_series = _ema_py(prices, 50)
+    e9, e21, e50 = e9_series[-1], e21_series[-1], e50_series[-1]
+
+    # ── Run individual models ────────────────────────────────────────
+    pct_chronos_bolt = _model_chronos_bolt(prices)
+    pct_chronos_2    = _model_chronos_2(prices)
+    pct_timesfm      = _model_timesfm(prices)
+    pct_lstm         = _model_lstm(prices, rsi, macd_v, sig_v)
+    pct_xgboost      = _model_xgboost(prices, rsi, macd_v, sig_v, atr, e9, e21, e50)
+
+    sc_chronos_bolt = _score(pct_chronos_bolt)
+    sc_chronos_2    = _score(pct_chronos_2)
+    sc_timesfm      = _score(pct_timesfm)
+    sc_lstm         = _score(pct_lstm)
+    sc_xgboost      = _score(pct_xgboost)
+
+    # ── Regime detection & weight adjustment ─────────────────────────
+    regime = _detect_regime_ens(prices)
+
+    w = {
+        "chronos_bolt": 0.20,
+        "chronos_2":    0.30,
+        "timesfm":      0.20,
+        "lstm":         0.15,
+        "xgboost":      0.15,
+    }
+
+    if regime == "bull":
+        w["chronos_2"]    += 0.08
+        w["timesfm"]      += 0.05
+        w["lstm"]         -= 0.07
+        w["xgboost"]      -= 0.06
+    elif regime == "bear":
+        w["lstm"]         += 0.08
+        w["xgboost"]      += 0.07
+        w["chronos_2"]    -= 0.05
+        w["timesfm"]      -= 0.10
+    else:  # sideways
+        w["xgboost"]      += 0.05
+        w["chronos_bolt"] += 0.03
+        w["timesfm"]      -= 0.08
+
+    # Renormalize weights to sum = 1
+    total_w = sum(w.values())
+    w = {k: v / total_w for k, v in w.items()}
+
+    # ── Weighted ensemble score ──────────────────────────────────────
+    model_scores = {
+        "chronos_bolt": sc_chronos_bolt,
+        "chronos_2":    sc_chronos_2,
+        "timesfm":      sc_timesfm,
+        "lstm":         sc_lstm,
+        "xgboost":      sc_xgboost,
+    }
+    final_score = sum(model_scores[k] * w[k] for k in w)
+
+    # ── Signal ───────────────────────────────────────────────────────
+    if final_score >= 0.30:
+        ensemble_signal = "BUY"
+    elif final_score <= -0.30:
+        ensemble_signal = "SELL"
+    else:
+        ensemble_signal = "HOLD"
+
+    # ── Confidence ───────────────────────────────────────────────────
+    scores_list = list(model_scores.values())
+    mean_s = sum(scores_list) / len(scores_list)
+    variance = sum((s - mean_s) ** 2 for s in scores_list) / len(scores_list)
+    stddev = variance ** 0.5
+    agreement = max(0.0, 1.0 - stddev * 1.5)
+    vol_adj = max(0.5, 1.0 - atr_pct / 20.0)
+    confidence = min(0.95, agreement * vol_adj)
+
+    result = {
+        "asset":            coin_id,
+        "ensemble_signal":  ensemble_signal,
+        "final_score":      round(final_score, 4),
+        "confidence":       round(confidence, 4),
+        "regime":           regime,
+        "weights": {k: round(v, 4) for k, v in w.items()},
+        "model_scores": {k: round(v, 4) for k, v in model_scores.items()},
+        "model_pct": {
+            "chronos_bolt": round(pct_chronos_bolt, 4),
+            "chronos_2":    round(pct_chronos_2, 4),
+            "timesfm":      round(pct_timesfm, 4),
+            "lstm":         round(pct_lstm, 4),
+            "xgboost":      round(pct_xgboost, 4),
+        },
+        "indicators": {
+            "rsi":     round(rsi, 4),
+            "atr_pct": round(atr_pct, 4),
+            "ema9":    round(e9, 4),
+            "ema21":   round(e21, 4),
+            "ema50":   round(e50, 4),
+            "price":   round(price, 4),
+        },
+        "price_history": [round(p, 4) for p in prices[-8:]],
+    }
+
+    cache_set(f"ensemble-{coin_id}", result)
+    return result
+
+
 if __name__ == "__main__":
     import uvicorn
     port = int(os.environ.get("PORT", 8000))
