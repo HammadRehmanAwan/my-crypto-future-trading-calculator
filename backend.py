@@ -604,6 +604,16 @@ def _rule_based_response(message: str, context: dict) -> str | None:
     price     = context.get("currentPrice")
     analysis  = context.get("analysis")
 
+    # Forecast / prediction — answer with the model projection, not a price line.
+    if any(w in msg_lower for w in ("predict", "forecast", "prediction", "tomorrow",
+                                     "next day", "next two", "next few", "outlook", "going to")):
+        fc = context.get("forecast")
+        if fc:
+            trend = analysis.get("trend") if analysis else None
+            extra = f" Momentum is {trend}." if trend else ""
+            return (f"{coin_name or 'This asset'} model forecast: {fc}.{extra} "
+                    f"Forecasts are probabilistic, not guarantees — manage risk and avoid over-leverage.")
+
     if coin_name and ("price" in msg_lower or "worth" in msg_lower or "trading" in msg_lower):
         if price:
             trend = analysis.get("trend", "unknown") if analysis else "unknown"
@@ -739,6 +749,7 @@ async def chat(body: dict):
         "portfolio", "rebalance", "outlook", "summary", "summar", "review",
         "should i", "what happens", "drop", "crash", "risky", "diversif",
         "analyze", "analyse", "my ", "overall", "right now",
+        "predict", "forecast", "prediction", "next day", "next two", "tomorrow",
     ))
     if rule_resp and not wants_llm:
         return {"response": rule_resp, "source": "kb"}

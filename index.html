@@ -649,16 +649,21 @@
   </button>
 </nav>
 
-<!-- ─── FLOATING AI MARKET COPILOT (global) ─── -->
+<!-- ─── FLOATING AI MARKET COPILOT (global, Siri-style + voice) ─── -->
 <div class="copilot" id="copilot">
   <button class="copilot-fab" id="copilotFab" onclick="copilotToggle()" aria-label="Open AI Market Copilot">
-    <span class="copilot-fab-ico">&#129302;</span>
-    <span class="copilot-fab-lbl">AI Copilot</span>
+    <span class="copilot-orb"></span>
   </button>
   <div class="copilot-panel" id="copilotPanel" role="dialog" aria-label="AI Market Copilot">
     <div class="copilot-head">
-      <div class="copilot-title"><span class="copilot-dot"></span> AI Market Copilot</div>
-      <button class="copilot-close" onclick="copilotToggle()" aria-label="Minimize">&#8211;</button>
+      <div class="copilot-title">
+        <span class="copilot-orb sm"></span>
+        <span class="copilot-title-txt">AI Market Copilot<span class="copilot-sub" id="copilotStatus">context-aware &middot; live data</span></span>
+      </div>
+      <div class="copilot-head-actions">
+        <button class="copilot-icon-btn" id="copilotTtsBtn" onclick="copilotToggleTts()" title="Toggle spoken replies" aria-label="Toggle spoken replies">&#128266;</button>
+        <button class="copilot-icon-btn" onclick="copilotToggle()" title="Minimize" aria-label="Minimize">&#8211;</button>
+      </div>
     </div>
     <div class="copilot-quick" id="copilotQuick">
       <button onclick="copilotQuick('Analyze BTC')">Analyze BTC</button>
@@ -669,10 +674,21 @@
       <button onclick="copilotQuick('Funding Analysis')">Funding Analysis</button>
     </div>
     <div class="copilot-messages" id="copilotMessages">
-      <div class="copilot-msg assistant"><div class="copilot-bubble">Hi! I&rsquo;m your AI Market Copilot. I can see live prices, indicators, funding, sentiment and your portfolio. Ask me anything &mdash; or tap a shortcut above.</div></div>
+      <div class="copilot-msg assistant"><div class="copilot-bubble">Hi, I&rsquo;m your AI Market Copilot. I read live prices, indicators, funding, sentiment and your portfolio. Ask about any coin &mdash; e.g. &ldquo;ETH forecast for the next 2 days&rdquo; &mdash; tap a shortcut, or use the mic for voice.</div></div>
     </div>
+
+    <!-- Voice mode overlay -->
+    <div class="copilot-voice" id="copilotVoice">
+      <div class="cv-orb" id="cvOrb"></div>
+      <div class="cv-wave" id="cvWave"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="cv-status" id="cvStatus">Listening&hellip;</div>
+      <div class="cv-transcript" id="cvTranscript"></div>
+      <button class="cv-stop" onclick="copilotStopVoice()">Stop</button>
+    </div>
+
     <div class="copilot-input-row">
-      <input type="text" id="copilotInput" class="copilot-input" placeholder="Ask about BTC, your portfolio, funding…" onkeydown="if(event.key==='Enter')copilotSend()" />
+      <button class="copilot-mic" id="copilotMic" onclick="copilotStartVoice()" title="Voice chat" aria-label="Voice chat">&#127908;</button>
+      <input type="text" id="copilotInput" class="copilot-input" placeholder="Ask about any coin, your portfolio, funding…" onkeydown="if(event.key==='Enter')copilotSend()" />
       <button class="copilot-send" onclick="copilotSend()" aria-label="Send">&#10148;</button>
     </div>
   </div>

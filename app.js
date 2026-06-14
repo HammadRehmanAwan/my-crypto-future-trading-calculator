@@ -1350,6 +1350,7 @@ function init() {
   initAlertUI();
   startBackgroundAlertChecks();
   initFirebase();
+  copilotInitVoice();
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4060,7 +4061,102 @@ function renderDailyBriefing(b) {
   }).catch(() => {});
 }
 
-// ─── FEATURE 6: FLOATING AI MARKET COPILOT ─────────────────────────
+// ─── FEATURE 6: FLOATING AI MARKET COPILOT (Siri-style + voice) ────
+
+// Which coin is the user asking about? Detect from the message so the copilot
+// answers about the right asset instead of the default/last coin.
+const COIN_ALIASES = {
+  bitcoin: ['btc', 'bitcoin', 'xbt'],
+  ethereum: ['eth', 'ethereum', 'ether'],
+  binancecoin: ['bnb', 'binancecoin', 'binance coin'],
+  solana: ['sol', 'solana'],
+  ripple: ['xrp', 'ripple'],
+  cardano: ['ada', 'cardano'],
+  'avalanche-2': ['avax', 'avalanche'],
+  dogecoin: ['doge', 'dogecoin'],
+  polkadot: ['dot', 'polkadot'],
+  'matic-network': ['matic', 'polygon'],
+  chainlink: ['link', 'chainlink'],
+  uniswap: ['uni', 'uniswap'],
+  litecoin: ['ltc', 'litecoin'],
+  cosmos: ['atom', 'cosmos'],
+  filecoin: ['fil', 'filecoin'],
+};
+function detectCoinFromText(text) {
+  const t = ' ' + String(text || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ') + ' ';
+  // Longest alias first so "chainlink" wins over "link", "bitcoin" over "btc".
+  const ordered = [];
+  for (const [id, al] of Object.entries(COIN_ALIASES)) for (const a of al) ordered.push([a, id]);
+  ordered.sort((a, b) => b[0].length - a[0].length);
+  for (const [a, id] of ordered) if (t.includes(' ' + a + ' ')) return id;
+  return null;
+}
+
+// Rich, context-aware local answer — keeps the copilot genuinely useful even
+// when the LLM backend is cold/unreachable. Always asset- and intent-aware.
+function copilotComposeLocal(message, ctx) {
+  const m = (message || '').toLowerCase();
+  const name = ctx.coinName || 'this asset';
+  const price = ctx.currentPrice;
+  const pd = price != null && price < 1 ? 5 : 2;
+  const priceStr = price != null ? '$' + Number(price).toLocaleString('en-US', { maximumFractionDigits: pd }) : null;
+
+  // "current / now / today / latest" => the user wants live data, not a textbook
+  // definition, so let the context branches below answer first.
+  const liveIntent = /\b(current|currently|now|right now|today|latest|live|at the moment)\b/.test(m);
+  const kbHit = () => { for (const [kw, ex] of Object.entries(CHAT_KB)) if (m.includes(kw)) return ex; return null; };
+
+  // 1) Concept definitions → knowledge base (unless they asked about the live state)
+  if (!liveIntent) { const k = kbHit(); if (k) return k; }
+
+  // 2) Forecast / prediction
+  if (/(predict|forecast|next\s+\w+\s*(day|days|week)|tomorrow|outlook|target price|will it|expected? move|going to|in \d+ day)/.test(m)) {
+    let s = `${name}${priceStr ? ` is trading near ${priceStr}` : ''}. `;
+    if (ctx.forecast) s += `The statistical model projects ${ctx.forecast}. `;
+    if (ctx.trend) s += `Momentum is ${ctx.trend.toLowerCase()}${ctx.rsi != null ? ` (RSI ${ctx.rsi}, MACD ${ctx.macd})` : ''}. `;
+    s += `Short-horizon moves are noisy — treat this as a probability, not a promise. Keep stops tight and avoid over-leverage.`;
+    return s;
+  }
+  // 3) Funding / OI / positioning
+  if (/(funding|open interest|\boi\b|long.?short|positioning|squeeze)/.test(m) && ctx.funding != null) {
+    return `${name}: funding ${(ctx.funding * 100).toFixed(4)}%, ${ctx.marketBias || 'neutral'} futures bias`
+      + (ctx.lsRatio != null ? `, L/S ratio ${ctx.lsRatio}` : '')
+      + (ctx.openInterest ? `, OI ~$${Number(ctx.openInterest).toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '')
+      + `. Positive funding = crowded longs (correction risk); negative = short-squeeze potential.`;
+  }
+  // 4) Portfolio / rebalance
+  if (/(portfolio|rebalanc|diversif|my holdings|my book|allocation)/.test(m)) {
+    const pm = state.portfolio;
+    if (pm) {
+      return `Portfolio health ${pm.overall}/100 (${pm.status.t}). Allocation: ${pm.summaryForAI}. `
+        + (pm.maxWeight >= 0.45 ? `Concentration is elevated in ${pm.holdings[0].sym} — trimming it would cut risk and lift diversification. ` : `It is reasonably balanced. `)
+        + `See the Rebalancing card for target weights.`;
+    }
+    return `Open the Portfolio tab and run an analysis first — then I can review your health score, concentration and rebalancing.`;
+  }
+  // 5) Price
+  if (/(price|worth|trading at|how much|value)/.test(m) && priceStr) {
+    return `${name} is trading around ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}${ctx.rsi != null ? ` (RSI ${ctx.rsi})` : ''}. Always use risk management.`;
+  }
+  // 6) Analysis / signal / should I
+  if (/(analy|signal|should i|long or short|setup|trade|buy|sell|bull|bear)/.test(m) && ctx.techScore != null) {
+    return `${name}: tech score ${ctx.techScore}/100 (${ctx.trend}). RSI ${ctx.rsi}, MACD ${ctx.macd}`
+      + (ctx.funding != null ? `, funding ${(ctx.funding * 100).toFixed(3)}%` : '')
+      + (ctx.fearGreed ? `, sentiment ${ctx.fearGreed}` : '')
+      + `. ${ctx.forecast ? `Model forecast ${ctx.forecast}. ` : ''}Educational only — size to risk, not conviction.`;
+  }
+  // 6b) Concept fallback — a KB term was mentioned but we lacked live data for it
+  { const k = kbHit(); if (k) return k; }
+
+  // 7) Greeting
+  if (/^\s*(hi|hey|hello|yo|sup|gm)\b/.test(m)) {
+    return `Hey! Ask me about any coin's price, forecast, funding or technicals, request a portfolio review, or say something like "explain liquidation".`;
+  }
+  // 8) Context-aware fallback
+  if (priceStr) return `${name} is near ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}. Ask me about its forecast, funding, technicals — or review your portfolio.`;
+  return `I can analyze any of the 15 supported coins. Try "ETH forecast for 2 days", "BTC funding", "review my portfolio", or "explain RSI".`;
+}
+
 function copilotToggle() {
   const c = document.getElementById('copilot');
   if (!c) return;
@@ -4068,6 +4164,8 @@ function copilotToggle() {
   if (c.classList.contains('open')) {
     const i = document.getElementById('copilotInput');
     if (i) setTimeout(() => i.focus(), 60);
+  } else {
+    copilotStopVoice();
   }
 }
 
@@ -4082,7 +4180,7 @@ function copilotAddMsg(text, isUser) {
   return div;
 }
 
-async function copilotSend(preset, coinHint) {
+async function copilotSend(preset, coinHint, speak) {
   const input = document.getElementById('copilotInput');
   const msg = (preset != null ? preset : (input ? input.value.trim() : '')) || '';
   if (!msg) return;
@@ -4095,15 +4193,19 @@ async function copilotSend(preset, coinHint) {
   load.innerHTML = '<div class="copilot-bubble"><span class="copilot-typing"><i></i><i></i><i></i></span></div>';
   if (box) { box.appendChild(load); box.scrollTop = box.scrollHeight; }
 
+  let reply;
   try {
-    const ctx = await AIService.gatherContext(coinHint);
-    const reply = await AIService.ask(msg, { context: ctx });
-    load.remove();
-    copilotAddMsg(reply, false);
+    const coin = coinHint || detectCoinFromText(msg) || undefined;
+    const ctx = await AIService.gatherContext(coin);
+    const local = copilotComposeLocal(msg, ctx);
+    reply = await AIService.ask(msg, { context: ctx, localAnswer: local });
   } catch (e) {
-    load.remove();
-    copilotAddMsg('I had trouble reaching the AI service. Try again, or ask about a specific indicator like RSI, MACD or funding rates.', false);
+    reply = copilotComposeLocal(msg, { coinName: 'the market' });
   }
+  load.remove();
+  copilotAddMsg(reply, false);
+
+  if (speak) { _cvSet('Speaking…'); copilotSpeak(reply, copilotCloseVoice); }
 }
 
 function copilotQuick(label) {
@@ -4119,5 +4221,96 @@ function copilotQuick(label) {
   const c = document.getElementById('copilot');
   if (c && !c.classList.contains('open')) c.classList.add('open');
   copilotSend(entry[0], entry[1]);
+}
+
+// ── Voice chat mode (Web Speech API: recognition + synthesis) ──────
+const copilotVoice = { rec: null, listening: false, ttsOn: true, cancelled: false };
+
+function copilotInitVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const mic = document.getElementById('copilotMic');
+  if (!SR && mic) mic.style.display = 'none';
+  // Some browsers populate the voice list asynchronously — prime it.
+  try { if (window.speechSynthesis) window.speechSynthesis.getVoices(); } catch (e) {}
+}
+
+function _cvSet(text) { const s = document.getElementById('cvStatus'); if (s) s.textContent = text; }
+function copilotSetStatus(text) { const s = document.getElementById('copilotStatus'); if (s) s.textContent = text; }
+
+function copilotStartVoice() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) { copilotSetStatus('Voice not supported in this browser'); return; }
+  if (copilotVoice.listening) { copilotStopVoice(); return; }
+  try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+
+  const c = document.getElementById('copilot');
+  if (c && !c.classList.contains('open')) c.classList.add('open');
+
+  const rec = new SR();
+  rec.lang = 'en-US'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+  copilotVoice.rec = rec; copilotVoice.listening = true; copilotVoice.cancelled = false;
+
+  const tr = document.getElementById('cvTranscript'); if (tr) tr.textContent = '';
+  if (c) { c.classList.add('voice-active'); c.classList.remove('speaking'); }
+  _cvSet('Listening…');
+
+  let finalText = '';
+  rec.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalText += t; else interim += t;
+    }
+    const el = document.getElementById('cvTranscript');
+    if (el) el.textContent = (finalText || interim).trim();
+  };
+  rec.onerror = () => { copilotVoice.listening = false; };
+  rec.onend = () => {
+    copilotVoice.listening = false;
+    if (copilotVoice.cancelled) { copilotCloseVoice(); return; }
+    const text = (document.getElementById('cvTranscript')?.textContent || finalText || '').trim();
+    if (!text) { copilotCloseVoice(); return; }
+    _cvSet('Thinking…');
+    copilotSend(text, null, true);
+  };
+  try { rec.start(); } catch (e) { copilotCloseVoice(); }
+}
+
+function copilotStopVoice() {
+  copilotVoice.cancelled = true;
+  copilotVoice.listening = false;
+  try { if (copilotVoice.rec) copilotVoice.rec.stop(); } catch (e) {}
+  try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {}
+  copilotCloseVoice();
+}
+
+function copilotCloseVoice() {
+  const c = document.getElementById('copilot');
+  if (c) c.classList.remove('voice-active', 'speaking');
+}
+
+function copilotSpeak(text, onDone) {
+  const synth = window.speechSynthesis;
+  if (!copilotVoice.ttsOn || !synth) { if (onDone) onDone(); return; }
+  try {
+    synth.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 1.03; u.pitch = 1.0; u.lang = 'en-US';
+    const vs = synth.getVoices() || [];
+    const pref = vs.find(v => /Samantha|Google US English|Aria|Jenny|Zira|Natural/i.test(v.name));
+    if (pref) u.voice = pref;
+    const c = document.getElementById('copilot');
+    u.onstart = () => { if (c) c.classList.add('speaking'); };
+    u.onend   = () => { if (c) c.classList.remove('speaking'); if (onDone) onDone(); };
+    u.onerror = () => { if (c) c.classList.remove('speaking'); if (onDone) onDone(); };
+    synth.speak(u);
+  } catch (e) { if (onDone) onDone(); }
+}
+
+function copilotToggleTts() {
+  copilotVoice.ttsOn = !copilotVoice.ttsOn;
+  const btn = document.getElementById('copilotTtsBtn');
+  if (btn) { btn.innerHTML = copilotVoice.ttsOn ? '&#128266;' : '&#128263;'; btn.classList.toggle('off', !copilotVoice.ttsOn); }
+  if (!copilotVoice.ttsOn) { try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) {} }
 }
 
