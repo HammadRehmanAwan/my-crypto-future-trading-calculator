@@ -1687,7 +1687,7 @@ function renderTradeCoach() {
 // ANALYSIS PROGRESS  (ChatGPT-style reasoning checklist for the Hub)
 // ═══════════════════════════════════════════════════════════════════
 
-const HUB_STEPS = ['Price Data', 'Technical Indicators', 'Futures Metrics', 'Sentiment Analysis', 'AI Forecast', 'Signal Generation'];
+const HUB_STEPS = ['Price Data', 'Technical Indicators', 'Futures Metrics', 'Sentiment Analysis', 'AI Forecast', 'Ensemble Forecast', 'Signal Generation'];
 
 function renderHubProgress(progress) {
   const el = document.getElementById('hubProgress');
@@ -2528,7 +2528,7 @@ async function runHubAnalysis() {
   // Reset cards to loading state
   ['hubTechCard','hubFuturesCard','hubSentHubCard','hubNewsCard',
    'hubNarrCard','hubTokCard','hubOnChainCard','hubRiskCard',
-   'hubLiqCard','hubWhaleCard','hubOrderFlowCard'].forEach(id => {
+   'hubLiqCard','hubWhaleCard','hubOrderFlowCard','hubEnsembleCard'].forEach(id => {
     const el = document.getElementById(id);
     if (el) {
       const heading = el.querySelector('.card-heading');
@@ -2679,12 +2679,251 @@ async function runHubAnalysis() {
     }
   })();
 
-  await Promise.allSettled([futuresP, orderFlowP, tokP, onchainP, newsP, sentP]);
+  // Ensemble forecast: parallel backend call
+  progress['Ensemble Forecast'] = 'active';
+  renderHubProgress(progress);
+  const ensembleP = BACKEND_URL
+    ? backendFetch(`${BACKEND_URL}/ensemble-forecast/${coinId}`, `ensemble-${coinId}`, 300_000, { retries: 1, timeoutMs: 18_000 })
+        .then(d => { renderEnsembleForecast(d); })
+        .catch(() => { renderEnsembleForecast(null); })
+        .finally(() => { progress['Ensemble Forecast'] = 'done'; renderHubProgress(progress); })
+    : Promise.resolve();
+
+  await Promise.allSettled([futuresP, orderFlowP, tokP, onchainP, newsP, sentP, ensembleP]);
   HUB_STEPS.forEach(s => { if (progress[s] !== 'done') progress[s] = 'done'; });
   progress['Signal Generation'] = 'done';
   renderHubProgress(progress);
   if (statusLbl) statusLbl.textContent = `Analysis complete for ${COINS[coinId]?.name || coinId}`;
   if (btn) { btn.disabled = false; btn.textContent = '⚡ Run Full Analysis'; }
+}
+
+// ════════════════════════════════════════════════════════════════════
+// ENSEMBLE FORECAST  (5 models, regime-adaptive)
+// ════════════════════════════════════════════════════════════════════
+
+let _ensembleChart = null;
+
+const ENS_MODEL_META = {
+  chronos_bolt: { name: 'Chronos-Bolt',  desc: 'Short-term micro movements',   color: '#00D4FF' },
+  chronos_2:    { name: 'Chronos-2',     desc: 'General-purpose baseline',      color: '#8B5CF6' },
+  timesfm:      { name: 'TimesFM',       desc: 'Long-horizon macro trend',      color: '#F59E0B' },
+  lstm:         { name: 'LSTM / GRU',    desc: 'Sequential memory & reversals', color: '#10B981' },
+  xgboost:      { name: 'XGBoost',       desc: 'Feature-based analysis',        color: '#FF6B6B' },
+};
+
+function renderEnsembleForecast(data) {
+  const card = document.getElementById('hubEnsembleCard');
+  if (!card) return;
+  const headingHTML = '<h3 class="card-heading">AI Ensemble Forecast <span class="heading-sub">— 7-day multi-model projection</span></h3>';
+  if (!data || data.error) {
+    card.innerHTML = headingHTML + `<div class="hub-unavail">${data?.error || 'Ensemble forecast unavailable — run full analysis.'}</div>`;
+    return;
+  }
+
+  const { ensemble_signal, final_score, confidence, regime, weights, model_scores, model_pct, indicators, price_history } = data;
+
+  const sigColor = ensemble_signal === 'BUY' ? 'var(--green)' : ensemble_signal === 'SELL' ? 'var(--red)' : 'var(--gold)';
+  const sigCls   = ensemble_signal === 'BUY' ? 'green' : ensemble_signal === 'SELL' ? 'red' : 'gold';
+
+  const regimeIcon  = { bull: '↑', bear: '↓', sideways: '→' }[regime] || '→';
+  const regimeCls   = { bull: 'green', bear: 'red', sideways: 'gold' }[regime] || '';
+  const regimeLabel = { bull: 'Bull Market', bear: 'Bear Market', sideways: 'Sideways / Range' }[regime] || 'Unknown';
+
+  const confPct = Math.round(confidence * 100);
+  const confCls = confPct >= 70 ? 'green' : confPct >= 45 ? 'gold' : 'red';
+
+  // Meter position: 0% = score -1, 50% = neutral, 100% = score +1
+  const meterLeft = Math.round(clamp((final_score + 1) / 2 * 100, 2, 98));
+
+  // Consensus: how many models lean same direction as the signal
+  const dir = final_score >= 0.30 ? 1 : final_score <= -0.30 ? -1 : 0;
+  const aligning = Object.values(model_scores).filter(s => dir > 0 ? s > 0.1 : dir < 0 ? s < -0.1 : Math.abs(s) <= 0.15).length;
+  const consensusStr = `${aligning}/5 ${dir > 0 ? 'bullish-leaning' : dir < 0 ? 'bearish-leaning' : 'near-neutral'}`;
+
+  // Per-model rows
+  const modelRows = ['chronos_bolt','chronos_2','timesfm','lstm','xgboost'].map(key => {
+    const meta   = ENS_MODEL_META[key];
+    const score  = model_scores[key] ?? 0;
+    const pct    = model_pct[key] ?? 0;
+    const w      = weights[key] ?? 0;
+    const barL   = Math.round(clamp(50 + Math.min(score, 0) * 50, 0, 50));
+    const barW   = Math.round(Math.abs(score) * 50);
+    const barCls = score > 0.15 ? 'bull' : score < -0.15 ? 'bear' : 'neu';
+    const pctStr = pct >= 0 ? `+${pct.toFixed(1)}%` : `${pct.toFixed(1)}%`;
+    const pctCls = pct > 0.5 ? 'green' : pct < -0.5 ? 'red' : '';
+    return `<div class="enm-row">
+      <div class="enm-dot" style="background:${meta.color}"></div>
+      <div class="enm-model-info">
+        <div class="enm-model-name">${meta.name}</div>
+        <div class="enm-model-desc">${meta.desc}</div>
+      </div>
+      <div class="enm-bar-wrap">
+        <div class="enm-bar-track">
+          <div class="enm-bar-center"></div>
+          <div class="enm-bar-fill ${barCls}" style="left:${barL}%;width:${barW}%"></div>
+        </div>
+      </div>
+      <div class="enm-pct ${pctCls}">${pctStr}</div>
+      <div class="enm-weight">${Math.round(w * 100)}%</div>
+    </div>`;
+  }).join('');
+
+  const p = indicators?.price ?? 0;
+  const e9rel  = p && indicators?.ema9  ? (p > indicators.ema9  ? '↑ above' : '↓ below') : '—';
+  const e50rel = p && indicators?.ema50 ? (p > indicators.ema50 ? '↑ above' : '↓ below') : '—';
+
+  card.innerHTML = `
+    <div class="aidash-head">
+      ${headingHTML}
+      <span class="enm-signal-badge enm-sig-${sigCls}">${ensemble_signal}</span>
+    </div>
+
+    <div class="enm-top">
+      <div class="enm-score-col">
+        <div class="enm-score-num" style="color:${sigColor}">${final_score >= 0 ? '+' : ''}${final_score.toFixed(3)}</div>
+        <div class="enm-score-sublabel">Ensemble Score (−1 to +1)</div>
+        <div class="enm-meter">
+          <div class="enm-meter-track">
+            <div class="enm-meter-marker" style="left:${meterLeft}%;color:${sigColor}"></div>
+          </div>
+          <div class="enm-meter-labels"><span>−1 Sell</span><span>Neutral</span><span>Buy +1</span></div>
+        </div>
+      </div>
+
+      <div class="enm-meta">
+        <div class="enm-meta-row">
+          <span class="enm-meta-label">Market Regime</span>
+          <span class="enm-meta-val ${regimeCls}">${regimeIcon} ${regimeLabel}</span>
+        </div>
+        <div class="enm-meta-row">
+          <span class="enm-meta-label">Model Confidence</span>
+          <span class="enm-meta-val ${confCls}">${confPct}%</span>
+        </div>
+        <div class="enm-conf-track"><div class="enm-conf-fill ${confCls}" style="width:${confPct}%"></div></div>
+        <div class="enm-meta-row">
+          <span class="enm-meta-label">Model Consensus</span>
+          <span class="enm-meta-val">${consensusStr}</span>
+        </div>
+        <div class="enm-chips">
+          <span class="enm-chip">RSI ${indicators?.rsi ?? '—'}</span>
+          <span class="enm-chip">ATR ${indicators?.atr_pct ?? '—'}%</span>
+          <span class="enm-chip">EMA9 ${e9rel}</span>
+          <span class="enm-chip">EMA50 ${e50rel}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hub-divider"></div>
+
+    <div class="enm-bd-head">
+      <span></span><span>Model</span><span></span><span>7d Proj.</span><span>Weight</span>
+    </div>
+    <div class="enm-rows">${modelRows}</div>
+
+    <div class="hub-divider" style="margin-top:14px"></div>
+
+    <div class="enm-chart-section">
+      <div class="enm-chart-title">Forecast Chart <span class="heading-sub">— actual price + 7-day model projections</span></div>
+      <div class="enm-canvas-wrap"><canvas id="ensembleChart"></canvas></div>
+    </div>
+
+    <div class="hub-note">Ensemble fuses ${Object.keys(ENS_MODEL_META).map(k=>ENS_MODEL_META[k].name).join(' · ')} with ${regime}-regime-adaptive weighting. Bear regime boosts LSTM &amp; XGBoost; bull regime boosts Chronos-2 &amp; TimesFM. Educational forecast — not financial advice.</div>`;
+
+  _buildEnsembleChart(price_history, model_pct, p || (price_history?.[price_history.length - 1] ?? 0));
+}
+
+function _buildEnsembleChart(history, modelPct, currentPrice) {
+  if (_ensembleChart) { _ensembleChart.destroy(); _ensembleChart = null; }
+  const canvas = document.getElementById('ensembleChart');
+  if (!canvas || !history?.length || !currentPrice) return;
+
+  const fdays = 7;
+  const n = history.length;
+
+  // Labels: past days → today → future days
+  const labels = [];
+  for (let i = n - 1; i >= 0; i--) labels.push(i === 0 ? 'Today' : `−${i}d`);
+  for (let i = 1; i <= fdays; i++) labels.push(`+${i}d`);
+
+  // Actual price (null-padded for forecast zone)
+  const actualData = [...history, ...new Array(fdays).fill(null)];
+
+  // Each model: anchor at today (index n-1), linear ramp to target over 7 days
+  const modelDatasets = Object.entries(modelPct ?? {}).map(([key, pct]) => {
+    const meta   = ENS_MODEL_META[key] ?? { name: key, color: '#888' };
+    const target = currentPrice * (1 + pct / 100);
+    const arr    = new Array(n + fdays).fill(null);
+    arr[n - 1] = currentPrice;
+    for (let i = 1; i <= fdays; i++) arr[n - 1 + i] = currentPrice + (target - currentPrice) * i / fdays;
+    return {
+      label: meta.name,
+      data: arr,
+      borderColor: meta.color,
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      borderDash: [5, 3],
+      pointRadius: (ctx) => [n - 1, n + fdays - 1].includes(ctx.dataIndex) ? 3 : 0,
+      pointHoverRadius: 4,
+      tension: 0.3,
+      order: 2,
+    };
+  });
+
+  _ensembleChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Actual Price',
+          data: actualData,
+          borderColor: 'rgba(255,255,255,0.85)',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 5,
+          tension: 0.3,
+          order: 1,
+        },
+        ...modelDatasets,
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          display: true,
+          position: 'top',
+          labels: { color: '#94A3B8', font: { size: 10 }, boxWidth: 18, usePointStyle: true },
+        },
+        tooltip: {
+          backgroundColor: 'rgba(5,10,25,0.94)',
+          titleColor: '#E2E8F0',
+          bodyColor: '#CBD5E1',
+          borderColor: 'rgba(0,212,255,0.2)',
+          borderWidth: 1,
+          callbacks: {
+            label: ctx => ctx.parsed.y == null ? null : ` ${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+          },
+        },
+      },
+      scales: {
+        x: {
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          ticks: { color: '#64748B', font: { size: 9 }, maxTicksLimit: 12 },
+        },
+        y: {
+          grid: { color: 'rgba(255,255,255,0.04)' },
+          ticks: {
+            color: '#64748B', font: { size: 9 },
+            callback: v => '$' + v.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+          },
+        },
+      },
+    },
+  });
 }
 
 // ── Render: Trading Score ──────────────────────────────────────────
