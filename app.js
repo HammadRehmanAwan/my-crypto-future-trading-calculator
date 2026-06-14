@@ -4157,6 +4157,7 @@ function copilotComposeLocal(message, ctx) {
   return `I can analyze any of the 15 supported coins. Try "ETH forecast for 2 days", "BTC funding", "review my portfolio", or "explain RSI".`;
 }
 
+let _zorionGreeted = false;
 function copilotToggle() {
   const c = document.getElementById('copilot');
   if (!c) return;
@@ -4164,9 +4165,32 @@ function copilotToggle() {
   if (c.classList.contains('open')) {
     const i = document.getElementById('copilotInput');
     if (i) setTimeout(() => i.focus(), 60);
+    if (!_zorionGreeted) {
+      _zorionGreeted = true;
+      setTimeout(() => _zorionIntro(), 400);
+    }
   } else {
     copilotStopVoice();
   }
+}
+
+function _zorionIntro() {
+  const synth = window.speechSynthesis;
+  if (!synth) return;
+  try {
+    synth.cancel();
+    const vs = synth.getVoices() || [];
+    const voice =
+      vs.find(v => /AriaNeural|JennyNeural|GuyNeural|Microsoft.*Natural/i.test(v.name)) ||
+      vs.find(v => /Google US English/i.test(v.name)) ||
+      vs.find(v => /Samantha|Aria|Jenny/i.test(v.name)) ||
+      vs.find(v => v.lang === 'en-US' && !v.localService) ||
+      vs.find(v => v.lang === 'en-US');
+    const u = new SpeechSynthesisUtterance("Hey, I'm Zorion. Ask me anything about the market.");
+    u.lang = 'en-US'; u.rate = 0.94; u.pitch = 1.06; u.volume = 1.0;
+    if (voice) u.voice = voice;
+    synth.speak(u);
+  } catch (e) {}
 }
 
 function copilotAddMsg(text, isUser) {
