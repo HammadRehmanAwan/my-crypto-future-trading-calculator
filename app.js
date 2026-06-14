@@ -4298,7 +4298,7 @@ function copilotComposeLocal(message, ctx, report) {
     return `I'm Zorion — fully operational. Ask me about any coin's structure, forecast, funding, or technicals. Run a portfolio analysis and I can review concentration and rebalancing too.`;
   }
 
-  // 7) Social / wellbeing questions — Zorion has a personality, not a price feed
+  // 7) Social / wellbeing questions
   if (/\b(how are you|how r u|you okay|you good|how('s| is) it going|how are things|how do you feel)\b/.test(m)) {
     return `Systems nominal. Market data is live, indicators are computed, and I'm reading ${priceStr ? `${name} at ${priceStr}` : 'the market'}. What would you like me to analyse?`;
   }
@@ -4308,14 +4308,33 @@ function copilotComposeLocal(message, ctx, report) {
     return `I'm Zorion — an AI market intelligence analyst built into FutureX. I can:\n• Read live price, RSI, MACD, Bollinger Bands for 15 assets\n• Deliver a structured analyst read with confidence score and bull/bear probability\n• Analyse funding rates, open interest and long/short positioning\n• Review your portfolio health, concentration and rebalancing targets\n• Produce statistical 7-day forecasts\n\nTry: "Analyse BTC", "ETH funding", "SOL forecast", or "review my portfolio".`;
   }
 
-  // 9) Thank you / acknowledgements
-  if (/^\s*(thanks|thank you|thx|ty|cheers|appreciated|great|nice|good job|well done|perfect)\b/.test(m)) {
+  // 9) Limitations / cons / what I can't do
+  if (/\b(cons|con\b|limitation|limit|weakness|weakness|drawback|downside|disadvantage|can'?t|cannot|don'?t|not (able|capable|good)|what.*(lack|miss|without))\b/.test(m)) {
+    return `Here's what Zorion doesn't do:\n• No real-time news or Twitter sentiment — I work from on-chain and derivatives data\n• Forecasts are statistical models, not certainties — treat them as probability ranges\n• I cover 15 supported assets only, not the entire market\n• No execution — I analyse, you decide and trade\n\nFor everything I can do: ask "what can you do".`;
+  }
+
+  // 10) Questions about how to use Zorion
+  if (/\b(how (to|do i|should i) use|get started|where (do i|should i) start|tutorial|guide|tips|instructions)\b/.test(m)) {
+    return `Getting started with Zorion:\n1. Type a coin name — "read ETH" or "BTC analysis"\n2. Ask about positioning — "SOL funding rate"\n3. Get a forecast — "AVAX forecast next 7 days"\n4. Run the Portfolio tab first, then ask "review my portfolio"\n5. Use the mic button for voice — I'll speak the answer back\n\nEvery analytical response includes a confidence score, bull/bear split and key levels.`;
+  }
+
+  // 11) Thank you / acknowledgements
+  if (/^\s*(thanks|thank you|thx|ty|cheers|appreciated|great|nice|good job|well done|perfect|awesome)\b/.test(m)) {
     return `Noted. If the structure changes I'll flag it — just ask.`;
   }
 
-  // 10) Context-aware fallback
-  if (priceStr) return `${name} is near ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}. Ask me for a full read, its forecast, funding — or a portfolio review.`;
-  return `I can analyse any of the 15 supported assets. Try "read BTC", "ETH forecast for 2 days", "SOL funding", or "review my portfolio".`;
+  // 12) Catch-all for questions clearly about Zorion rather than the market
+  // (contains "you" or "your" with no coin name detected and no market keyword)
+  const isAboutZorion = /\b(you|your|zorion)\b/.test(m) && !detectCoinFromText(m);
+  const isMarketQuestion = /(price|chart|trade|signal|crypto|coin|token|market|invest|rsi|macd|fund)/i.test(m);
+  if (isAboutZorion && !isMarketQuestion) {
+    return `That's an interesting question about me. I'm Zorion — an AI market intelligence layer. My focus is crypto analysis: prices, technicals, funding, forecasts, and portfolio health. Ask me anything in that space and I'll give you a structured read.`;
+  }
+
+  // 13) Final fallback — only use the price if the question is genuinely market-related
+  const isQuestionAboutMarket = /(price|market|coin|crypto|bitcoin|btc|eth|trade|invest|fund|rsi|trend|forecast|signal|analysis|analy)/i.test(m);
+  if (priceStr && isQuestionAboutMarket) return `${name} is near ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}. Ask me for a full read, its forecast, funding — or a portfolio review.`;
+  return `I focus on crypto market analysis. Try: "read BTC", "ETH forecast", "SOL funding", or "portfolio review". For my full capabilities say "what can you do".`;
 }
 
 let _zorionGreeted = false;
@@ -4388,7 +4407,7 @@ async function copilotSend(preset, coinHint, speak) {
   load.className = 'copilot-msg assistant';
   if (box) { box.appendChild(load); box.scrollTop = box.scrollHeight; }
   // Skip the market-analysis thinking sequence for purely conversational turns.
-  const isConversational = /^\s*(hi|hey|hello|yo|sup|gm|how are you|how r u|thanks|thank you|thx|ty|cheers|what can you do|what do you do|who are you|what are you|help( me)?|you good|good (morning|evening|afternoon))\b/.test(msg.toLowerCase());
+  const isConversational = /^\s*(hi|hey|hello|yo|sup|gm|how are you|how r u|thanks|thank you|thx|ty|cheers|awesome|what can you do|what do you do|who are you|what are you|what.*(your cons|your limit|your weak|your draw|can.?t you)|how (to|do i) use|get started|help( me)?|you good|good (morning|evening|afternoon))\b/.test(msg.toLowerCase());
   const think = isConversational
     ? { stop() {}, _plain: true }
     : startThinkingSequence(load);
