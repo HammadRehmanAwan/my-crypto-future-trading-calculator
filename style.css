@@ -2317,93 +2317,79 @@ input, select, button { font-family: inherit; }
 /* ─── FEATURE 6: Floating AI Market Copilot ─── */
 .copilot { position: fixed; right: 22px; bottom: 22px; z-index: 300; }
 
-/* The Siri-style energy orb — layered radial blooms over a slow-spinning
-   conic gradient, with a soft inner highlight that breathes. */
+/* 3-D glass sphere */
 .copilot-orb {
-  position: relative; width: 42px; height: 42px; border-radius: 50%;
+  position: relative; width: 42px; height: 42px; border-radius: 50%; z-index: 2;
   background:
-    radial-gradient(circle at 32% 30%, #7FC0FF 0%, transparent 55%),
-    radial-gradient(circle at 70% 64%, #C887FF 0%, transparent 55%),
-    radial-gradient(circle at 50% 82%, #FF82D6 0%, transparent 50%),
-    conic-gradient(from 0deg, #4F8CFF, #8B5CF6, #00D4FF, #FF6BD6, #4F8CFF);
-  box-shadow: inset 0 0 14px rgba(255,255,255,.45), 0 0 20px rgba(124,80,255,.55);
-  animation: orbSpin 7s linear infinite;
+    radial-gradient(circle at 32% 26%, rgba(160,210,255,.55) 0%, rgba(80,140,255,.18) 35%, transparent 60%),
+    radial-gradient(circle at 68% 72%, rgba(180,120,255,.22) 0%, transparent 50%),
+    radial-gradient(circle at 50% 50%, #1c1450 0%, #0e0a30 45%, #060414 80%, #03020e 100%);
+  box-shadow:
+    inset 0 2px 6px  rgba(120,180,255,.22),
+    inset 0 -5px 14px rgba(0,0,40,.75),
+    0 0 0 1px rgba(90,130,255,.28),
+    0 0 28px rgba(79,140,255,.5),
+    0 0 56px rgba(139,92,246,.22),
+    0 6px 24px rgba(0,0,0,.7);
+  animation: orbBreath 3.8s ease-in-out infinite;
 }
+/* Glass gloss — fixed highlight, no spinning */
 .copilot-orb::after {
-  content: ''; position: absolute; inset: 20%; border-radius: 50%;
-  background: radial-gradient(circle at 50% 38%, rgba(255,255,255,.95), rgba(255,255,255,.12) 55%, transparent 72%);
-  filter: blur(1.5px); animation: orbPulse 3s ease-in-out infinite;
+  content: ''; position: absolute; top: 9%; left: 13%; width: 46%; height: 36%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 38% 40%, rgba(255,255,255,.72) 0%, rgba(255,255,255,.12) 55%, transparent 100%);
+  filter: blur(1px); pointer-events: none;
 }
-.copilot-orb.sm { width: 26px; height: 26px; box-shadow: inset 0 0 9px rgba(255,255,255,.45), 0 0 12px rgba(124,80,255,.5); }
-@keyframes orbSpin { to { transform: rotate(360deg); } }
-@keyframes orbPulse { 0%,100% { transform: scale(.82); opacity: .65; } 50% { transform: scale(1.05); opacity: 1; } }
+.copilot-orb.sm {
+  width: 26px; height: 26px;
+  box-shadow: inset 0 1px 4px rgba(120,180,255,.2), inset 0 -3px 8px rgba(0,0,40,.7),
+    0 0 0 1px rgba(90,130,255,.22), 0 0 14px rgba(79,140,255,.45), 0 0 28px rgba(139,92,246,.18);
+}
+@keyframes orbBreath {
+  0%,100% { box-shadow: inset 0 2px 6px rgba(120,180,255,.22), inset 0 -5px 14px rgba(0,0,40,.75), 0 0 0 1px rgba(90,130,255,.28), 0 0 28px rgba(79,140,255,.5), 0 0 56px rgba(139,92,246,.22), 0 6px 24px rgba(0,0,0,.7); }
+  50%      { box-shadow: inset 0 2px 8px rgba(120,180,255,.32), inset 0 -5px 14px rgba(0,0,40,.75), 0 0 0 1px rgba(90,130,255,.4),  0 0 40px rgba(79,140,255,.72), 0 0 70px rgba(139,92,246,.38), 0 6px 28px rgba(0,0,0,.6); }
+}
 
 /* Floating launcher button */
 .copilot-fab {
   position: relative; width: 64px; height: 64px; padding: 0; border: none; border-radius: 50%;
   cursor: pointer; display: grid; place-items: center; overflow: visible;
-  background: rgba(18,16,34,.55); backdrop-filter: blur(8px);
+  background: radial-gradient(circle at 50% 40%, #14103a, #07051a);
+  border: 1px solid rgba(90,120,255,.18);
   transition: transform .25s cubic-bezier(.34,1.56,.64,1);
-  animation: cfGlow 3.2s ease-in-out infinite;
+  box-shadow: 0 8px 32px rgba(79,140,255,.28), 0 2px 8px rgba(0,0,0,.7);
 }
 .copilot-fab > * { grid-area: 1 / 1; }
 .copilot-fab .copilot-orb { z-index: 2; }
-/* Breathing energy glow (box-shadow only — never fights the hover transform) */
-@keyframes cfGlow {
-  0%,100% { box-shadow: 0 12px 34px rgba(124,80,255,.5), 0 0 0 1px rgba(255,255,255,.08), 0 0 20px rgba(0,212,255,0); }
-  50%     { box-shadow: 0 14px 44px rgba(124,80,255,.72), 0 0 0 1px rgba(255,255,255,.14), 0 0 36px rgba(0,212,255,.42); }
-}
 
-/* Radar pulse rings — fab::before + cf-rings give 3 staggered expanding rings */
-.copilot-fab::before {
-  content: ''; position: absolute; inset: -5px; border-radius: 50%; z-index: 0;
-  border: 2px solid rgba(124,80,255,.5); animation: fabRing 2.7s ease-out infinite;
+/* SVG arc rings — positioned beyond the 64 px hit area */
+.cf-arcs {
+  position: absolute;
+  inset: -16px;
+  width: calc(100% + 32px); height: calc(100% + 32px);
+  pointer-events: none; z-index: 3; overflow: visible;
 }
-.cf-rings { position: absolute; inset: 0; pointer-events: none; z-index: 0; }
-.cf-rings::before, .cf-rings::after {
-  content: ''; position: absolute; inset: -5px; border-radius: 50%;
-  border: 2px solid rgba(0,212,255,.45); animation: fabRing 2.7s ease-out infinite;
+/* r=36 → C≈226  dasharray: 170 56 (≈75 % arc) */
+.cfa-r1 {
+  stroke-dasharray: 170 56;
+  transform-origin: 48px 48px;
+  animation: arcSpin1 3.6s linear infinite;
 }
-.cf-rings::before { animation-delay: .9s; border-color: rgba(139,92,246,.5); }
-.cf-rings::after  { animation-delay: 1.8s; border-color: rgba(0,212,255,.4); }
-@keyframes fabRing { 0% { transform: scale(.9); opacity: .8; } 100% { transform: scale(1.32); opacity: 0; } }
+/* r=43 → C≈270  dasharray: 108 162 (≈40 % arc) */
+.cfa-r2 {
+  stroke-dasharray: 108 162;
+  stroke-dashoffset: 54;
+  transform-origin: 48px 48px;
+  animation: arcSpin2 5.8s linear infinite reverse;
+}
+@keyframes arcSpin1 { to { transform: rotate(360deg); } }
+@keyframes arcSpin2 { to { transform: rotate(360deg); } }
 
-/* Rotating segmented HUD ring (sci-fi tick marks) */
-.cf-hud {
-  position: absolute; inset: -2px; border-radius: 50%; pointer-events: none; z-index: 1; opacity: .9;
-  background: repeating-conic-gradient(from 0deg, rgba(0,212,255,0) 0deg 9deg, rgba(0,212,255,.9) 9deg 12deg);
-  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
-          mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 3px));
-  animation: hudSpin 5s linear infinite;
-}
-@keyframes hudSpin { to { transform: rotate(-360deg); } }
-
-/* Orbiting energy particles (atom-style) */
-.cf-orbit { position: absolute; inset: 0; pointer-events: none; z-index: 3; --orbit-r: 28px; animation: orbitSpin 6s linear infinite; }
-.cf-orbit i {
-  position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%;
-}
-.cf-orbit i:nth-child(1) { transform: rotate(0deg)   translateX(var(--orbit-r)); background: #7FE0FF; box-shadow: 0 0 10px 1px #00D4FF; }
-.cf-orbit i:nth-child(2) { transform: rotate(120deg) translateX(var(--orbit-r)); background: #C887FF; box-shadow: 0 0 10px 1px #8B5CF6; }
-.cf-orbit i:nth-child(3) { transform: rotate(240deg) translateX(var(--orbit-r)); background: #FF9BE0; box-shadow: 0 0 10px 1px #FF6BD6; }
-@keyframes orbitSpin { to { transform: rotate(360deg); } }
-
-/* Conic scanner sweep over the orb */
-.cf-scan {
-  position: absolute; inset: 6px; border-radius: 50%; pointer-events: none; z-index: 4; mix-blend-mode: screen;
-  background: conic-gradient(from 0deg, rgba(255,255,255,0) 0deg, rgba(255,255,255,.55) 24deg, rgba(255,255,255,0) 60deg);
-  -webkit-mask: radial-gradient(farthest-side, #000 60%, transparent 78%);
-          mask: radial-gradient(farthest-side, #000 60%, transparent 78%);
-  animation: scanSweep 2.6s linear infinite;
-}
-@keyframes scanSweep { to { transform: rotate(360deg); } }
-
-/* Hover — energize: pop, brighten, and spin everything faster */
+/* Hover */
 .copilot-fab:hover { transform: scale(1.09); }
 .copilot-fab:hover .copilot-orb { filter: brightness(1.18) saturate(1.25); }
-.copilot-fab:hover .cf-orbit { animation-duration: 2.4s; }
-.copilot-fab:hover .cf-hud   { animation-duration: 2.6s; }
-.copilot-fab:hover .cf-scan  { animation-duration: 1.4s; }
+.copilot-fab:hover .cfa-r1 { animation-duration: 1.8s; }
+.copilot-fab:hover .cfa-r2 { animation-duration: 2.9s; }
 .copilot-fab:active { transform: scale(1.02); }
 .copilot.open .copilot-fab { display: none; }
 
@@ -2545,7 +2531,6 @@ input, select, button { font-family: inherit; }
   .copilot { right: 14px; bottom: 132px; }
   .copilot-fab { width: 56px; height: 56px; }
   .copilot-fab .copilot-orb { width: 38px; height: 38px; }
-  .copilot-fab .cf-orbit { --orbit-r: 24px; }
   .copilot-panel { height: 70vh; max-height: calc(100vh - 150px); }
 }
 @media (max-width: 420px) {
