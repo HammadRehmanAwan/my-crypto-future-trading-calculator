@@ -1499,6 +1499,14 @@ function switchTab(tab) {
   // Keep the mobile bottom-nav in sync.
   document.querySelectorAll('.bn-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
   window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  // Daily AI Briefing loads when the Portfolio tab opens, then self-refreshes.
+  if (tab === 'dash') {
+    loadDailyBriefing();
+    if (!_briefingTimer) _briefingTimer = setInterval(() => {
+      if (document.getElementById('dashView')?.style.display !== 'none') loadDailyBriefing(true);
+    }, 10 * 60_000);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1764,6 +1772,7 @@ async function runDashboard() {
     document.getElementById('dashLoader').style.display = 'none';
 
     if (scored.length === 0) {
+      hidePortfolioIntel();
       document.getElementById('dashNoSignal').style.display = 'block';
       btn.disabled = false; btn.textContent = 'Analyze Now'; return;
     }
@@ -1797,6 +1806,7 @@ async function runDashboard() {
     renderDashboard(trades, capital, riskProfile);
 
   } catch (e) {
+    hidePortfolioIntel();
     document.getElementById('dashLoader').style.display = 'none';
     const errEl = document.getElementById('dashError');
     errEl.style.display = 'block';
@@ -1877,6 +1887,9 @@ function renderDashboard(trades, capital, riskProfile) {
   }).join('');
 
   document.getElementById('dashResults').style.display = 'block';
+
+  // Build the AI portfolio-intelligence layer from these allocations.
+  renderPortfolioIntelligence(trades, capital, riskProfile);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -3342,35 +3355,769 @@ async function sendChat() {
   }
 
   try {
-    const context = {
-      coin: hubState.coinId,
-      coinName: COINS[hubState.coinId]?.name || hubState.coinId,
-      currentPrice: hubState.prices ? hubState.prices[hubState.prices.length - 1] : null,
-      analysis: hubState.analysis ? {
-        rsi: hubState.analysis.rsi,
-        macd: hubState.analysis.macd > hubState.analysis.sig ? 'Bullish' : 'Bearish',
-        trend: hubState.analysis.trend?.direction,
-      } : null,
-    };
-
-    // Always have an instant client-side answer ready.
-    const local = localChatResponse(msg, context);
-    let reply = local;
-    // Optionally enhance with the backend LLM if it's reachable (short timeout).
-    try {
-      const data = await backendFetch(`${BACKEND_URL}/chat`, null, 0, {
-        method: 'POST', body: { message: msg, context }, retries: 0, timeoutMs: 6_000,
-      });
-      reply = data.response || data.message || local;
-    } catch (e) { /* backend down — use local KB answer */ }
-
+    // Reuse the shared AI service so the Hub chat gets the same live context
+    // (price, technicals, funding, OI, sentiment, forecast, portfolio).
+    const ctx = await AIService.gatherContext(hubState.coinId);
+    const reply = await AIService.ask(msg, { context: ctx, timeoutMs: 8_000 });
     const loadEl = document.getElementById(loadId);
     if (loadEl) loadEl.remove();
     addChatMessage(reply, false);
   } catch (e) {
     const loadEl = document.getElementById(loadId);
     if (loadEl) loadEl.remove();
-    addChatMessage(localChatResponse(msg, context), false);
+    addChatMessage(localChatResponse(msg, {
+      coinName: COINS[hubState.coinId]?.name || hubState.coinId,
+      currentPrice: hubState.prices ? hubState.prices[hubState.prices.length - 1] : null,
+    }), false);
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// AI PORTFOLIO INTELLIGENCE
+// New layer that turns the Portfolio Dashboard into an intelligence center.
+// Everything is derived from the existing analysis (the generated `trades`
+// allocation = the portfolio) and live market data — no mock data.
+// ═══════════════════════════════════════════════════════════════════
+
+// Small shared helpers --------------------------------------------------
+function animateNumber(el, from, to, dur = 850) {
+  if (!el) return;
+  const start = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - t, 3);
+    el.textContent = Math.round(from + (to - from) * eased);
+    if (t < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+}
+
+function scoreColor(v) { return v >= 66 ? 'var(--green)' : v >= 45 ? 'var(--gold)' : 'var(--red)'; }
+
+// Relative volatility betas vs BTC — standard market parameters (like ATR
+// multipliers already used elsewhere), used by the scenario simulator.
+const ASSET_BETA = {
+  bitcoin: 1.0, ethereum: 1.15, binancecoin: 0.9, solana: 1.5, ripple: 1.1,
+  cardano: 1.3, 'avalanche-2': 1.5, dogecoin: 1.7, polkadot: 1.35,
+  'matic-network': 1.4, chainlink: 1.3, uniswap: 1.4, litecoin: 1.05,
+  cosmos: 1.3, filecoin: 1.5,
+};
+
+// Chart.js instances for the portfolio cards (destroy-before-recreate).
+const _pfCharts = { scenario: null, rebalCur: null, rebalSug: null };
+
+// ─── REUSABLE AI SERVICE LAYER ─────────────────────────────────────
+// Single entry point for every LLM-backed answer in the app. Gathers live
+// platform context and proxies to the backend /chat endpoint (HF Inference,
+// token stays server-side). Always returns instantly with a deterministic
+// local answer, upgraded to the model's answer when the backend is reachable.
+const AIService = {
+  async gatherContext(coinId) {
+    coinId = coinId || hubState.coinId || state.coin || 'bitcoin';
+    const ctx = { coin: coinId, coinName: COINS[coinId]?.name || coinId };
+
+    // Price + technicals (reuse hub analysis if it matches, else light fetch)
+    try {
+      let prices, volumes;
+      if (hubState.coinId === coinId && hubState.prices?.length) {
+        prices = hubState.prices; volumes = hubState.volumes;
+      } else {
+        const h = await fetchHistory(coinId, 90); prices = h.prices; volumes = h.volumes;
+      }
+      if (prices && prices.length >= 20) {
+        const curr = prices[prices.length - 1];
+        const rsiArr = calcRSI(prices);
+        const { macdLine, signalLine } = calcMACD(prices);
+        const bb = calcBollinger(prices);
+        const ts = calcHubTechScore(
+          rsiArr[rsiArr.length - 1], macdLine[macdLine.length - 1], signalLine[signalLine.length - 1],
+          curr, bb.upper[bb.upper.length - 1], bb.lower[bb.lower.length - 1],
+          ema(prices, 20).slice(-1)[0], ema(prices, 50).slice(-1)[0], ema(prices, 200).slice(-1)[0]);
+        ctx.currentPrice = curr;
+        ctx.rsi = +rsiArr[rsiArr.length - 1].toFixed(1);
+        ctx.macd = macdLine[macdLine.length - 1] > signalLine[signalLine.length - 1] ? 'Bullish' : 'Bearish';
+        ctx.techScore = ts.score;
+        ctx.trend = ts.score >= 58 ? 'Bullish' : ts.score <= 43 ? 'Bearish' : 'Neutral';
+        const f = holtForecast(prices, 7);
+        const chg = (f.median[6] - curr) / curr * 100;
+        ctx.forecast = `${chg >= 0 ? '+' : ''}${chg.toFixed(1)}% (7d)`;
+      }
+    } catch (e) { /* skip technicals */ }
+
+    // Futures (funding / OI / positioning)
+    try {
+      const f = (hubState.futures && hubState.coinId === coinId)
+        ? hubState.futures : await fetchFuturesDirect(coinId);
+      if (f) {
+        ctx.funding = f.funding_rate;
+        ctx.openInterest = f.open_interest;
+        ctx.lsRatio = f.ls_ratio;
+        ctx.marketBias = f.market_bias;
+      }
+    } catch (e) { /* futures optional */ }
+
+    // Sentiment (Fear & Greed)
+    try {
+      const fg = state.sentiment?.fg;
+      if (fg && fg.length) ctx.fearGreed = `${fg[0].value} (${fg[0].value_classification})`;
+    } catch (e) {}
+
+    // Portfolio snapshot for portfolio-aware questions
+    if (state.portfolio) ctx.portfolio = state.portfolio.summaryForAI;
+    return ctx;
+  },
+
+  buildAnalysis(ctx) {
+    return ctx.rsi != null ? { rsi: ctx.rsi, macd: ctx.macd, trend: ctx.trend } : null;
+  },
+
+  // Ask the model. `localAnswer` overrides the default deterministic fallback.
+  async ask(message, { context = null, localAnswer = null, timeoutMs = 14_000 } = {}) {
+    const ctx = context || await this.gatherContext();
+    const local = localAnswer != null ? localAnswer : localChatResponse(message, {
+      coinName: ctx.coinName, currentPrice: ctx.currentPrice, analysis: this.buildAnalysis(ctx),
+    });
+    try {
+      const data = await backendFetch(`${BACKEND_URL}/chat`, null, 0, {
+        method: 'POST', body: { message, context: ctx }, retries: 0, timeoutMs,
+      });
+      const r = (data.response || data.message || '').trim();
+      return r || local;
+    } catch (e) { return local; }
+  },
+};
+
+// ─── PORTFOLIO MODEL  (derived from the generated trades) ──────────
+function buildPortfolioModel(trades, capital, riskProfile) {
+  const totalAlloc = trades.reduce((s, t) => s + t.alloc, 0) || 1;
+  const holdings = trades.map(t => ({
+    id: t.id, sym: t.sym, name: t.name, dir: t.dir, price: t.price,
+    alloc: t.alloc, weight: t.alloc / totalAlloc, lev: t.lev,
+    vol: t.bbW, score: t.score, chg24: t.chg24,
+  })).sort((a, b) => b.weight - a.weight);
+
+  const n = holdings.length;
+  const hhi = holdings.reduce((s, h) => s + h.weight * h.weight, 0); // 0..1
+  const maxWeight = holdings[0]?.weight || 0;
+  const wVol = holdings.reduce((s, h) => s + h.weight * h.vol, 0);
+  const wLev = holdings.reduce((s, h) => s + h.weight * h.lev, 0);
+  const netDir = holdings.reduce((s, h) => s + h.weight * (h.dir === 'Long' ? 1 : -1), 0);
+  const btc = holdings.find(h => h.id === 'bitcoin');
+  const btcW = btc ? btc.weight : 0;
+
+  // Sub-scores (0..100, higher = healthier)
+  const idealHHI = 1 / n;
+  const divScore  = clamp(Math.round((1 - (hhi - idealHHI) / (1 - idealHHI)) * 80 + Math.min(20, (n - 1) * 7)), 0, 100);
+  const concScore = clamp(Math.round(100 - Math.max(0, maxWeight - 0.35) / 0.65 * 100), 0, 100);
+  const volScore  = clamp(Math.round(100 - (wVol - 5) / 20 * 100), 0, 100);
+  const levScore  = clamp(Math.round(100 - (wLev - 2) / 18 * 100), 0, 100);
+  const expScore  = clamp(Math.round(100 - Math.abs(netDir) * 35 - Math.max(0, btcW - 0.4) / 0.6 * 40), 0, 100);
+
+  const fg = state.sentiment?.fg?.length ? parseInt(state.sentiment.fg[0].value) : null;
+  const avgScore = holdings.reduce((s, h) => s + Math.abs(h.score), 0) / n;
+  const fgComfort = fg == null ? 55 : clamp(100 - Math.abs(fg - 50) * 1.1, 0, 100);
+  const mktScore = clamp(Math.round(fgComfort * 0.6 + Math.min(100, avgScore * 18) * 0.4), 0, 100);
+
+  const overall = clamp(Math.round(
+    divScore * 0.20 + concScore * 0.20 + volScore * 0.18 + expScore * 0.15 + levScore * 0.15 + mktScore * 0.12
+  ), 0, 100);
+
+  const status = overall >= 80 ? { t: 'Excellent', c: 'green' }
+               : overall >= 65 ? { t: 'Good',      c: 'green' }
+               : overall >= 45 ? { t: 'Moderate',  c: 'gold'  }
+               :                  { t: 'Risky',     c: 'red'   };
+
+  // The three headline display scores requested by the spec.
+  const riskScore     = clamp(Math.round(volScore * 0.4 + levScore * 0.35 + concScore * 0.25), 0, 100);
+  const exposureScore = expScore;
+
+  return {
+    holdings, capital, riskProfile, n,
+    hhi: +hhi.toFixed(3), maxWeight, wVol: +wVol.toFixed(1), wLev: +wLev.toFixed(1),
+    netDir: +netDir.toFixed(2), btcW: +btcW.toFixed(3), fg,
+    sub: { divScore, concScore, volScore, levScore, expScore, mktScore },
+    overall, status, riskScore, exposureScore, divScore,
+    summaryForAI: holdings.map(h => `${h.sym} ${Math.round(h.weight * 100)}% ${h.dir}${h.lev > 1 ? ` ${h.lev}x` : ''}`).join(', ')
+      + `; health ${overall}/100 (${status.t})`,
+    ts: Date.now(),
+  };
+}
+
+function hidePortfolioIntel() {
+  ['dashIntel', 'scenarioCard', 'rebalanceCard'].forEach(id => {
+    const el = document.getElementById(id); if (el) el.style.display = 'none';
+  });
+}
+
+// Entry point: called by renderDashboard after the trades are built.
+function renderPortfolioIntelligence(trades, capital, riskProfile) {
+  const pm = buildPortfolioModel(trades, capital, riskProfile);
+  state.portfolio = pm;
+
+  const intel = document.getElementById('dashIntel');
+  if (intel) intel.style.display = 'block';
+
+  renderPortfolioHealth(pm);     // Feature 1
+  renderPortfolioSummary(pm);    // Feature 2
+  renderScenarioSimulator(pm);   // Feature 3
+  renderRebalanceEngine(pm);     // Feature 4
+}
+
+// ─── FEATURE 1: PORTFOLIO HEALTH SCORE ─────────────────────────────
+function portfolioHealthExplanation(pm) {
+  const top = pm.holdings[0];
+  const parts = [];
+  parts.push(pm.divScore >= 66 ? 'Your portfolio is well diversified'
+           : pm.divScore >= 45 ? 'Your portfolio is reasonably diversified'
+           : 'Your portfolio is fairly concentrated');
+  if (top && top.weight >= 0.4) parts.push(`but remains heavily exposed to ${top.sym} (${Math.round(top.weight * 100)}%)`);
+  else if (top) parts.push(`with ${top.sym} as the largest position (${Math.round(top.weight * 100)}%)`);
+  const lev = pm.wLev >= 12 ? 'high' : pm.wLev >= 6 ? 'moderate' : 'conservative';
+  const cond = pm.fg == null ? 'neutral' : pm.fg <= 25 ? 'fearful' : pm.fg <= 45 ? 'cautious'
+             : pm.fg <= 55 ? 'balanced' : pm.fg <= 75 ? 'favorable' : 'euphoric';
+  parts.push(`. Average leverage is ${lev} (${pm.wLev}×) and current market conditions are ${cond}`);
+  parts.push(`, resulting in a ${pm.status.t.toLowerCase()} health score of ${pm.overall}/100.`);
+  return parts.join(' ').replace(' .', '.').replace(' ,', ',');
+}
+
+function renderPortfolioHealth(pm) {
+  const card = document.getElementById('healthCard');
+  if (!card || !pm) return;
+  const color = pm.status.c === 'green' ? 'var(--green)' : pm.status.c === 'gold' ? 'var(--gold)' : 'var(--red)';
+  const R = 54, C = 2 * Math.PI * R;
+  const bar = (label, val) => `
+    <div class="ph-sub">
+      <span class="ph-sub-l">${label}</span>
+      <div class="ph-sub-track"><div class="ph-sub-fill" data-w="${val}" style="width:0%;background:${scoreColor(val)}"></div></div>
+      <span class="ph-sub-v">${val}</span>
+    </div>`;
+
+  card.innerHTML = `
+    <div class="aidash-head">
+      <h3 class="card-heading">Portfolio Health Score</h3>
+      <span class="ph-status ${pm.status.c}">${pm.status.t}</span>
+    </div>
+    <div class="ph-body">
+      <div class="ph-gauge-col">
+        <div class="ph-gauge-wrap">
+          <svg class="ph-gauge" viewBox="0 0 128 128" width="158" height="158">
+            <circle cx="64" cy="64" r="${R}" class="ph-gauge-bg"/>
+            <circle cx="64" cy="64" r="${R}" class="ph-gauge-fg" stroke="${color}"
+              stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${C.toFixed(1)}"
+              transform="rotate(-90 64 64)"/>
+          </svg>
+          <div class="ph-gauge-center">
+            <div class="ph-score" style="color:${color}">0</div>
+            <div class="ph-score-max">/ 100</div>
+          </div>
+        </div>
+      </div>
+      <div class="ph-subs">
+        ${bar('Diversification', pm.divScore)}
+        ${bar('Risk Score', pm.riskScore)}
+        ${bar('Market Exposure', pm.exposureScore)}
+      </div>
+    </div>
+    <div class="ph-ai" id="healthAi">
+      <span class="ph-ai-badge">AI</span>
+      <span id="healthAiText">${escapeHtml(portfolioHealthExplanation(pm))}</span>
+    </div>`;
+
+  requestAnimationFrame(() => {
+    const fg = card.querySelector('.ph-gauge-fg');
+    if (fg) fg.style.strokeDashoffset = String(C * (1 - pm.overall / 100));
+    animateNumber(card.querySelector('.ph-score'), 0, pm.overall, 950);
+    card.querySelectorAll('.ph-sub-fill').forEach(el => { el.style.width = el.dataset.w + '%'; });
+  });
+
+  // Optional LLM enhancement (swaps in when reachable).
+  AIService.ask(
+    'In 2 sentences, explain this crypto portfolio\'s health: diversification, concentration, leverage and market conditions. Be specific and mention one risk.',
+    { context: { coinName: 'the portfolio', portfolio: pm.summaryForAI,
+      fearGreed: pm.fg != null ? String(pm.fg) : '' },
+      localAnswer: portfolioHealthExplanation(pm), timeoutMs: 12_000 }
+  ).then(t => {
+    const el = document.getElementById('healthAiText');
+    if (el && t && t.length > 20) el.textContent = t;
+  }).catch(() => {});
+}
+
+// ─── FEATURE 2: AI PORTFOLIO SUMMARY ───────────────────────────────
+function portfolioConfidence(pm) {
+  let c = 55;
+  if (state.sentiment?.fg?.length) c += 12;        // sentiment available
+  if (pm.n >= 3) c += 8;                            // enough holdings to reason about
+  c += Math.min(15, pm.holdings.reduce((s, h) => s + Math.abs(h.score), 0)); // signal strength
+  if (pm.maxWeight > 0.6) c -= 8;                   // very concentrated → less reliable
+  return clamp(Math.round(c), 35, 95);
+}
+
+function portfolioSummaryText(pm) {
+  const alloc = pm.holdings.slice(0, 4).map(h => `${Math.round(h.weight * 100)}% ${h.sym}`).join(', ');
+  const longs = pm.holdings.filter(h => h.dir === 'Long').length;
+  const shorts = pm.holdings.length - longs;
+  const fg = pm.fg;
+  const sent = fg == null ? 'mixed' : fg <= 44 ? 'bearish' : fg <= 55 ? 'neutral' : 'bullish';
+  const conc = pm.maxWeight >= 0.45 ? `concentration is elevated due to ${pm.holdings[0].sym} exposure`
+             : pm.maxWeight >= 0.33 ? 'concentration is slightly elevated'
+             : 'concentration is well balanced';
+  const risk = pm.riskScore >= 66 ? 'moderate' : pm.riskScore >= 45 ? 'elevated' : 'high';
+  const outlook = pm.overall >= 65 ? 'positive' : pm.overall >= 45 ? 'cautiously constructive' : 'defensive';
+  return `Your portfolio is currently ${alloc}. That is ${longs} long and ${shorts} short across ${pm.n} assets. `
+       + `Market sentiment remains ${sent}. Portfolio ${conc}. Overall outlook remains ${outlook} with ${risk} risk.`;
+}
+
+function renderPortfolioSummary(pm) {
+  const card = document.getElementById('aiSummaryCard');
+  if (!card || !pm) return;
+  const conf = portfolioConfidence(pm);
+  card.innerHTML = `
+    <div class="aidash-head">
+      <h3 class="card-heading">AI Portfolio Analysis</h3>
+      <span class="ai-chip">AI</span>
+    </div>
+    <div class="aip-summary" id="aipText">${escapeHtml(portfolioSummaryText(pm))}</div>
+    <div class="aip-foot">
+      <div class="aip-conf">
+        <span class="aip-conf-l">AI Confidence</span>
+        <div class="aip-conf-track"><div class="aip-conf-fill" style="width:0%"></div></div>
+        <span class="aip-conf-v">${conf}%</span>
+      </div>
+      <div class="aip-updated">Last updated <span id="aipUpdated">just now</span></div>
+    </div>`;
+
+  requestAnimationFrame(() => {
+    const f = card.querySelector('.aip-conf-fill');
+    if (f) f.style.width = conf + '%';
+  });
+
+  AIService.ask(
+    'Write a 3-4 sentence professional analysis of this crypto portfolio: holdings and allocation, risk level, market sentiment, and current crypto trends. End with the overall outlook.',
+    { context: { coinName: 'the portfolio', portfolio: pm.summaryForAI,
+      fearGreed: pm.fg != null ? String(pm.fg) : '' },
+      localAnswer: portfolioSummaryText(pm), timeoutMs: 13_000 }
+  ).then(t => {
+    const el = document.getElementById('aipText');
+    if (el && t && t.length > 30) el.textContent = t;
+    const u = document.getElementById('aipUpdated');
+    if (u) u.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }).catch(() => {});
+}
+
+// ─── FEATURE 3: SCENARIO SIMULATOR ─────────────────────────────────
+const SCENARIOS = [
+  { k: 'btc+10', label: 'BTC +10%', m: 0.10 },
+  { k: 'btc-10', label: 'BTC -10%', m: -0.10 },
+  { k: 'btc+20', label: 'BTC +20%', m: 0.20 },
+  { k: 'btc-20', label: 'BTC -20%', m: -0.20 },
+  { k: 'crash',  label: 'Market Crash -30%', m: -0.30 },
+  { k: 'bull',   label: 'Bull Run +30%', m: 0.30 },
+];
+let _scenActive = 'btc-10';
+
+function computeScenario(pm, m) {
+  const rows = pm.holdings.map(h => {
+    const beta = ASSET_BETA[h.id] ?? 1.2;
+    const assetMove = m * beta;                       // fraction
+    const dirSign = h.dir === 'Long' ? 1 : -1;
+    const pnl = h.alloc * assetMove * dirSign;         // matches existing PnL convention
+    return { sym: h.sym, dir: h.dir, lev: h.lev, weight: h.weight,
+             assetMove: assetMove * 100, pnl };
+  });
+  const totalPnl = rows.reduce((s, r) => s + r.pnl, 0);
+  const pct = pm.capital ? totalPnl / pm.capital * 100 : 0;
+  return { rows, totalPnl, pct, newValue: pm.capital + totalPnl };
+}
+
+function renderScenarioSimulator(pm) {
+  const card = document.getElementById('scenarioCard');
+  if (!card || !pm) return;
+  card.style.display = 'block';
+
+  const chips = SCENARIOS.map(s => {
+    const r = computeScenario(pm, s.m);
+    const cls = r.pct >= 0 ? 'up' : 'down';
+    return `<button class="scen-chip ${cls} ${s.k === _scenActive ? 'active' : ''}" data-k="${s.k}" onclick="runScenario('${s.k}')">
+      <span class="scen-chip-l">${s.label}</span>
+      <span class="scen-chip-v ${cls}">${r.pct >= 0 ? '+' : ''}${r.pct.toFixed(1)}%</span>
+    </button>`;
+  }).join('');
+
+  card.innerHTML = `
+    <div class="aidash-head">
+      <h3 class="card-heading">Scenario Simulator <span class="heading-sub">&mdash; stress-test your portfolio</span></h3>
+    </div>
+    <div class="scen-chips">${chips}</div>
+    <div class="scen-custom">
+      <span class="scen-custom-l">Custom BTC move</span>
+      <input type="number" id="scenCustom" class="scen-custom-input" value="15" step="1" min="-90" max="200" />
+      <span class="scen-custom-pct">%</span>
+      <button class="scen-custom-btn" onclick="runScenarioCustom()">Simulate</button>
+    </div>
+    <div class="scen-detail" id="scenDetail"></div>`;
+
+  runScenario(_scenActive, pm);
+}
+
+function _renderScenarioDetail(pm, m, label) {
+  const data = computeScenario(pm, m);
+  const detail = document.getElementById('scenDetail');
+  if (!detail) return;
+  const up = data.pct >= 0;
+  const rowsHtml = data.rows.map(r => {
+    const rUp = r.pnl >= 0;
+    const mag = Math.min(100, Math.abs(r.pnl) / (pm.capital || 1) * 100 * 2.2);
+    return `<div class="scen-asset">
+      <span class="scen-asset-sym">${r.sym} <span class="scen-asset-dir ${r.dir === 'Long' ? 'long' : 'short'}">${r.dir === 'Long' ? '▲' : '▼'} ${r.lev}×</span></span>
+      <div class="scen-asset-bar"><div class="scen-asset-fill ${rUp ? 'up' : 'down'}" style="width:0%" data-w="${mag.toFixed(1)}"></div></div>
+      <span class="scen-asset-pnl ${rUp ? 'green' : 'red'}">${rUp ? '+' : ''}${fmtUSD(r.pnl)}</span>
+    </div>`;
+  }).join('');
+
+  detail.innerHTML = `
+    <div class="scen-head-row">
+      <div class="scen-headline">
+        <div class="scen-headline-l">${escapeHtml(label)} → portfolio value</div>
+        <div class="scen-headline-v ${up ? 'green' : 'red'}">${up ? '+' : ''}${data.pct.toFixed(2)}%</div>
+        <div class="scen-headline-sub">${up ? '+' : ''}${fmtUSD(data.totalPnl)} PnL &middot; new value ${fmtUSD(data.newValue)}</div>
+      </div>
+      <div class="scen-chart-wrap"><canvas id="scenChart"></canvas></div>
+    </div>
+    <div class="scen-assets">${rowsHtml}</div>
+    <div class="hub-note">Asset moves modeled from BTC shock × historical beta. PnL uses your position sizes; leverage shown per asset. Educational only.</div>`;
+
+  requestAnimationFrame(() => {
+    detail.querySelectorAll('.scen-asset-fill').forEach(el => { el.style.width = el.dataset.w + '%'; });
+  });
+  _buildScenarioChart(data);
+}
+
+function _buildScenarioChart(data) {
+  const ctx = document.getElementById('scenChart');
+  if (!ctx || typeof Chart === 'undefined') return;
+  if (_pfCharts.scenario) { try { _pfCharts.scenario.destroy(); } catch (e) {} }
+  _pfCharts.scenario = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: data.rows.map(r => r.sym),
+      datasets: [{
+        data: data.rows.map(r => +r.pnl.toFixed(2)),
+        backgroundColor: data.rows.map(r => r.pnl >= 0 ? 'rgba(0,230,118,0.7)' : 'rgba(255,82,82,0.7)'),
+        borderColor: data.rows.map(r => r.pnl >= 0 ? '#00E676' : '#FF5252'),
+        borderWidth: 1, borderRadius: 4,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 600 },
+      plugins: { legend: { display: false },
+        tooltip: { callbacks: { label: c => ` PnL: ${c.parsed.y >= 0 ? '+' : ''}$${c.parsed.y.toFixed(2)}` } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { color: '#6D85B0', font: { size: 10 } } },
+        y: { grid: { color: 'rgba(42,58,92,0.4)' }, ticks: { color: '#6D85B0', font: { size: 10 },
+          callback: v => '$' + v } },
+      },
+    },
+  });
+}
+
+function runScenario(key, pm) {
+  pm = pm || state.portfolio; if (!pm) return;
+  const s = SCENARIOS.find(x => x.k === key); if (!s) return;
+  _scenActive = key;
+  document.querySelectorAll('.scen-chip').forEach(c => c.classList.toggle('active', c.dataset.k === key));
+  _renderScenarioDetail(pm, s.m, s.label);
+}
+
+function runScenarioCustom() {
+  const pm = state.portfolio; if (!pm) return;
+  const v = parseFloat(document.getElementById('scenCustom')?.value);
+  if (!isFinite(v)) return;
+  _scenActive = 'custom';
+  document.querySelectorAll('.scen-chip').forEach(c => c.classList.remove('active'));
+  _renderScenarioDetail(pm, v / 100, `Custom BTC ${v >= 0 ? '+' : ''}${v}%`);
+}
+
+// ─── FEATURE 4: REBALANCING RECOMMENDATIONS ────────────────────────
+function suggestRebalance(pm) {
+  const cap = 0.40; // soft ceiling on any single asset
+  const w = pm.holdings.map(h => ({ sym: h.sym, id: h.id, dir: h.dir, cur: h.weight, vol: h.vol, tgt: h.weight }));
+  for (let iter = 0; iter < 8; iter++) {
+    let excess = 0;
+    w.forEach(x => { if (x.tgt > cap) { excess += x.tgt - cap; x.tgt = cap; } });
+    const room = w.filter(x => x.tgt < cap - 1e-6);
+    if (excess <= 1e-6 || !room.length) break;
+    const invVol = room.map(x => 1 / Math.max(4, x.vol)); // favor calmer assets
+    const sumInv = invVol.reduce((a, b) => a + b, 0) || 1;
+    room.forEach((x, i) => { x.tgt = Math.min(cap, x.tgt + excess * invVol[i] / sumInv); });
+  }
+  const sum = w.reduce((s, x) => s + x.tgt, 0) || 1;
+  w.forEach(x => { x.tgt /= sum; });
+
+  const newHHI = w.reduce((s, x) => s + x.tgt * x.tgt, 0);
+  const riskRed = pm.hhi > 0 ? Math.max(0, Math.round((pm.hhi - newHHI) / pm.hhi * 100)) : 0;
+  // Diversification proxy on the new weights, comparable to buildPortfolioModel.
+  const n = w.length, idealHHI = 1 / n;
+  const newDiv = clamp(Math.round((1 - (newHHI - idealHHI) / (1 - idealHHI)) * 80 + Math.min(20, (n - 1) * 7)), 0, 100);
+  const divImprove = Math.max(0, newDiv - pm.divScore);
+  const changed = w.some(x => Math.abs(x.tgt - x.cur) >= 0.02);
+  return {
+    rows: w.map(x => ({ sym: x.sym, dir: x.dir, cur: Math.round(x.cur * 100), tgt: Math.round(x.tgt * 100) })),
+    newHHI: +newHHI.toFixed(3), riskRed, newDiv, divImprove, changed,
+  };
+}
+
+function rebalanceText(pm, rb) {
+  if (!rb.changed) {
+    return 'Your allocation is already well balanced — no single position dominates the book. Maintain current weights and keep stops in place.';
+  }
+  const top = pm.holdings[0];
+  const cut = rb.rows.find(r => r.sym === top.sym);
+  const reduce = cut ? cut.cur - cut.tgt : 0;
+  return `Reducing ${top.sym} exposure by ${Math.max(1, reduce)}% may decrease concentration risk `
+       + `while improving diversification by ${rb.divImprove || 'a few'} points. `
+       + `Redistribute toward your lower-volatility positions to lower overall portfolio risk by ~${rb.riskRed}%.`;
+}
+
+function renderRebalanceEngine(pm) {
+  const card = document.getElementById('rebalanceCard');
+  if (!card || !pm) return;
+  card.style.display = 'block';
+  const rb = suggestRebalance(pm);
+
+  const rowsHtml = rb.rows.map(r => {
+    const delta = r.tgt - r.cur;
+    const dc = delta > 0 ? 'green' : delta < 0 ? 'red' : '';
+    return `<div class="reb-row">
+      <span class="reb-sym">${r.sym}<span class="reb-dir ${r.dir === 'Long' ? 'long' : 'short'}">${r.dir === 'Long' ? '▲' : '▼'}</span></span>
+      <span class="reb-cur">${r.cur}%</span>
+      <span class="reb-arrow">→</span>
+      <span class="reb-tgt accent">${r.tgt}%</span>
+      <span class="reb-delta ${dc}">${delta > 0 ? '+' : ''}${delta}%</span>
+    </div>`;
+  }).join('');
+
+  card.innerHTML = `
+    <div class="aidash-head">
+      <h3 class="card-heading">AI Rebalancing Engine <span class="heading-sub">&mdash; concentration &amp; risk optimization</span></h3>
+    </div>
+    <div class="reb-grid">
+      <div class="reb-chart-col">
+        <div class="reb-chart-title">Current</div>
+        <div class="reb-chart-wrap"><canvas id="rebalCurChart"></canvas></div>
+      </div>
+      <div class="reb-chart-col">
+        <div class="reb-chart-title">Suggested</div>
+        <div class="reb-chart-wrap"><canvas id="rebalSugChart"></canvas></div>
+      </div>
+      <div class="reb-table">
+        <div class="reb-row reb-head"><span>Asset</span><span>Now</span><span></span><span>Target</span><span>Δ</span></div>
+        ${rowsHtml}
+      </div>
+    </div>
+    <div class="reb-metrics">
+      <div class="reb-metric"><div class="reb-metric-v green">−${rb.riskRed}%</div><div class="reb-metric-l">Expected Risk Reduction</div></div>
+      <div class="reb-metric"><div class="reb-metric-v accent">+${rb.divImprove}</div><div class="reb-metric-l">Diversification Improvement</div></div>
+      <div class="reb-metric"><div class="reb-metric-v">${Math.round(pm.maxWeight * 100)}% → ${Math.max(...rb.rows.map(r => r.tgt))}%</div><div class="reb-metric-l">Top Position Weight</div></div>
+    </div>
+    <div class="reb-ai" id="rebAi"><span class="ph-ai-badge">AI</span><span id="rebAiText">${escapeHtml(rebalanceText(pm, rb))}</span></div>`;
+
+  _buildDonut('rebalCurChart', 'rebalCur', rb.rows.map(r => r.sym), rb.rows.map(r => r.cur));
+  _buildDonut('rebalSugChart', 'rebalSug', rb.rows.map(r => r.sym), rb.rows.map(r => r.tgt));
+
+  AIService.ask(
+    'In 2 sentences, advise how to rebalance this crypto portfolio to reduce concentration and improve diversification. Reference the largest position.',
+    { context: { coinName: 'the portfolio', portfolio: pm.summaryForAI },
+      localAnswer: rebalanceText(pm, rb), timeoutMs: 12_000 }
+  ).then(t => {
+    const el = document.getElementById('rebAiText');
+    if (el && t && t.length > 20) el.textContent = t;
+  }).catch(() => {});
+}
+
+const _DONUT_COLORS = ['#4F8CFF', '#8B5CF6', '#00D4FF', '#00E676', '#FFB800', '#FF5252', '#FF8A65', '#26C6DA'];
+function _buildDonut(canvasId, key, labels, values) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx || typeof Chart === 'undefined') return;
+  if (_pfCharts[key]) { try { _pfCharts[key].destroy(); } catch (e) {} }
+  _pfCharts[key] = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{ data: values, backgroundColor: labels.map((_, i) => _DONUT_COLORS[i % _DONUT_COLORS.length]),
+        borderColor: '#131A2A', borderWidth: 2 }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '62%',
+      animation: { duration: 700 },
+      plugins: {
+        legend: { position: 'bottom', labels: { color: '#6D85B0', font: { size: 10 }, boxWidth: 10, padding: 6 } },
+        tooltip: { callbacks: { label: c => ` ${c.label}: ${c.parsed}%` } },
+      },
+    },
+  });
+}
+
+// ─── FEATURE 5: DAILY AI BRIEFING ──────────────────────────────────
+let _briefingTimer = null;
+let _briefingLoading = false;
+
+function _miniTrend(prices, chg24) {
+  if (!prices || prices.length < 30) return chg24 >= 1 ? 'Bullish' : chg24 <= -1 ? 'Bearish' : 'Neutral';
+  const rsi = calcRSI(prices); const { macdLine, signalLine } = calcMACD(prices);
+  const r = rsi[rsi.length - 1];
+  const macdBull = macdLine[macdLine.length - 1] > signalLine[signalLine.length - 1];
+  let s = 0;
+  if (r > 55) s++; else if (r < 45) s--;
+  if (macdBull) s++; else s--;
+  if (chg24 > 1.5) s++; else if (chg24 < -1.5) s--;
+  return s >= 1 ? 'Bullish' : s <= -1 ? 'Bearish' : 'Neutral';
+}
+
+async function loadDailyBriefing(force) {
+  const body = document.getElementById('briefingBody');
+  if (!body || _briefingLoading) return;
+  if (!force && state.briefing && Date.now() - state.briefing.ts < 8 * 60_000) {
+    renderDailyBriefing(state.briefing); return;
+  }
+  _briefingLoading = true;
+  try {
+    const ids = Object.keys(COINS).join(',');
+    const url = `${BASE}/coins/markets?vs_currency=usd&ids=${ids}&sparkline=true&price_change_percentage=24h`;
+    const [markets, fgRaw] = await Promise.all([
+      apiFetch(url, 'mkts-spark', 5 * 60_000),
+      fetchFearGreed().catch(() => null),
+    ]);
+
+    const byChg = [...markets].sort((a, b) =>
+      (b.price_change_percentage_24h || 0) - (a.price_change_percentage_24h || 0));
+    const gainers = byChg.slice(0, 3).map(c => ({ sym: (c.symbol || '').toUpperCase(), chg: c.price_change_percentage_24h || 0 }));
+    const losers = byChg.slice(-3).reverse().map(c => ({ sym: (c.symbol || '').toUpperCase(), chg: c.price_change_percentage_24h || 0 }));
+
+    const btc = markets.find(c => c.id === 'bitcoin');
+    const eth = markets.find(c => c.id === 'ethereum');
+    const btcTrend = btc ? _miniTrend(btc.sparkline_in_7d?.price, btc.price_change_percentage_24h || 0) : 'Neutral';
+    const ethTrend = eth ? _miniTrend(eth.sparkline_in_7d?.price, eth.price_change_percentage_24h || 0) : 'Neutral';
+
+    const fg = fgRaw?.data?.[0] || null;
+    const fgVal = fg ? parseInt(fg.value) : null;
+    const fgClass = fg ? fg.value_classification : null;
+
+    state.briefing = { gainers, losers, btcTrend, ethTrend, fgVal, fgClass,
+      btcChg: btc?.price_change_percentage_24h || 0, ethChg: eth?.price_change_percentage_24h || 0, ts: Date.now() };
+    renderDailyBriefing(state.briefing);
+  } catch (e) {
+    body.innerHTML = `<div class="briefing-err">Market briefing unavailable right now. ${escapeHtml(e.message || '')}</div>`;
+  } finally {
+    _briefingLoading = false;
+  }
+}
+
+function briefingOutlookText(b) {
+  const sent = b.fgClass || 'neutral';
+  const lead = (b.btcTrend === 'Bullish' && b.ethTrend !== 'Bearish')
+    ? 'Market structure remains constructive, with momentum favoring major assets.'
+    : (b.btcTrend === 'Bearish')
+    ? 'Market structure is under pressure; majors are showing weakness and caution is warranted.'
+    : 'Market structure is mixed, with majors consolidating and no clear directional conviction.';
+  const alt = b.gainers[0] ? ` ${b.gainers[0].sym} leads today (+${b.gainers[0].chg.toFixed(1)}%)` : '';
+  return `${lead} Sentiment reads ${sent}.${alt}. Manage risk and avoid over-leverage into volatility.`;
+}
+
+function renderDailyBriefing(b) {
+  const body = document.getElementById('briefingBody');
+  if (!body) return;
+  const trendCls = t => t === 'Bullish' ? 'green' : t === 'Bearish' ? 'red' : 'gold';
+  const fgCls = b.fgVal == null ? 'gold' : b.fgVal <= 44 ? 'red' : b.fgVal <= 55 ? 'gold' : 'green';
+  const mvr = list => list.map(g =>
+    `<span class="brief-mv ${g.chg >= 0 ? 'green' : 'red'}">${g.sym} ${g.chg >= 0 ? '+' : ''}${g.chg.toFixed(1)}%</span>`).join('');
+
+  body.innerHTML = `
+    <div class="brief-grid">
+      <div class="brief-stat"><div class="brief-stat-l">BTC Trend</div><div class="brief-stat-v ${trendCls(b.btcTrend)}">${b.btcTrend}</div><div class="brief-stat-s">${b.btcChg >= 0 ? '+' : ''}${b.btcChg.toFixed(1)}% 24h</div></div>
+      <div class="brief-stat"><div class="brief-stat-l">ETH Trend</div><div class="brief-stat-v ${trendCls(b.ethTrend)}">${b.ethTrend}</div><div class="brief-stat-s">${b.ethChg >= 0 ? '+' : ''}${b.ethChg.toFixed(1)}% 24h</div></div>
+      <div class="brief-stat"><div class="brief-stat-l">Market Sentiment</div><div class="brief-stat-v ${fgCls}">${b.fgClass || '—'}</div><div class="brief-stat-s">Fear &amp; Greed ${b.fgVal != null ? b.fgVal : '—'}</div></div>
+      <div class="brief-stat"><div class="brief-stat-l">Fear &amp; Greed</div><div class="brief-stat-gauge"><div class="brief-gauge-fill ${fgCls}" style="width:${b.fgVal != null ? b.fgVal : 50}%"></div></div><div class="brief-stat-s">${b.fgVal != null ? b.fgVal + ' / 100' : '—'}</div></div>
+    </div>
+    <div class="brief-movers">
+      <div class="brief-mv-row"><span class="brief-mv-l">Top Gainers</span><div class="brief-mv-list">${mvr(b.gainers)}</div></div>
+      <div class="brief-mv-row"><span class="brief-mv-l">Top Losers</span><div class="brief-mv-list">${mvr(b.losers)}</div></div>
+    </div>
+    <div class="brief-outlook">
+      <div class="brief-outlook-head"><span class="ph-ai-badge">AI</span> AI Market Outlook</div>
+      <div class="brief-outlook-text" id="briefOutlook">${escapeHtml(briefingOutlookText(b))}</div>
+    </div>`;
+
+  AIService.ask(
+    'Give a 2-3 sentence crypto market outlook for today based on the BTC/ETH trends and sentiment provided. Be specific and end with a risk reminder.',
+    { context: { coinName: 'the crypto market',
+        fearGreed: b.fgVal != null ? `${b.fgVal} (${b.fgClass})` : '',
+        forecast: `BTC ${b.btcTrend}, ETH ${b.ethTrend}` },
+      localAnswer: briefingOutlookText(b), timeoutMs: 12_000 }
+  ).then(t => {
+    const el = document.getElementById('briefOutlook');
+    if (el && t && t.length > 25) el.textContent = t;
+  }).catch(() => {});
+}
+
+// ─── FEATURE 6: FLOATING AI MARKET COPILOT ─────────────────────────
+function copilotToggle() {
+  const c = document.getElementById('copilot');
+  if (!c) return;
+  c.classList.toggle('open');
+  if (c.classList.contains('open')) {
+    const i = document.getElementById('copilotInput');
+    if (i) setTimeout(() => i.focus(), 60);
+  }
+}
+
+function copilotAddMsg(text, isUser) {
+  const box = document.getElementById('copilotMessages');
+  if (!box) return null;
+  const div = document.createElement('div');
+  div.className = `copilot-msg ${isUser ? 'user' : 'assistant'}`;
+  div.innerHTML = `<div class="copilot-bubble">${escapeHtml(text)}</div>`;
+  box.appendChild(div);
+  box.scrollTop = box.scrollHeight;
+  return div;
+}
+
+async function copilotSend(preset, coinHint) {
+  const input = document.getElementById('copilotInput');
+  const msg = (preset != null ? preset : (input ? input.value.trim() : '')) || '';
+  if (!msg) return;
+  if (!preset && input) input.value = '';
+  copilotAddMsg(msg, true);
+
+  const box = document.getElementById('copilotMessages');
+  const load = document.createElement('div');
+  load.className = 'copilot-msg assistant';
+  load.innerHTML = '<div class="copilot-bubble"><span class="copilot-typing"><i></i><i></i><i></i></span></div>';
+  if (box) { box.appendChild(load); box.scrollTop = box.scrollHeight; }
+
+  try {
+    const ctx = await AIService.gatherContext(coinHint);
+    const reply = await AIService.ask(msg, { context: ctx });
+    load.remove();
+    copilotAddMsg(reply, false);
+  } catch (e) {
+    load.remove();
+    copilotAddMsg('I had trouble reaching the AI service. Try again, or ask about a specific indicator like RSI, MACD or funding rates.', false);
+  }
+}
+
+function copilotQuick(label) {
+  const map = {
+    'Analyze BTC':      ['Give a concise trading analysis of BTC right now using the live data — trend, momentum, key risk.', 'bitcoin'],
+    'Analyze ETH':      ['Give a concise trading analysis of ETH right now using the live data — trend, momentum, key risk.', 'ethereum'],
+    'Portfolio Review': ['Review my current portfolio: concentration, risk, leverage and what to watch.', null],
+    'Market Summary':   ['Summarize current crypto market conditions, sentiment and momentum.', null],
+    'Explain Signal':   ['Explain the current technical signal for this asset and what it means for a trader.', null],
+    'Funding Analysis': ['Explain the current funding rate and open interest and what they imply for positioning.', null],
+  };
+  const entry = map[label] || [label, null];
+  const c = document.getElementById('copilot');
+  if (c && !c.classList.contains('open')) c.classList.add('open');
+  copilotSend(entry[0], entry[1]);
 }
 

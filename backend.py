@@ -627,6 +627,101 @@ def _rule_based_response(message: str, context: dict) -> str | None:
     return None
 
 
+# ── HF Inference model cascade (free serverless tier) ──────────────
+# Tried in order; first one that responds wins. 7B models give the richest
+# answers but may be cold/unavailable on the free tier — we fall back to the
+# smaller instruct model and finally to the rule-based KB so chat never dies.
+_HF_CHAT_MODELS = [
+    "Qwen/Qwen2.5-7B-Instruct",
+    "mistralai/Mistral-7B-Instruct-v0.3",
+    "microsoft/Phi-4-mini-instruct",
+    "Qwen/Qwen2.5-0.5B-Instruct",
+]
+
+
+def _fmt_num(v):
+    try:
+        return f"{float(v):,.0f}"
+    except (TypeError, ValueError):
+        return None
+
+
+def _build_system_prompt(context: dict) -> str:
+    """Inject the live platform data the frontend collected into the prompt."""
+    coin = context.get("coinName") or "the crypto market"
+    lines = [
+        "You are FutureX AI, an expert crypto futures trading assistant.",
+        "Answer using the LIVE platform data below. Be concise (under 130 words),",
+        "specific, and practical. Always mention risk. This is educational analysis,",
+        "not financial advice — never tell the user to definitively buy or sell.",
+        f"Asset in focus: {coin}.",
+    ]
+    data = []
+    price = context.get("currentPrice")
+    if price:
+        try:
+            data.append(f"Price ${float(price):,.2f}")
+        except (TypeError, ValueError):
+            pass
+    if context.get("rsi") is not None:
+        data.append(f"RSI(14) {context['rsi']}")
+    if context.get("macd"):
+        data.append(f"MACD {context['macd']}")
+    if context.get("trend"):
+        data.append(f"Trend {context['trend']}")
+    if context.get("techScore") is not None:
+        data.append(f"Tech score {context['techScore']}/100")
+    fr = context.get("funding")
+    if fr is not None:
+        try:
+            data.append(f"Funding {float(fr) * 100:.4f}%")
+        except (TypeError, ValueError):
+            pass
+    oi = _fmt_num(context.get("openInterest"))
+    if oi:
+        data.append(f"Open interest ${oi}")
+    if context.get("lsRatio") is not None:
+        data.append(f"Long/Short ratio {context['lsRatio']}")
+    if context.get("marketBias"):
+        data.append(f"Futures bias {context['marketBias']}")
+    if context.get("fearGreed"):
+        data.append(f"Fear&Greed {context['fearGreed']}")
+    if context.get("forecast"):
+        data.append(f"7d forecast {context['forecast']}")
+    if context.get("portfolio"):
+        data.append(f"User portfolio: {context['portfolio']}")
+    if data:
+        lines.append("LIVE DATA — " + "; ".join(data) + ".")
+    return " ".join(lines)
+
+
+def _format_prompt(model: str, system: str, user: str) -> str:
+    """Each instruct family expects its own chat template."""
+    m = model.lower()
+    if "qwen" in m:
+        return (f"<|im_start|>system\n{system}<|im_end|>\n"
+                f"<|im_start|>user\n{user}<|im_end|>\n<|im_start|>assistant\n")
+    if "mistral" in m:
+        return f"<s>[INST] {system}\n\n{user} [/INST]"
+    if "phi" in m:
+        return f"<|system|>{system}<|end|><|user|>{user}<|end|><|assistant|>"
+    return f"{system}\n\nUser: {user}\nAssistant:"
+
+
+def _clean_llm_text(text: str) -> str:
+    """Strip chat-template artifacts a model may echo back."""
+    if not text:
+        return ""
+    for tok in ("<|im_end|>", "<|im_start|>", "<|end|>", "<|system|>",
+                "<|user|>", "<|assistant|>", "[/INST]", "[INST]", "</s>", "<s>"):
+        text = text.replace(tok, " ")
+    # Some models continue with a fresh turn — keep only the first one.
+    for cut in ("\nUser:", "\nUSER:", "<|"):
+        if cut in text:
+            text = text.split(cut)[0]
+    return text.strip()
+
+
 @app.post("/chat")
 async def chat(body: dict):
     message = (body.get("message") or "").strip()
@@ -635,49 +730,55 @@ async def chat(body: dict):
     if not message:
         return {"response": "Please send a message."}
 
-    # Try rule-based first
     rule_resp = _rule_based_response(message, context)
-    if rule_resp:
-        return {"response": rule_resp}
 
-    # Try HF Inference API (Qwen2.5-0.5B-Instruct)
+    # Portfolio / outlook / scenario questions benefit from the LLM even when a
+    # KB keyword matches — let those reach the model; pure definitions short-circuit.
+    msg_lower = message.lower()
+    wants_llm = any(k in msg_lower for k in (
+        "portfolio", "rebalance", "outlook", "summary", "summar", "review",
+        "should i", "what happens", "drop", "crash", "risky", "diversif",
+        "analyze", "analyse", "my ", "overall", "right now",
+    ))
+    if rule_resp and not wants_llm:
+        return {"response": rule_resp, "source": "kb"}
+
     hf_token = os.environ.get("HF_TOKEN", "")
     if hf_token:
-        coin_name = context.get("coinName", "cryptocurrency")
-        price = context.get("currentPrice")
-        system_prompt = (
-            f"You are a concise crypto trading assistant. "
-            f"Current coin: {coin_name}."
-            + (f" Current price: ${price:,.2f}." if price else "")
-            + " Keep answers under 120 words. Focus on trading concepts and risk management."
-        )
-        prompt = f"<|system|>{system_prompt}<|end|><|user|>{message}<|end|><|assistant|>"
+        system_prompt = _build_system_prompt(context)
         try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                r = await client.post(
-                    "https://api-inference.huggingface.co/models/Qwen/Qwen2.5-0.5B-Instruct",
-                    headers={"Authorization": f"Bearer {hf_token}"},
-                    json={
-                        "inputs": prompt,
-                        "parameters": {
-                            "max_new_tokens": 150,
-                            "temperature": 0.7,
-                            "do_sample": True,
-                            "return_full_text": False,
-                        },
-                    },
-                )
-                if r.status_code == 200:
-                    resp_json = r.json()
-                    if isinstance(resp_json, list) and resp_json:
-                        text = resp_json[0].get("generated_text", "").strip()
-                        # Clean up any repeated prompt artifacts
-                        if "<|" in text:
-                            text = text.split("<|")[0].strip()
-                        if text:
-                            return {"response": text}
+            async with httpx.AsyncClient(timeout=18.0) as client:
+                for model in _HF_CHAT_MODELS:
+                    try:
+                        r = await client.post(
+                            f"https://api-inference.huggingface.co/models/{model}",
+                            headers={"Authorization": f"Bearer {hf_token}"},
+                            json={
+                                "inputs": _format_prompt(model, system_prompt, message),
+                                "parameters": {
+                                    "max_new_tokens": 220,
+                                    "temperature": 0.6,
+                                    "top_p": 0.9,
+                                    "do_sample": True,
+                                    "return_full_text": False,
+                                },
+                                "options": {"wait_for_model": False},
+                            },
+                        )
+                        if r.status_code == 200:
+                            resp_json = r.json()
+                            if isinstance(resp_json, list) and resp_json:
+                                text = _clean_llm_text(resp_json[0].get("generated_text", ""))
+                                if text:
+                                    return {"response": text, "source": "llm", "model": model}
+                        # 503 = model loading, 404 = unavailable → try the next one.
+                    except Exception:
+                        continue
         except Exception:
             pass
+
+    if rule_resp:
+        return {"response": rule_resp, "source": "kb"}
 
     # Generic fallback
     return {
@@ -685,7 +786,8 @@ async def chat(body: dict):
             "I can help explain crypto trading concepts! Try asking me about: "
             "RSI, MACD, Bollinger Bands, funding rates, open interest, "
             "long/short squeeze, ATR, VWAP, support and resistance levels."
-        )
+        ),
+        "source": "fallback",
     }
 
 

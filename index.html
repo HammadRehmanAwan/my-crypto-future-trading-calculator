@@ -405,6 +405,17 @@
 
   </div>
 
+  <!-- Daily AI Briefing (market-wide, loads on tab open + refreshes) -->
+  <div class="card briefing-card" id="dashBriefingCard">
+    <div class="aidash-head">
+      <h3 class="card-heading">Daily AI Briefing <span class="heading-sub">&mdash; live market pulse</span></h3>
+      <span class="ai-chip">AI</span>
+    </div>
+    <div class="briefing-body" id="briefingBody">
+      <div class="hub-card-loader"><div class="spin"></div><span>Loading today&rsquo;s market briefing&hellip;</span></div>
+    </div>
+  </div>
+
   <!-- Loader -->
   <div class="dash-loader" id="dashLoader" style="display:none">
     <div class="spin"></div>
@@ -424,6 +435,14 @@
   <!-- Error -->
   <div class="dash-error" id="dashError" style="display:none"></div>
 
+  <!-- Portfolio Intelligence — appears once an analysis builds the portfolio -->
+  <div id="dashIntel" style="display:none">
+    <!-- Feature 1: Portfolio Health Score -->
+    <div class="card health-card" id="healthCard"></div>
+    <!-- Feature 2: AI Portfolio Analysis -->
+    <div class="card aip-card" id="aiSummaryCard"></div>
+  </div>
+
   <!-- Results -->
   <div id="dashResults" style="display:none">
     <div class="card dash-summary-card">
@@ -432,6 +451,12 @@
     </div>
     <div class="dash-trades-grid" id="dashTradesGrid"></div>
   </div>
+
+  <!-- Feature 3: Scenario Simulator -->
+  <div class="card scenario-card" id="scenarioCard" style="display:none"></div>
+
+  <!-- Feature 4: Rebalancing Recommendations -->
+  <div class="card rebalance-card" id="rebalanceCard" style="display:none"></div>
 
   <div class="dash-disclaimer">Signals are based on technical analysis and statistical forecasting. For educational purposes only &mdash; not financial advice.</div>
 </section>
@@ -623,6 +648,35 @@
     <span class="bn-ico">&#127891;</span><span class="bn-lbl">Learn</span>
   </button>
 </nav>
+
+<!-- ─── FLOATING AI MARKET COPILOT (global) ─── -->
+<div class="copilot" id="copilot">
+  <button class="copilot-fab" id="copilotFab" onclick="copilotToggle()" aria-label="Open AI Market Copilot">
+    <span class="copilot-fab-ico">&#129302;</span>
+    <span class="copilot-fab-lbl">AI Copilot</span>
+  </button>
+  <div class="copilot-panel" id="copilotPanel" role="dialog" aria-label="AI Market Copilot">
+    <div class="copilot-head">
+      <div class="copilot-title"><span class="copilot-dot"></span> AI Market Copilot</div>
+      <button class="copilot-close" onclick="copilotToggle()" aria-label="Minimize">&#8211;</button>
+    </div>
+    <div class="copilot-quick" id="copilotQuick">
+      <button onclick="copilotQuick('Analyze BTC')">Analyze BTC</button>
+      <button onclick="copilotQuick('Analyze ETH')">Analyze ETH</button>
+      <button onclick="copilotQuick('Portfolio Review')">Portfolio Review</button>
+      <button onclick="copilotQuick('Market Summary')">Market Summary</button>
+      <button onclick="copilotQuick('Explain Signal')">Explain Signal</button>
+      <button onclick="copilotQuick('Funding Analysis')">Funding Analysis</button>
+    </div>
+    <div class="copilot-messages" id="copilotMessages">
+      <div class="copilot-msg assistant"><div class="copilot-bubble">Hi! I&rsquo;m your AI Market Copilot. I can see live prices, indicators, funding, sentiment and your portfolio. Ask me anything &mdash; or tap a shortcut above.</div></div>
+    </div>
+    <div class="copilot-input-row">
+      <input type="text" id="copilotInput" class="copilot-input" placeholder="Ask about BTC, your portfolio, funding…" onkeydown="if(event.key==='Enter')copilotSend()" />
+      <button class="copilot-send" onclick="copilotSend()" aria-label="Send">&#10148;</button>
+    </div>
+  </div>
+</div>
 
 <footer class="footer">
   Powered by
