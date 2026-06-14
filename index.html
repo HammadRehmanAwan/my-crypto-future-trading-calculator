@@ -671,8 +671,12 @@
           <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
         </filter>
       </defs>
-      <circle class="cfa-r1" cx="48" cy="48" r="36" fill="none" stroke="url(#ag1)" stroke-width="2.5" stroke-linecap="round" filter="url(#aglow)"/>
-      <circle class="cfa-r2" cx="48" cy="48" r="43" fill="none" stroke="url(#ag2)" stroke-width="1.8" stroke-linecap="round" filter="url(#aglow)"/>
+      <circle class="cfa-r1" cx="48" cy="48" r="36" fill="none" stroke="url(#ag1)" stroke-width="2.5" stroke-linecap="round" filter="url(#aglow)" stroke-dasharray="170 56">
+        <animateTransform attributeName="transform" type="rotate" from="0 48 48" to="360 48 48" dur="3.6s" repeatCount="indefinite"/>
+      </circle>
+      <circle class="cfa-r2" cx="48" cy="48" r="43" fill="none" stroke="url(#ag2)" stroke-width="1.8" stroke-linecap="round" filter="url(#aglow)" stroke-dasharray="108 162" stroke-dashoffset="54">
+        <animateTransform attributeName="transform" type="rotate" from="360 48 48" to="0 48 48" dur="5.8s" repeatCount="indefinite"/>
+      </circle>
     </svg>
     <span class="copilot-orb"></span>
   </button>

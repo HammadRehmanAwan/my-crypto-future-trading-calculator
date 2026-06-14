@@ -4294,16 +4294,43 @@ function copilotSpeak(text, onDone) {
   if (!copilotVoice.ttsOn || !synth) { if (onDone) onDone(); return; }
   try {
     synth.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.03; u.pitch = 1.0; u.lang = 'en-US';
+    // Strip markdown noise so it doesn't get read aloud
+    const clean = text
+      .replace(/\*\*(.*?)\*\*/g, '$1').replace(/\*(.*?)\*/g, '$1')
+      .replace(/`([^`]+)`/g, '$1').replace(/#+\s/g, '')
+      .replace(/\n{2,}/g, '. ').replace(/\n/g, ', ').trim();
+
+    // Sentence chunks — prevents Chrome TTS 15-second cutoff bug
+    const sentences = clean.match(/[^.!?]+[.!?]+(?:\s|$)/g) || [clean];
+
     const vs = synth.getVoices() || [];
-    const pref = vs.find(v => /Samantha|Google US English|Aria|Jenny|Zira|Natural/i.test(v.name));
-    if (pref) u.voice = pref;
+    // Priority: Microsoft Neural (Aria/Jenny) → Google US → any en-US online voice → any en-US
+    const voice =
+      vs.find(v => /AriaNeural|JennyNeural|GuyNeural|Microsoft.*Natural/i.test(v.name)) ||
+      vs.find(v => /Google US English/i.test(v.name)) ||
+      vs.find(v => /Google.*English/i.test(v.name)) ||
+      vs.find(v => /Samantha|Aria|Jenny/i.test(v.name)) ||
+      vs.find(v => v.lang === 'en-US' && !v.localService) ||
+      vs.find(v => v.lang === 'en-US');
+
     const c = document.getElementById('copilot');
-    u.onstart = () => { if (c) c.classList.add('speaking'); };
-    u.onend   = () => { if (c) c.classList.remove('speaking'); if (onDone) onDone(); };
-    u.onerror = () => { if (c) c.classList.remove('speaking'); if (onDone) onDone(); };
-    synth.speak(u);
+    let idx = 0;
+    if (c) c.classList.add('speaking');
+
+    function next() {
+      if (idx >= sentences.length || copilotVoice.cancelled) {
+        if (c) c.classList.remove('speaking');
+        if (onDone) onDone();
+        return;
+      }
+      const u = new SpeechSynthesisUtterance(sentences[idx++].trim());
+      u.lang = 'en-US'; u.rate = 0.94; u.pitch = 1.06; u.volume = 1.0;
+      if (voice) u.voice = voice;
+      u.onend = next;
+      u.onerror = () => { if (c) c.classList.remove('speaking'); if (onDone) onDone(); };
+      synth.speak(u);
+    }
+    next();
   } catch (e) { if (onDone) onDone(); }
 }
 

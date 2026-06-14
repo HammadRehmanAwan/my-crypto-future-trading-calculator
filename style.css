@@ -2319,35 +2319,58 @@ input, select, button { font-family: inherit; }
 
 /* 3-D glass sphere */
 .copilot-orb {
-  position: relative; width: 42px; height: 42px; border-radius: 50%; z-index: 2;
+  position: relative; width: 44px; height: 44px; border-radius: 50%; z-index: 2;
   background:
-    radial-gradient(circle at 32% 26%, rgba(160,210,255,.55) 0%, rgba(80,140,255,.18) 35%, transparent 60%),
-    radial-gradient(circle at 68% 72%, rgba(180,120,255,.22) 0%, transparent 50%),
-    radial-gradient(circle at 50% 50%, #1c1450 0%, #0e0a30 45%, #060414 80%, #03020e 100%);
+    /* Primary specular highlight — simulates a light source hitting glass */
+    radial-gradient(circle at 27% 20%, rgba(255,255,255,.88) 0%, rgba(210,235,255,.45) 16%, transparent 36%),
+    /* Secondary fill light from above */
+    radial-gradient(circle at 55% 12%, rgba(130,190,255,.32) 0%, transparent 42%),
+    /* Subtle rim light on right edge */
+    radial-gradient(circle at 90% 52%, rgba(150,100,255,.28) 0%, transparent 28%),
+    /* Core depth shadow at bottom-right */
+    radial-gradient(circle at 68% 80%, rgba(0,0,30,.95) 0%, transparent 45%),
+    /* Base sphere gradient — light center to very dark edge */
+    radial-gradient(circle at 42% 38%, #2e2480 0%, #160f50 30%, #0a0730 58%, #040218 80%, #010109 100%);
   box-shadow:
-    inset 0 2px 6px  rgba(120,180,255,.22),
-    inset 0 -5px 14px rgba(0,0,40,.75),
-    0 0 0 1px rgba(90,130,255,.28),
-    0 0 28px rgba(79,140,255,.5),
-    0 0 56px rgba(139,92,246,.22),
-    0 6px 24px rgba(0,0,0,.7);
+    /* Crisp rim outline */
+    0 0 0 1px rgba(110,150,255,.35),
+    /* Coloured halo */
+    0 0 22px rgba(79,140,255,.65),
+    0 0 44px rgba(139,92,246,.30),
+    /* Natural drop shadow */
+    0 8px 32px rgba(0,0,0,.85),
+    /* Inner top-light */
+    inset 0 3px 8px rgba(160,210,255,.2),
+    /* Inner bottom-shadow for depth */
+    inset 0 -5px 14px rgba(0,0,50,.9);
   animation: orbBreath 3.8s ease-in-out infinite;
 }
-/* Glass gloss — fixed highlight, no spinning */
+/* Sharp gloss ellipse — top-left quadrant, never spins */
 .copilot-orb::after {
-  content: ''; position: absolute; top: 9%; left: 13%; width: 46%; height: 36%;
+  content: ''; position: absolute;
+  top: 7%; left: 10%; width: 52%; height: 40%;
   border-radius: 50%;
-  background: radial-gradient(ellipse at 38% 40%, rgba(255,255,255,.72) 0%, rgba(255,255,255,.12) 55%, transparent 100%);
-  filter: blur(1px); pointer-events: none;
+  background: radial-gradient(ellipse at 36% 36%,
+    rgba(255,255,255,.90) 0%,
+    rgba(235,248,255,.50) 30%,
+    rgba(180,225,255,.12) 60%,
+    transparent 100%);
+  filter: blur(1.5px); pointer-events: none;
 }
 .copilot-orb.sm {
   width: 26px; height: 26px;
-  box-shadow: inset 0 1px 4px rgba(120,180,255,.2), inset 0 -3px 8px rgba(0,0,40,.7),
-    0 0 0 1px rgba(90,130,255,.22), 0 0 14px rgba(79,140,255,.45), 0 0 28px rgba(139,92,246,.18);
+  box-shadow: 0 0 0 1px rgba(110,150,255,.3), 0 0 12px rgba(79,140,255,.5), 0 0 24px rgba(139,92,246,.22),
+    inset 0 2px 5px rgba(160,210,255,.18), inset 0 -3px 8px rgba(0,0,50,.8);
 }
 @keyframes orbBreath {
-  0%,100% { box-shadow: inset 0 2px 6px rgba(120,180,255,.22), inset 0 -5px 14px rgba(0,0,40,.75), 0 0 0 1px rgba(90,130,255,.28), 0 0 28px rgba(79,140,255,.5), 0 0 56px rgba(139,92,246,.22), 0 6px 24px rgba(0,0,0,.7); }
-  50%      { box-shadow: inset 0 2px 8px rgba(120,180,255,.32), inset 0 -5px 14px rgba(0,0,40,.75), 0 0 0 1px rgba(90,130,255,.4),  0 0 40px rgba(79,140,255,.72), 0 0 70px rgba(139,92,246,.38), 0 6px 28px rgba(0,0,0,.6); }
+  0%,100% {
+    box-shadow: 0 0 0 1px rgba(110,150,255,.35), 0 0 22px rgba(79,140,255,.65), 0 0 44px rgba(139,92,246,.30),
+      0 8px 32px rgba(0,0,0,.85), inset 0 3px 8px rgba(160,210,255,.2), inset 0 -5px 14px rgba(0,0,50,.9);
+  }
+  50% {
+    box-shadow: 0 0 0 1px rgba(110,150,255,.5), 0 0 36px rgba(79,140,255,.88), 0 0 68px rgba(139,92,246,.48),
+      0 10px 38px rgba(0,0,0,.75), inset 0 3px 10px rgba(160,210,255,.28), inset 0 -5px 14px rgba(0,0,50,.9);
+  }
 }
 
 /* Floating launcher button */
@@ -2369,21 +2392,9 @@ input, select, button { font-family: inherit; }
   width: calc(100% + 32px); height: calc(100% + 32px);
   pointer-events: none; z-index: 3; overflow: visible;
 }
-/* r=36 → C≈226  dasharray: 170 56 (≈75 % arc) */
-.cfa-r1 {
-  stroke-dasharray: 170 56;
-  transform-origin: 48px 48px;
-  animation: arcSpin1 3.6s linear infinite;
-}
-/* r=43 → C≈270  dasharray: 108 162 (≈40 % arc) */
-.cfa-r2 {
-  stroke-dasharray: 108 162;
-  stroke-dashoffset: 54;
-  transform-origin: 48px 48px;
-  animation: arcSpin2 5.8s linear infinite reverse;
-}
-@keyframes arcSpin1 { to { transform: rotate(360deg); } }
-@keyframes arcSpin2 { to { transform: rotate(360deg); } }
+/* stroke-dasharray defined in SVG attributes; rotation driven by <animateTransform> */
+.cfa-r1 { stroke-dasharray: 170 56; }
+.cfa-r2 { stroke-dasharray: 108 162; stroke-dashoffset: 54; }
 
 /* Hover */
 .copilot-fab:hover { transform: scale(1.09); }
@@ -2463,21 +2474,37 @@ input, select, button { font-family: inherit; }
 .cv-orb {
   width: 138px; height: 138px; border-radius: 50%; position: relative;
   background:
-    radial-gradient(circle at 32% 30%, #7FC0FF 0%, transparent 55%),
-    radial-gradient(circle at 70% 64%, #C887FF 0%, transparent 55%),
-    radial-gradient(circle at 50% 82%, #FF82D6 0%, transparent 50%),
-    conic-gradient(from 0deg, #4F8CFF, #8B5CF6, #00D4FF, #FF6BD6, #4F8CFF);
-  box-shadow: 0 0 60px rgba(124,80,255,.7), inset 0 0 34px rgba(255,255,255,.32);
-  animation: orbSpin 6s linear infinite, cvBreath 2.4s ease-in-out infinite;
+    radial-gradient(circle at 27% 20%, rgba(255,255,255,.82) 0%, rgba(200,230,255,.4) 18%, transparent 38%),
+    radial-gradient(circle at 55% 10%, rgba(130,190,255,.28) 0%, transparent 40%),
+    radial-gradient(circle at 88% 52%, rgba(160,100,255,.25) 0%, transparent 28%),
+    radial-gradient(circle at 65% 82%, rgba(0,0,30,.9) 0%, transparent 42%),
+    radial-gradient(circle at 42% 38%, #2e2480 0%, #160f50 30%, #0a0730 58%, #040218 82%, #010109 100%);
+  box-shadow:
+    0 0 0 2px rgba(110,150,255,.3),
+    0 0 50px rgba(124,80,255,.75),
+    0 0 90px rgba(79,140,255,.4),
+    0 16px 60px rgba(0,0,0,.8),
+    inset 0 4px 14px rgba(160,210,255,.22),
+    inset 0 -8px 22px rgba(0,0,50,.9);
+  animation: cvBreath 2.4s ease-in-out infinite;
 }
 .cv-orb::after {
-  content: ''; position: absolute; inset: 24%; border-radius: 50%;
-  background: radial-gradient(circle at 50% 40%, rgba(255,255,255,.95), rgba(255,255,255,.1) 55%, transparent 72%);
+  content: ''; position: absolute;
+  top: 7%; left: 10%; width: 52%; height: 40%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse at 36% 36%,
+    rgba(255,255,255,.88) 0%, rgba(230,248,255,.45) 32%, rgba(180,225,255,.1) 65%, transparent 100%);
   filter: blur(3px);
 }
-@keyframes cvBreath { 0%,100% { transform: scale(1); } 50% { transform: scale(1.08); } }
-.copilot.speaking .cv-orb { animation: orbSpin 4s linear infinite, cvSpeak .5s ease-in-out infinite; }
-@keyframes cvSpeak { 0%,100% { transform: scale(1); } 50% { transform: scale(1.14); } }
+@keyframes cvBreath {
+  0%,100% { transform: scale(1);    box-shadow: 0 0 0 2px rgba(110,150,255,.3), 0 0 50px rgba(124,80,255,.75), 0 0 90px rgba(79,140,255,.4), 0 16px 60px rgba(0,0,0,.8), inset 0 4px 14px rgba(160,210,255,.22), inset 0 -8px 22px rgba(0,0,50,.9); }
+  50%      { transform: scale(1.06); box-shadow: 0 0 0 2px rgba(110,150,255,.45), 0 0 70px rgba(124,80,255,.95), 0 0 120px rgba(79,140,255,.6), 0 18px 70px rgba(0,0,0,.7), inset 0 4px 16px rgba(160,210,255,.3), inset 0 -8px 22px rgba(0,0,50,.9); }
+}
+.copilot.speaking .cv-orb { animation: cvSpeak .55s ease-in-out infinite; }
+@keyframes cvSpeak {
+  0%,100% { transform: scale(1);    box-shadow: 0 0 0 2px rgba(110,150,255,.4), 0 0 55px rgba(124,80,255,.8), 0 0 95px rgba(79,140,255,.45), 0 16px 60px rgba(0,0,0,.8), inset 0 4px 14px rgba(160,210,255,.22), inset 0 -8px 22px rgba(0,0,50,.9); }
+  50%      { transform: scale(1.12); box-shadow: 0 0 0 2px rgba(139,92,246,.7), 0 0 80px rgba(139,92,246,.95), 0 0 130px rgba(124,80,255,.65), 0 20px 70px rgba(0,0,0,.7), inset 0 4px 18px rgba(190,160,255,.35), inset 0 -8px 22px rgba(0,0,50,.9); }
+}
 .cv-wave { display: flex; gap: 5px; align-items: center; height: 26px; }
 .cv-wave i { width: 4px; height: 8px; border-radius: 3px; background: linear-gradient(var(--ai), var(--primary)); animation: cvwave 1s ease-in-out infinite; }
 .cv-wave i:nth-child(2) { animation-delay: .12s; }
