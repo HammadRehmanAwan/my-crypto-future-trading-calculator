@@ -4293,11 +4293,27 @@ function copilotComposeLocal(message, ctx, report) {
   // 5b) Concept fallback — a KB term was mentioned but we lacked live data
   { const k = kbHit(); if (k) return k; }
 
-  // 6) Greeting
-  if (/^\s*(hi|hey|hello|yo|sup|gm)\b/.test(m)) {
-    return `I'm here. Ask me about any coin's structure, forecast, funding or technicals, request a portfolio review, or say something like "explain liquidation".`;
+  // 6) Greeting / social opener
+  if (/^\s*(hi|hey|hello|yo|sup|gm|good (morning|evening|afternoon)|greetings)\b/.test(m)) {
+    return `I'm Zorion — fully operational. Ask me about any coin's structure, forecast, funding, or technicals. Run a portfolio analysis and I can review concentration and rebalancing too.`;
   }
-  // 7) Context-aware fallback
+
+  // 7) Social / wellbeing questions — Zorion has a personality, not a price feed
+  if (/\b(how are you|how r u|you okay|you good|how('s| is) it going|how are things|how do you feel)\b/.test(m)) {
+    return `Systems nominal. Market data is live, indicators are computed, and I'm reading ${priceStr ? `${name} at ${priceStr}` : 'the market'}. What would you like me to analyse?`;
+  }
+
+  // 8) Capability / identity questions
+  if (/\b(what can you do|what do you do|what are you|who are you|your (capabilities|abilities|features)|help me|how can you help|what('s| is) your (purpose|function|job))\b/.test(m)) {
+    return `I'm Zorion — an AI market intelligence analyst built into FutureX. I can:\n• Read live price, RSI, MACD, Bollinger Bands for 15 assets\n• Deliver a structured analyst read with confidence score and bull/bear probability\n• Analyse funding rates, open interest and long/short positioning\n• Review your portfolio health, concentration and rebalancing targets\n• Produce statistical 7-day forecasts\n\nTry: "Analyse BTC", "ETH funding", "SOL forecast", or "review my portfolio".`;
+  }
+
+  // 9) Thank you / acknowledgements
+  if (/^\s*(thanks|thank you|thx|ty|cheers|appreciated|great|nice|good job|well done|perfect)\b/.test(m)) {
+    return `Noted. If the structure changes I'll flag it — just ask.`;
+  }
+
+  // 10) Context-aware fallback
   if (priceStr) return `${name} is near ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}. Ask me for a full read, its forecast, funding — or a portfolio review.`;
   return `I can analyse any of the 15 supported assets. Try "read BTC", "ETH forecast for 2 days", "SOL funding", or "review my portfolio".`;
 }
@@ -4371,7 +4387,14 @@ async function copilotSend(preset, coinHint, speak) {
   const load = document.createElement('div');
   load.className = 'copilot-msg assistant';
   if (box) { box.appendChild(load); box.scrollTop = box.scrollHeight; }
-  const think = startThinkingSequence(load);
+  // Skip the market-analysis thinking sequence for purely conversational turns.
+  const isConversational = /^\s*(hi|hey|hello|yo|sup|gm|how are you|how r u|thanks|thank you|thx|ty|cheers|what can you do|what do you do|who are you|what are you|help( me)?|you good|good (morning|evening|afternoon))\b/.test(msg.toLowerCase());
+  const think = isConversational
+    ? { stop() {}, _plain: true }
+    : startThinkingSequence(load);
+  if (isConversational) {
+    load.innerHTML = '<div class="copilot-bubble"><span class="copilot-typing"><i></i><i></i><i></i></span></div>';
+  }
 
   let reply, report = { analytical: false };
   try {
