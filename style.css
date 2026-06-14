@@ -2314,8 +2314,24 @@ input, select, button { font-family: inherit; }
 .brief-outlook-text { font-size: 13px; line-height: 1.6; color: var(--text); }
 .briefing-err { color: var(--text-lo); font-size: 13px; padding: 8px 0; }
 
-/* ─── FEATURE 6: Floating AI Market Copilot ─── */
-.copilot { position: fixed; right: 22px; bottom: 22px; z-index: 300; }
+/* ─── FEATURE 6: Zorion — AI Market Intelligence ─── */
+.copilot {
+  position: fixed; right: 22px; bottom: 22px; z-index: 300;
+  /* Zorion energy palette — overridden per cognitive state */
+  --zc1: #5B8CFF;       /* primary energy   */
+  --zc2: #8B5CF6;       /* secondary energy */
+  --zc-core: #CFE6FF;   /* core highlight   */
+  --zc-flow-dur: 7s;    /* energy rotation  */
+  --zc-core-dur: 3.6s;  /* core breathing   */
+  --zc-part-dur: 6s;    /* particle drift   */
+  --zc-scan-op: 0;      /* scan-ring opacity */
+}
+/* ── Cognitive states (set by zorionSetState in app.js) ── */
+.copilot.z-thinking  { --zc1:#22D3EE; --zc2:#4F8CFF; --zc-core:#DCF7FF; --zc-flow-dur:3s;   --zc-core-dur:1.5s; --zc-part-dur:3s;   --zc-scan-op:.9; }
+.copilot.z-analyzing { --zc1:#00D4FF; --zc2:#7C5CFF; --zc-core:#D6F2FF; --zc-flow-dur:2.4s; --zc-core-dur:1.7s; --zc-part-dur:2.6s; --zc-scan-op:1; }
+.copilot.z-confident { --zc1:#2BE5A6; --zc2:#FFC53D; --zc-core:#EAFFF5; --zc-flow-dur:5s;   --zc-core-dur:2.6s; --zc-part-dur:5s;   --zc-scan-op:0; }
+.copilot.z-warning   { --zc1:#FF9A3D; --zc2:#FF4D5E; --zc-core:#FFE6D6; --zc-flow-dur:2.2s; --zc-core-dur:.62s; --zc-part-dur:2.4s; --zc-scan-op:.5; }
+.copilot.z-speaking  { --zc1:#7AA8FF; --zc2:#B47BFF; --zc-core:#EAF2FF; --zc-flow-dur:3.4s; --zc-core-dur:.4s;  --zc-part-dur:3s;   --zc-scan-op:.3; }
 
 /* 3-D glass sphere */
 .copilot-orb {
@@ -2373,6 +2389,82 @@ input, select, button { font-family: inherit; }
   }
 }
 
+/* The inner .zc-gloss supplies the highlight; drop the legacy ::after gloss
+   on orbs that now carry the full layer stack (keeps the tiny .sm header orb). */
+.copilot-orb:has(.zc-sphere)::after,
+.cv-orb:has(.zc-sphere)::after { display: none; }
+
+/* ═══ ZORION AI CORE — volumetric multi-layer energy sphere ═══
+   Inner layers live inside .zc-sphere (clipped to the circle); the glow
+   halo + specular highlight read as a true 3-D glass orb with living
+   energy inside. All layers inherit colour/tempo from the --zc* vars,
+   so a single state class re-tints and re-paces the whole core. */
+.zc-sphere {
+  position: absolute; inset: 0; border-radius: 50%; overflow: hidden;
+  isolation: isolate; pointer-events: none;
+}
+/* Inner plasma core — breathes; the "soul" of the orb */
+.zc-core {
+  position: absolute; inset: 16%; border-radius: 50%;
+  background: radial-gradient(circle at 50% 44%,
+    #ffffff 0%, var(--zc-core) 24%, var(--zc1) 52%, transparent 74%);
+  filter: blur(2px); mix-blend-mode: screen;
+  animation: zcCore var(--zc-core-dur) ease-in-out infinite;
+}
+@keyframes zcCore {
+  0%,100% { transform: scale(.82); opacity: .78; }
+  50%     { transform: scale(1.1);  opacity: 1; }
+}
+/* Flowing energy — a soft conic band sweeping through the core */
+.zc-flow {
+  position: absolute; inset: -12%; border-radius: 50%; mix-blend-mode: screen;
+  background: conic-gradient(from 0deg,
+    transparent 0deg, var(--zc1) 60deg, transparent 140deg,
+    var(--zc2) 230deg, transparent 320deg);
+  filter: blur(3px); opacity: .6;
+  animation: zcSpin var(--zc-flow-dur) linear infinite;
+}
+@keyframes zcSpin { to { transform: rotate(360deg); } }
+/* Scanning ring — only visible in thinking/analyzing states */
+.zc-scan {
+  position: absolute; inset: 0; border-radius: 50%; mix-blend-mode: screen;
+  background: conic-gradient(from 0deg,
+    transparent 0deg, rgba(255,255,255,.75) 16deg, transparent 52deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent 56%, #000 60%);
+          mask: radial-gradient(farthest-side, transparent 56%, #000 60%);
+  opacity: var(--zc-scan-op); transition: opacity .4s ease;
+  animation: zcSpin 2.1s linear infinite;
+}
+/* Floating particles drifting inside the glass */
+.zc-particles { position: absolute; inset: 0; }
+.zc-particles i {
+  position: absolute; width: 7.5%; height: 7.5%; border-radius: 50%;
+  background: radial-gradient(circle, #fff 0%, var(--zc-core) 55%, transparent 78%);
+  box-shadow: 0 0 6px var(--zc1); mix-blend-mode: screen; opacity: .9;
+  animation: zcFloat var(--zc-part-dur) ease-in-out infinite;
+}
+.zc-particles i:nth-child(1) { left: 28%; top: 30%; animation-delay: 0s;    }
+.zc-particles i:nth-child(2) { left: 62%; top: 26%; animation-delay: -.9s; width: 5.5%; height: 5.5%; }
+.zc-particles i:nth-child(3) { left: 46%; top: 58%; animation-delay: -1.8s; }
+.zc-particles i:nth-child(4) { left: 70%; top: 60%; animation-delay: -2.6s; width: 5%;  height: 5%;  }
+.zc-particles i:nth-child(5) { left: 34%; top: 66%; animation-delay: -3.4s; width: 6%;  height: 6%;  }
+.zc-particles i:nth-child(6) { left: 54%; top: 40%; animation-delay: -4.2s; width: 4.5%; height: 4.5%; }
+.zc-particles i:nth-child(7) { left: 40%; top: 44%; animation-delay: -1.2s; width: 5%;  height: 5%;  }
+.zc-particles i:nth-child(8) { left: 64%; top: 48%; animation-delay: -3.0s; width: 4%;  height: 4%;  }
+@keyframes zcFloat {
+  0%,100% { transform: translate(0,0) scale(1);     opacity: .55; }
+  25%     { transform: translate(14%,-10%) scale(1.2); opacity: 1; }
+  50%     { transform: translate(-8%,8%) scale(.85);  opacity: .7; }
+  75%     { transform: translate(-12%,-6%) scale(1.1); opacity: .95; }
+}
+/* Specular glass highlight — fixed, sells the 3-D read */
+.zc-gloss {
+  position: absolute; top: 7%; left: 11%; width: 52%; height: 40%; border-radius: 50%;
+  background: radial-gradient(ellipse at 36% 36%,
+    rgba(255,255,255,.92) 0%, rgba(225,242,255,.4) 42%, transparent 76%);
+  filter: blur(1px);
+}
+
 /* Floating launcher button */
 .copilot-fab {
   position: relative; width: 64px; height: 64px; padding: 0; border: none; border-radius: 50%;
@@ -2396,12 +2488,17 @@ input, select, button { font-family: inherit; }
 .cfa-r1 { stroke-dasharray: 170 56; }
 .cfa-r2 { stroke-dasharray: 108 162; stroke-dashoffset: 54; }
 
-/* Hover */
-.copilot-fab:hover { transform: scale(1.09); }
-.copilot-fab:hover .copilot-orb { filter: brightness(1.18) saturate(1.25); }
+/* Hover — magnetic attraction + energy surge */
+.copilot-fab { transition: transform .3s cubic-bezier(.34,1.56,.64,1), box-shadow .3s ease; }
+.copilot-fab:hover {
+  transform: scale(1.1) translateY(-2px);
+  box-shadow: 0 14px 44px rgba(79,140,255,.5), 0 0 40px rgba(139,92,246,.4), 0 2px 8px rgba(0,0,0,.7);
+}
+.copilot-fab:hover .copilot-orb { filter: brightness(1.22) saturate(1.35); }
+.copilot-fab:hover .zc-core { animation-duration: 1.3s; }
 .copilot-fab:hover .cfa-r1 { animation-duration: 1.8s; }
 .copilot-fab:hover .cfa-r2 { animation-duration: 2.9s; }
-.copilot-fab:active { transform: scale(1.02); }
+.copilot-fab:active { transform: scale(1.03); }
 .copilot.open .copilot-fab { display: none; }
 
 /* Glass panel */
@@ -2437,26 +2534,82 @@ input, select, button { font-family: inherit; }
 .copilot-quick { display: flex; gap: 7px; flex-wrap: wrap; padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,.05); }
 .copilot-quick button {
   padding: 6px 12px; font-size: 11.5px; font-weight: 600; cursor: pointer; color: var(--text);
-  background: rgba(255,255,255,.04); border: 1px solid var(--border2); border-radius: 20px; transition: all .15s;
+  background: rgba(255,255,255,.04); border: 1px solid var(--border2); border-radius: 20px;
+  transition: transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s, background .2s, color .2s, border-color .2s;
 }
 .copilot-quick button:hover {
-  color: #fff; border-color: transparent;
-  background: linear-gradient(135deg, rgba(139,92,246,.5), rgba(79,140,255,.5));
-  box-shadow: 0 4px 14px rgba(124,80,255,.35);
+  color: #fff; border-color: transparent; transform: translateY(-2px);
+  background: linear-gradient(135deg, rgba(139,92,246,.55), rgba(79,140,255,.55));
+  box-shadow: 0 6px 18px rgba(124,80,255,.4);
 }
+.copilot-quick button:active { transform: translateY(0) scale(.96); }
 
-.copilot-messages { flex: 1; overflow-y: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 11px; }
-.copilot-msg { display: flex; }
+.copilot-messages { flex: 1; overflow-y: auto; padding: 16px 14px; display: flex; flex-direction: column; gap: 13px; }
+.copilot-msg { display: flex; animation: zMsgIn .42s cubic-bezier(.22,1,.36,1) both; }
 .copilot-msg.user { justify-content: flex-end; }
-.copilot-bubble { max-width: 84%; padding: 11px 14px; border-radius: 16px; font-size: 13px; line-height: 1.58; }
+@keyframes zMsgIn { from { opacity: 0; transform: translateY(10px) scale(.98); } to { opacity: 1; transform: none; } }
+.copilot-bubble { max-width: 86%; padding: 11px 14px; border-radius: 16px; font-size: 13px; line-height: 1.58; position: relative; }
+/* Assistant — frosted-glass intelligence surface with a soft inner glow */
 .copilot-msg.assistant .copilot-bubble {
-  background: rgba(255,255,255,.045); border: 1px solid rgba(255,255,255,.07);
+  background: linear-gradient(180deg, rgba(139,92,246,.09), rgba(255,255,255,.035));
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(139,92,246,.22);
   color: var(--text); border-bottom-left-radius: 5px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.06), 0 0 0 1px rgba(124,80,255,.05);
 }
 .copilot-msg.user .copilot-bubble {
   background: linear-gradient(135deg, #6B5CF0, #4F8CFF); color: #fff; border-bottom-right-radius: 5px;
-  box-shadow: 0 4px 16px rgba(79,140,255,.3);
+  box-shadow: 0 4px 16px rgba(79,140,255,.35);
 }
+
+/* ── Intelligence report (structured analytical answer) ── */
+.zr-report { display: flex; flex-direction: column; gap: 9px; }
+.zr-badges { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 1px; }
+.zr-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 9.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 7px; line-height: 1;
+  border: 1px solid transparent;
+}
+.zr-badge.buy   { color: #4DF0B0; background: rgba(0,230,118,.12); border-color: rgba(0,230,118,.3); }
+.zr-badge.sell  { color: #FF7B7B; background: rgba(255,82,82,.12);  border-color: rgba(255,82,82,.3); }
+.zr-badge.neutral{ color: #9FB4DC; background: rgba(159,180,220,.1); border-color: rgba(159,180,220,.25); }
+.zr-badge.risk-low { color: #4DF0B0; background: rgba(0,230,118,.1); border-color: rgba(0,230,118,.25); }
+.zr-badge.risk-mod { color: #FFD56A; background: rgba(255,184,0,.12); border-color: rgba(255,184,0,.3); }
+.zr-badge.risk-high{ color: #FF9A6A; background: rgba(255,122,0,.14); border-color: rgba(255,122,0,.32); }
+.zr-badge.senti { color: #B79CFF; background: rgba(139,92,246,.14); border-color: rgba(139,92,246,.3); }
+/* Confidence meter */
+.zr-conf { display: flex; align-items: center; gap: 8px; }
+.zr-conf-label { font-size: 10px; font-weight: 600; color: var(--text-lo); white-space: nowrap; }
+.zr-conf-track { flex: 1; height: 6px; border-radius: 4px; background: rgba(255,255,255,.06); overflow: hidden; }
+.zr-conf-fill { height: 100%; border-radius: 4px; width: 0; background: linear-gradient(90deg, var(--primary), var(--ai)); transition: width 1s cubic-bezier(.22,1,.36,1); box-shadow: 0 0 10px rgba(124,80,255,.5); }
+.zr-conf-val { font-size: 11px; font-weight: 800; color: var(--text-hi); font-variant-numeric: tabular-nums; }
+/* Probability split */
+.zr-prob { display: flex; height: 7px; border-radius: 4px; overflow: hidden; background: rgba(255,255,255,.05); }
+.zr-prob-bull { background: linear-gradient(90deg, #00C566, #2BE5A6); }
+.zr-prob-bear { background: linear-gradient(90deg, #FF6E6E, #FF4D4D); }
+.zr-prob-row { display: flex; justify-content: space-between; font-size: 10px; font-weight: 700; margin-top: 3px; }
+.zr-prob-row .bull { color: #4DF0B0; } .zr-prob-row .bear { color: #FF8A8A; }
+/* Sections */
+.zr-sec { font-size: 12.5px; line-height: 1.55; }
+.zr-sec b { color: var(--text-hi); font-weight: 700; }
+.zr-sec .lbl { display: block; font-size: 9.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--ai); margin-bottom: 1px; opacity: .85; }
+.zr-levels { display: flex; gap: 8px; }
+.zr-level { flex: 1; padding: 7px 9px; border-radius: 9px; background: rgba(255,255,255,.04); border: 1px solid rgba(255,255,255,.07); }
+.zr-level .k { font-size: 9px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-lo); }
+.zr-level .v { font-size: 13px; font-weight: 800; color: var(--text-hi); font-variant-numeric: tabular-nums; }
+.zr-level.sup .v { color: #4DF0B0; } .zr-level.res .v { color: #FF9A8A; }
+
+/* ── Thinking sequence (replaces the spinner) ── */
+.copilot-think { display: flex; flex-direction: column; gap: 7px; min-width: 180px; }
+.cth-row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-lo); opacity: .4; transition: opacity .35s, color .35s; }
+.cth-row.active { opacity: 1; color: var(--text); }
+.cth-row.done { opacity: .8; color: var(--text-lo); }
+.cth-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: rgba(255,255,255,.15); transition: all .35s; }
+.cth-row.active .cth-dot { background: var(--accent); box-shadow: 0 0 8px var(--accent); animation: cthPulse 1s ease-in-out infinite; }
+.cth-row.done .cth-dot { background: var(--green); box-shadow: 0 0 6px rgba(0,230,118,.5); }
+@keyframes cthPulse { 0%,100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.4); opacity: .6; } }
+
 .copilot-typing { display: inline-flex; gap: 4px; }
 .copilot-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--ai); animation: ctype 1s infinite; }
 .copilot-typing i:nth-child(2) { animation-delay: .15s; }
@@ -2536,12 +2689,21 @@ input, select, button { font-family: inherit; }
 }
 .copilot-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,140,255,.14); }
 .copilot-send {
-  flex-shrink: 0; width: 40px; height: 40px; border: none; border-radius: 50%; cursor: pointer;
-  display: grid; place-items: center; font-size: 15px; color: #fff;
+  position: relative; flex-shrink: 0; width: 40px; height: 40px; border: none; border-radius: 50%; cursor: pointer;
+  display: grid; place-items: center; font-size: 15px; color: #fff; overflow: visible;
   background: linear-gradient(135deg, var(--ai), var(--primary));
   box-shadow: 0 4px 16px rgba(124,80,255,.4);
+  transition: transform .2s cubic-bezier(.34,1.56,.64,1), box-shadow .2s;
 }
-.copilot-send:hover { transform: scale(1.06); }
+.copilot-send:hover { transform: scale(1.1); box-shadow: 0 6px 22px rgba(124,80,255,.6); }
+.copilot-send:active { transform: scale(.94); }
+/* Energy ripple on press */
+.copilot-send::after {
+  content: ''; position: absolute; inset: 0; border-radius: 50%;
+  border: 2px solid rgba(124,80,255,.6); opacity: 0; pointer-events: none;
+}
+.copilot-send:active::after { animation: zRipple .5s ease-out; }
+@keyframes zRipple { 0% { opacity: .8; transform: scale(1); } 100% { opacity: 0; transform: scale(1.8); } }
 
 /* ─── Responsive ─── */
 @media (max-width: 760px) {

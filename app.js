@@ -3442,6 +3442,16 @@ const AIService = {
         const f = holtForecast(prices, 7);
         const chg = (f.median[6] - curr) / curr * 100;
         ctx.forecast = `${chg >= 0 ? '+' : ''}${chg.toFixed(1)}% (7d)`;
+        ctx.forecastPct = +chg.toFixed(1);
+        // Real support/resistance + volatility for trust metrics
+        const lastBB = bb.upper.length - 1;
+        const pdp = curr < 1 ? 5 : 2;
+        ctx.support = +bb.lower[lastBB].toFixed(pdp);
+        ctx.resistance = +bb.upper[lastBB].toFixed(pdp);
+        ctx.volPct = +(((bb.upper[lastBB] - bb.lower[lastBB]) / curr) * 100).toFixed(1);
+        const recent = prices.slice(-30);
+        ctx.low30 = Math.min(...recent);
+        ctx.high30 = Math.max(...recent);
       }
     } catch (e) { /* skip technicals */ }
 
@@ -4092,69 +4102,204 @@ function detectCoinFromText(text) {
   return null;
 }
 
-// Rich, context-aware local answer — keeps the copilot genuinely useful even
-// when the LLM backend is cold/unreachable. Always asset- and intent-aware.
-function copilotComposeLocal(message, ctx) {
+// ══ ZORION INTELLIGENCE LAYER ══════════════════════════════════════
+// Cognitive state machine — re-tints/re-paces the whole AI Core. A safety
+// timeout guard guarantees the orb never gets stuck mid-thought.
+let _zStateTimer = null;
+const _Z_STATES = ['z-thinking', 'z-analyzing', 'z-confident', 'z-warning', 'z-speaking'];
+function zorionSetState(s, holdMs) {
+  const c = document.getElementById('copilot');
+  if (!c) return;
+  c.classList.remove(..._Z_STATES);
+  if (s && s !== 'idle') c.classList.add('z-' + s);
+  if (_zStateTimer) { clearTimeout(_zStateTimer); _zStateTimer = null; }
+  if (holdMs) _zStateTimer = setTimeout(() => { c.classList.remove(..._Z_STATES); }, holdMs);
+}
+
+// Conversation memory — lets Zorion reference earlier turns naturally.
+const zorionMemory = [];
+let _zLastCoin = null;
+function zorionRecall(coin) {
+  for (let i = zorionMemory.length - 1; i >= 0; i--) {
+    const e = zorionMemory[i];
+    if (e.role === 'zorion' && coin && e.coin === coin) return 'Picking up from earlier —';
+  }
+  return '';
+}
+
+const _zfmt = (v, pd) => v == null ? '—' : '$' + Number(v).toLocaleString('en-US', { maximumFractionDigits: pd });
+
+// Deterministic trust metrics derived ONLY from real live data — never faked.
+function buildZorionReport(ctx, msg) {
+  const m = (msg || '').toLowerCase();
+  if (/(portfolio|rebalanc|diversif|my holdings|allocation)/.test(m)) return { analytical: false };
+  // Definition / explainer questions stay plain — no trade badges.
+  if (/\b(what is|what's|whats|explain|define|definition|how does|how do|meaning of)\b/.test(m)) return { analytical: false };
+  const analytical = ctx.techScore != null &&
+    /(analy|signal|should i|long or short|setup|\btrade\b|buy|sell|bull|bear|forecast|predict|outlook|target|momentum|trend|funding|\bprice\b|worth|moon|pump|dump|risk)/.test(m);
+  if (!analytical) return { analytical: false };
+
+  const ts = ctx.techScore;
+  // Bull probability anchored to the tech score, nudged by crowded funding.
+  let bull = ts;
+  if (ctx.funding != null) bull += ctx.funding > 0.0005 ? -4 : ctx.funding < -0.0005 ? 4 : 0;
+  bull = clamp(Math.round(bull), 8, 92);
+  const bear = 100 - bull;
+
+  // Confidence = strength of signal agreement, penalised by high volatility.
+  let conf = 48 + Math.abs(ts - 50) * 0.72;
+  if (ctx.rsi != null && (ctx.rsi < 30 || ctx.rsi > 70)) conf += 6;
+  if (ctx.volPct != null && ctx.volPct > 16) conf -= 8;
+  conf = clamp(Math.round(conf), 38, 90);
+
+  const signal = ts >= 70 ? 'Strong Buy' : ts >= 58 ? 'Buy' : ts > 42 ? 'Neutral' : ts > 30 ? 'Sell' : 'Strong Sell';
+  const sigClass = ts >= 58 ? 'buy' : ts <= 42 ? 'sell' : 'neutral';
+
+  let riskScore = 0;
+  if (ctx.volPct != null) riskScore += ctx.volPct > 18 ? 2 : ctx.volPct > 11 ? 1 : 0;
+  if (ctx.funding != null && Math.abs(ctx.funding) > 0.0008) riskScore += 1;
+  if (ctx.rsi != null && (ctx.rsi > 75 || ctx.rsi < 25)) riskScore += 1;
+  const risk = riskScore >= 3 ? 'High' : riskScore >= 1 ? 'Moderate' : 'Low';
+  const riskClass = risk === 'High' ? 'risk-high' : risk === 'Moderate' ? 'risk-mod' : 'risk-low';
+
+  let senti = null;
+  if (ctx.fearGreed) {
+    const v = parseInt(ctx.fearGreed);
+    senti = isNaN(v) ? ctx.fearGreed : v >= 60 ? `Greed ${v}` : v <= 40 ? `Fear ${v}` : `Neutral ${v}`;
+  }
+
+  const orbState = (risk === 'High' || signal === 'Strong Sell') ? 'warning'
+    : (conf >= 68 && signal !== 'Neutral') ? 'confident' : 'analyzing';
+
+  return {
+    analytical: true, bull, bear, conf, signal, sigClass, risk, riskClass, senti, orbState,
+    support: ctx.support, resistance: ctx.resistance,
+    pd: (ctx.currentPrice != null && ctx.currentPrice < 1) ? 5 : 2,
+  };
+}
+
+// Analyst-voice narrative: Observation → Evidence → Conclusion, in Zorion's
+// calm institutional tone. Built from the same real data as the report.
+function zorionNarrative(ctx, report) {
+  const name = ctx.coinName || 'This asset';
+  const pd = report.pd;
+  const px = ctx.currentPrice != null ? _zfmt(ctx.currentPrice, pd) : null;
+  const trend = (ctx.trend || 'neutral').toLowerCase();
+  const recall = ctx.recall ? ctx.recall + ' ' : '';
+  const parts = [];
+
+  parts.push(`${recall}${name}${px ? ` is holding near ${px}` : ''} within a ${trend} structure${ctx.rsi != null ? ` — RSI ${ctx.rsi}` : ''}.`);
+
+  const ev = [];
+  if (ctx.macd) ev.push(`MACD reads ${ctx.macd.toLowerCase()}`);
+  if (ctx.funding != null) ev.push(`funding ${(ctx.funding * 100).toFixed(3)}% (${ctx.marketBias || 'neutral'})`);
+  if (ctx.volPct != null) ev.push(`volatility ~${ctx.volPct}%`);
+  if (ctx.forecast) ev.push(`7-day model ${ctx.forecast}`);
+  if (ev.length) parts.push(`The evidence: ${ev.join(', ')}.`);
+
+  let concl;
+  if (report.signal.includes('Buy')) concl = `Structure favours buyers while support at ${_zfmt(ctx.support, pd)} holds; momentum loses its edge on a clean break below.`;
+  else if (report.signal.includes('Sell')) concl = `Pressure sits with sellers unless price reclaims ${_zfmt(ctx.resistance, pd)} on rising volume.`;
+  else concl = `The tape is balanced — I'd wait for a decisive break of ${_zfmt(ctx.support, pd)} or ${_zfmt(ctx.resistance, pd)} before committing risk.`;
+  parts.push(concl);
+
+  if (report.risk !== 'Low') parts.push(`Risk is ${report.risk.toLowerCase()} here — size to the stop, not the conviction.`);
+  return parts.join(' ');
+}
+
+function zorionReportHTML(text, r) {
+  const pd = r.pd;
+  const badges = `<span class="zr-badge ${r.sigClass}">${r.signal}</span>`
+    + `<span class="zr-badge ${r.riskClass}">${r.risk} Risk</span>`
+    + (r.senti ? `<span class="zr-badge senti">${escapeHtml(r.senti)}</span>` : '');
+  const levels = (r.support != null || r.resistance != null)
+    ? `<div class="zr-levels">
+         <div class="zr-level sup"><div class="k">Support</div><div class="v">${_zfmt(r.support, pd)}</div></div>
+         <div class="zr-level res"><div class="k">Resistance</div><div class="v">${_zfmt(r.resistance, pd)}</div></div>
+       </div>` : '';
+  return `<div class="zr-report">
+    <div class="zr-badges">${badges}</div>
+    <div class="zr-sec">${escapeHtml(text)}</div>
+    ${levels}
+    <div>
+      <div class="zr-prob"><div class="zr-prob-bull" style="width:${r.bull}%"></div><div class="zr-prob-bear" style="width:${r.bear}%"></div></div>
+      <div class="zr-prob-row"><span class="bull">&#9650; ${r.bull}% Bull</span><span class="bear">${r.bear}% Bear &#9660;</span></div>
+    </div>
+    <div class="zr-conf"><span class="zr-conf-label">Confidence</span><div class="zr-conf-track"><div class="zr-conf-fill"></div></div><span class="zr-conf-val">${r.conf}%</span></div>
+  </div>`;
+}
+
+// Thinking sequence — visible "intelligence working", not a spinner.
+function startThinkingSequence(loadEl) {
+  const steps = ['Scanning market structure', 'Checking liquidity zones', 'Reading funding & open interest', 'Evaluating momentum & trend', 'Computing probability'];
+  loadEl.innerHTML = '<div class="copilot-bubble"><div class="copilot-think">'
+    + steps.map(s => `<div class="cth-row"><span class="cth-dot"></span><span>${s}&hellip;</span></div>`).join('')
+    + '</div></div>';
+  const rows = loadEl.querySelectorAll('.cth-row');
+  let i = 0;
+  if (rows[0]) rows[0].classList.add('active');
+  zorionSetState('thinking');
+  const timers = [];
+  const tick = () => {
+    if (i > 0 && rows[i - 1]) { rows[i - 1].classList.remove('active'); rows[i - 1].classList.add('done'); }
+    if (rows[i]) rows[i].classList.add('active');
+    if (i === 2) zorionSetState('analyzing');
+    i++;
+    if (i < rows.length) timers.push(setTimeout(tick, 470 + Math.random() * 220));
+  };
+  timers.push(setTimeout(tick, 470));
+  return { stop() { timers.forEach(clearTimeout); } };
+}
+
+// Rich, context-aware local answer — keeps Zorion genuinely useful even when
+// the LLM backend is cold/unreachable. Always asset- and intent-aware.
+function copilotComposeLocal(message, ctx, report) {
   const m = (message || '').toLowerCase();
   const name = ctx.coinName || 'this asset';
   const price = ctx.currentPrice;
   const pd = price != null && price < 1 ? 5 : 2;
   const priceStr = price != null ? '$' + Number(price).toLocaleString('en-US', { maximumFractionDigits: pd }) : null;
 
-  // "current / now / today / latest" => the user wants live data, not a textbook
-  // definition, so let the context branches below answer first.
   const liveIntent = /\b(current|currently|now|right now|today|latest|live|at the moment)\b/.test(m);
   const kbHit = () => { for (const [kw, ex] of Object.entries(CHAT_KB)) if (m.includes(kw)) return ex; return null; };
 
-  // 1) Concept definitions → knowledge base (unless they asked about the live state)
+  // 1) Concept definitions → knowledge base (unless they asked about live state)
   if (!liveIntent) { const k = kbHit(); if (k) return k; }
 
-  // 2) Forecast / prediction
-  if (/(predict|forecast|next\s+\w+\s*(day|days|week)|tomorrow|outlook|target price|will it|expected? move|going to|in \d+ day)/.test(m)) {
-    let s = `${name}${priceStr ? ` is trading near ${priceStr}` : ''}. `;
-    if (ctx.forecast) s += `The statistical model projects ${ctx.forecast}. `;
-    if (ctx.trend) s += `Momentum is ${ctx.trend.toLowerCase()}${ctx.rsi != null ? ` (RSI ${ctx.rsi}, MACD ${ctx.macd})` : ''}. `;
-    s += `Short-horizon moves are noisy — treat this as a probability, not a promise. Keep stops tight and avoid over-leverage.`;
-    return s;
-  }
+  // 2) Analytical query → full analyst narrative (matches the report card)
+  if (report && report.analytical) return zorionNarrative(ctx, report);
+
   // 3) Funding / OI / positioning
   if (/(funding|open interest|\boi\b|long.?short|positioning|squeeze)/.test(m) && ctx.funding != null) {
     return `${name}: funding ${(ctx.funding * 100).toFixed(4)}%, ${ctx.marketBias || 'neutral'} futures bias`
       + (ctx.lsRatio != null ? `, L/S ratio ${ctx.lsRatio}` : '')
       + (ctx.openInterest ? `, OI ~$${Number(ctx.openInterest).toLocaleString('en-US', { maximumFractionDigits: 0 })}` : '')
-      + `. Positive funding = crowded longs (correction risk); negative = short-squeeze potential.`;
+      + `. Positive funding signals crowded longs and correction risk; negative funding sets up short-squeeze potential.`;
   }
   // 4) Portfolio / rebalance
   if (/(portfolio|rebalanc|diversif|my holdings|my book|allocation)/.test(m)) {
     const pm = state.portfolio;
     if (pm) {
-      return `Portfolio health ${pm.overall}/100 (${pm.status.t}). Allocation: ${pm.summaryForAI}. `
-        + (pm.maxWeight >= 0.45 ? `Concentration is elevated in ${pm.holdings[0].sym} — trimming it would cut risk and lift diversification. ` : `It is reasonably balanced. `)
-        + `See the Rebalancing card for target weights.`;
+      return `Your portfolio scores ${pm.overall}/100 (${pm.status.t}). Allocation: ${pm.summaryForAI}. `
+        + (pm.maxWeight >= 0.45 ? `Concentration is elevated in ${pm.holdings[0].sym} — trimming it would cut single-name risk and lift diversification. ` : `It reads reasonably balanced. `)
+        + `The Rebalancing card has target weights.`;
     }
-    return `Open the Portfolio tab and run an analysis first — then I can review your health score, concentration and rebalancing.`;
+    return `Run a Portfolio analysis first — then I can review your health score, concentration and rebalancing with live numbers.`;
   }
   // 5) Price
   if (/(price|worth|trading at|how much|value)/.test(m) && priceStr) {
-    return `${name} is trading around ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}${ctx.rsi != null ? ` (RSI ${ctx.rsi})` : ''}. Always use risk management.`;
+    return `${name} is trading around ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}${ctx.rsi != null ? ` (RSI ${ctx.rsi})` : ''}. Always anchor entries to your risk plan.`;
   }
-  // 6) Analysis / signal / should I
-  if (/(analy|signal|should i|long or short|setup|trade|buy|sell|bull|bear)/.test(m) && ctx.techScore != null) {
-    return `${name}: tech score ${ctx.techScore}/100 (${ctx.trend}). RSI ${ctx.rsi}, MACD ${ctx.macd}`
-      + (ctx.funding != null ? `, funding ${(ctx.funding * 100).toFixed(3)}%` : '')
-      + (ctx.fearGreed ? `, sentiment ${ctx.fearGreed}` : '')
-      + `. ${ctx.forecast ? `Model forecast ${ctx.forecast}. ` : ''}Educational only — size to risk, not conviction.`;
-  }
-  // 6b) Concept fallback — a KB term was mentioned but we lacked live data for it
+  // 5b) Concept fallback — a KB term was mentioned but we lacked live data
   { const k = kbHit(); if (k) return k; }
 
-  // 7) Greeting
+  // 6) Greeting
   if (/^\s*(hi|hey|hello|yo|sup|gm)\b/.test(m)) {
-    return `Hey! Ask me about any coin's price, forecast, funding or technicals, request a portfolio review, or say something like "explain liquidation".`;
+    return `I'm here. Ask me about any coin's structure, forecast, funding or technicals, request a portfolio review, or say something like "explain liquidation".`;
   }
-  // 8) Context-aware fallback
-  if (priceStr) return `${name} is near ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}. Ask me about its forecast, funding, technicals — or review your portfolio.`;
-  return `I can analyze any of the 15 supported coins. Try "ETH forecast for 2 days", "BTC funding", "review my portfolio", or "explain RSI".`;
+  // 7) Context-aware fallback
+  if (priceStr) return `${name} is near ${priceStr}${ctx.trend ? `, ${ctx.trend.toLowerCase()} trend` : ''}. Ask me for a full read, its forecast, funding — or a portfolio review.`;
+  return `I can analyse any of the 15 supported assets. Try "read BTC", "ETH forecast for 2 days", "SOL funding", or "review my portfolio".`;
 }
 
 let _zorionGreeted = false;
@@ -4193,13 +4338,23 @@ function _zorionIntro() {
   } catch (e) {}
 }
 
-function copilotAddMsg(text, isUser) {
+function copilotAddMsg(text, isUser, report) {
   const box = document.getElementById('copilotMessages');
   if (!box) return null;
   const div = document.createElement('div');
   div.className = `copilot-msg ${isUser ? 'user' : 'assistant'}`;
-  div.innerHTML = `<div class="copilot-bubble">${escapeHtml(text)}</div>`;
-  box.appendChild(div);
+  if (!isUser && report && report.analytical) {
+    div.innerHTML = `<div class="copilot-bubble">${zorionReportHTML(text, report)}</div>`;
+    box.appendChild(div);
+    // Animate the confidence meter once it's in the DOM
+    requestAnimationFrame(() => {
+      const f = div.querySelector('.zr-conf-fill');
+      if (f) f.style.width = report.conf + '%';
+    });
+  } else {
+    div.innerHTML = `<div class="copilot-bubble">${escapeHtml(text)}</div>`;
+    box.appendChild(div);
+  }
   box.scrollTop = box.scrollHeight;
   return div;
 }
@@ -4210,24 +4365,34 @@ async function copilotSend(preset, coinHint, speak) {
   if (!msg) return;
   if (!preset && input) input.value = '';
   copilotAddMsg(msg, true);
+  zorionMemory.push({ role: 'user', text: msg });
 
   const box = document.getElementById('copilotMessages');
   const load = document.createElement('div');
   load.className = 'copilot-msg assistant';
-  load.innerHTML = '<div class="copilot-bubble"><span class="copilot-typing"><i></i><i></i><i></i></span></div>';
   if (box) { box.appendChild(load); box.scrollTop = box.scrollHeight; }
+  const think = startThinkingSequence(load);
 
-  let reply;
+  let reply, report = { analytical: false };
   try {
     const coin = coinHint || detectCoinFromText(msg) || undefined;
     const ctx = await AIService.gatherContext(coin);
-    const local = copilotComposeLocal(msg, ctx);
+    ctx.recall = zorionRecall(coin || ctx.coin);
+    report = buildZorionReport(ctx, msg);
+    const local = copilotComposeLocal(msg, ctx, report);
     reply = await AIService.ask(msg, { context: ctx, localAnswer: local });
+    zorionMemory.push({ role: 'zorion', text: reply, coin: ctx.coin, report });
+    _zLastCoin = ctx.coin;
   } catch (e) {
     reply = copilotComposeLocal(msg, { coinName: 'the market' });
   }
+  think.stop();
   load.remove();
-  copilotAddMsg(reply, false);
+  copilotAddMsg(reply, false, report);
+
+  // Settle the orb into its resolved cognitive state, then ease back to idle.
+  if (report && report.orbState) zorionSetState(report.orbState, 4200);
+  else zorionSetState('idle');
 
   if (speak) { _cvSet('Speaking…'); copilotSpeak(reply, copilotCloseVoice); }
 }
@@ -4340,10 +4505,12 @@ function copilotSpeak(text, onDone) {
     const c = document.getElementById('copilot');
     let idx = 0;
     if (c) c.classList.add('speaking');
+    zorionSetState('speaking');
 
     function next() {
       if (idx >= sentences.length || copilotVoice.cancelled) {
         if (c) c.classList.remove('speaking');
+        zorionSetState('idle');
         if (onDone) onDone();
         return;
       }
@@ -4351,7 +4518,7 @@ function copilotSpeak(text, onDone) {
       u.lang = 'en-US'; u.rate = 0.94; u.pitch = 1.06; u.volume = 1.0;
       if (voice) u.voice = voice;
       u.onend = next;
-      u.onerror = () => { if (c) c.classList.remove('speaking'); if (onDone) onDone(); };
+      u.onerror = () => { if (c) c.classList.remove('speaking'); zorionSetState('idle'); if (onDone) onDone(); };
       synth.speak(u);
     }
     next();
