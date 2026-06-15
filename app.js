@@ -625,10 +625,16 @@ function holtForecast(prices, horizon = 7, alpha = 0.35, beta = 0.08) {
 // FUTURES CALCULATOR
 // ═══════════════════════════════════════════════════════════════════
 
-function calcFutures(entry, leverage, size, dir, tp, sl) {
+function calcFutures(entry, leverage, size, dir, tp, sl, fundingRate = 0, horizon = 7) {
   const margin = size / leverage;
   const contracts = size / entry;
   const mmr = 0.005;
+  const takerFee = 0.0005; // 0.05% per side; open + close = 0.10%
+  const totalFees = size * takerFee * 2;
+  // Funding paid every 8h = 3×/day; long pays positive rate, short earns it
+  const fundingPeriods = horizon * 3;
+  const fundingCost = fundingRate * size * fundingPeriods * (dir === 'Long' ? 1 : -1);
+
   let liq, liqDist, pnlFn;
   if (dir === 'Long') {
     liq = entry * (1 - 1 / leverage + mmr);
@@ -639,9 +645,17 @@ function calcFutures(entry, leverage, size, dir, tp, sl) {
     liqDist = (liq - entry) / entry * 100;
     pnlFn = px => contracts * (entry - px);
   }
-  const res = { entry, leverage, size, margin, contracts, liq, liqDist, dir };
-  if (tp) { const p = pnlFn(tp); res.tp = tp; res.pnlTp = p; res.roeTp = p / margin * 100; }
-  if (sl) { const p = pnlFn(sl); res.sl = sl; res.pnlSl = p; res.roeSl = p / margin * 100; }
+  const res = { entry, leverage, size, margin, contracts, liq, liqDist, dir, totalFees, fundingCost };
+  if (tp) {
+    const gross = pnlFn(tp);
+    const net = gross - totalFees - fundingCost;
+    res.tp = tp; res.pnlTpGross = gross; res.pnlTp = net; res.roeTp = net / margin * 100;
+  }
+  if (sl) {
+    const gross = pnlFn(sl);
+    const net = gross - totalFees - fundingCost;
+    res.sl = sl; res.pnlSlGross = gross; res.pnlSl = net; res.roeSl = net / margin * 100;
+  }
   if (tp && sl) res.rr = Math.abs(tp - entry) / Math.abs(sl - entry);
   return res;
 }
@@ -1206,7 +1220,8 @@ async function analyze() {
   const fcst    = holtForecast(prices, horizon);
   const tp      = parseFloat(document.getElementById('takeProfit').value)  || fcst.median[fcst.median.length - 1];
   const sl      = parseFloat(document.getElementById('stopLoss').value)    || 0;
-  const m       = calcFutures(entry, lev, size, dir, tp, sl);
+  const fundingRate = state.futures?.funding_rate ?? 0;
+  const m       = calcFutures(entry, lev, size, dir, tp, sl, fundingRate, horizon);
 
   const rsiArr = calcRSI(prices);
   const { macdLine, signalLine } = calcMACD(prices);
@@ -1231,9 +1246,9 @@ async function analyze() {
   if (chgF > 2)       { signals.push({ t:`Forecast: Model predicts price rises +${chgF.toFixed(1)}% over ${horizon} days`, c:'green' }); score += 1; }
   else if (chgF < -2) { signals.push({ t:`Forecast: Model predicts price falls ${chgF.toFixed(1)}% over ${horizon} days`, c:'red' }); score -= 1; }
   else                  signals.push({ t:`Forecast: Price expected to stay roughly flat (${chgF.toFixed(1)}% change)`, c:'neutral' });
-  if (m.liqDist < 5)  { signals.push({ t:`DANGER: Your forced-close price is only ${m.liqDist.toFixed(1)}% away — very high risk!`, c:'red' }); score -= 1; }
-  else if (m.liqDist < 10) signals.push({ t:`Caution: Your forced-close price is ${m.liqDist.toFixed(1)}% away — moderate risk`, c:'yellow' });
-  else                      signals.push({ t:`Safe buffer: Your forced-close price is ${m.liqDist.toFixed(1)}% away`, c:'green' });
+  if (m.liqDist < 5)  { signals.push({ t:`DANGER: Liquidation price is only ${m.liqDist.toFixed(1)}% away — very high risk!`, c:'red' }); score -= 1; }
+  else if (m.liqDist < 10) signals.push({ t:`Caution: Liquidation price is ${m.liqDist.toFixed(1)}% away — moderate risk`, c:'yellow' });
+  else                      signals.push({ t:`Safe buffer: Liquidation price is ${m.liqDist.toFixed(1)}% away`, c:'green' });
 
   if (state.sentiment?.fg?.length) {
     const fgV = parseInt(state.sentiment.fg[0].value);
@@ -1283,15 +1298,23 @@ function renderResults(m, curr, fcst, horizon, chgF) {
   const predDesc = chgF >= 0
     ? `Model expects price to rise ${fmtPct(chgF)} over the next ${horizon} days`
     : `Model expects price to fall ${Math.abs(chgF).toFixed(2)}% over the next ${horizon} days`;
+  const feesSub = `Taker 0.05% × 2 (open + close) on $${fmt(m.size)} position`;
+  const frAbs = Math.abs(m.fundingCost);
+  const frSign = m.fundingCost >= 0 ? '−' : '+';
+  const frSub = m.fundingCost !== 0
+    ? `${(Math.abs(state.futures?.funding_rate ?? 0) * 100).toFixed(4)}%/8h × ${horizon * 3} periods (${horizon}-day hold)`
+    : null;
   document.getElementById('resultsCard').style.display = 'block';
   document.getElementById('resultsBody').innerHTML = `<div class="results-grid">
     ${row('Current Market Price', fmtUSD(curr), 'accent', 'Live price of the coin right now')}
     ${row(`Price Forecast (${horizon} days)`, fmtUSD(pred) + ` <span style="font-size:11px">${fmtPct(chgF)}</span>`, predCls, predDesc)}
     ${row('Your Entry Price', fmtUSD(m.entry), '', 'The price at which you open this trade')}
     ${row('Your Capital at Risk', fmtUSD(m.margin), '', `Real money you put in — your $${fmt(m.size)} trade size ÷ ${m.leverage}× leverage`)}
-    ${row('Forced Close Price', fmtUSD(m.liq), m.liqDist < 10 ? 'red' : '', `${m.liqDist.toFixed(2)}% from entry — you lose all your capital if price reaches here`, m.liqDist < 10 ? 'hl-red' : '')}
-    ${m.tp != null ? row('Take Profit Target', fmtUSD(m.tp), 'green', `Your profit at this price: +${fmtUSD(m.pnlTp)} · Return on your capital: ${fmtPct(m.roeTp)}`, 'hl-green') : ''}
-    ${m.sl ? row('Stop Loss', fmtUSD(m.sl), 'red', `Max loss if triggered: ${fmtUSD(m.pnlSl)} · That is ${fmtPct(m.roeSl)} of your capital`, 'hl-red') : ''}
+    ${row('Liquidation Price', fmtUSD(m.liq), m.liqDist < 10 ? 'red' : '', `${m.liqDist.toFixed(2)}% from entry — exchange closes your position here`, m.liqDist < 10 ? 'hl-red' : '')}
+    ${row('Est. Trading Fees', `−${fmtUSD(m.totalFees)}`, 'red', feesSub)}
+    ${frSub ? row('Est. Funding Cost', `${frSign}${fmtUSD(frAbs)}`, m.fundingCost > 0 ? 'red' : 'green', frSub) : ''}
+    ${m.tp != null ? row('Take Profit Target', fmtUSD(m.tp), 'green', `Gross +${fmtUSD(m.pnlTpGross)} · Net after fees & funding: +${fmtUSD(m.pnlTp)} · ROE ${fmtPct(m.roeTp)}`, 'hl-green') : ''}
+    ${m.sl ? row('Stop Loss', fmtUSD(m.sl), 'red', `Gross ${fmtUSD(m.pnlSlGross)} · Net after fees & funding: ${fmtUSD(m.pnlSl)} · ROE ${fmtPct(m.roeSl)}`, 'hl-red') : ''}
     ${m.rr != null ? row('Risk / Reward Ratio', `1 : ${m.rr.toFixed(2)}`, m.rr >= 2 ? 'green' : m.rr >= 1 ? 'gold' : 'red', m.rr >= 2 ? `Good — for every $1 risked you could gain $${m.rr.toFixed(2)}` : m.rr >= 1 ? 'Fair — aim for 1:2 or better for quality trades' : 'Poor — you risk more than your potential gain', m.rr >= 2 ? 'hl-green' : m.rr >= 1 ? 'hl-gold' : 'hl-red') : ''}
   </div>`;
 }
