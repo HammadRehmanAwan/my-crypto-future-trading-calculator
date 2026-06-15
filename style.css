@@ -1434,6 +1434,8 @@ input, select, button { font-family: inherit; }
   border-bottom-left-radius: 4px;
 }
 
+.chat-src { display: block; font-size: 10px; color: var(--text-lo); margin-top: 4px; }
+
 .chat-input-row {
   display: flex; gap: 8px;
 }
@@ -2740,6 +2742,8 @@ input, select, button { font-family: inherit; }
 .zr-badge.risk-mod { color: #FFD56A; background: rgba(255,184,0,.12); border-color: rgba(255,184,0,.3); }
 .zr-badge.risk-high{ color: #FF9A6A; background: rgba(255,122,0,.14); border-color: rgba(255,122,0,.32); }
 .zr-badge.senti { color: #B79CFF; background: rgba(139,92,246,.14); border-color: rgba(139,92,246,.3); }
+/* Source provenance badge (Analytical / Rule-based / AI-enhanced) */
+.zr-src-tag { font-size: 10px; color: var(--text-lo); margin-top: 8px; text-align: right; opacity: .7; }
 /* Confidence meter */
 .zr-conf { display: flex; align-items: center; gap: 8px; }
 .zr-conf-label { font-size: 10px; font-weight: 600; color: var(--text-lo); white-space: nowrap; }

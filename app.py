@@ -724,14 +724,14 @@ def _rule_based_response(message: str, context: dict):
     return None
 
 
-# HF Inference model cascade (tried in order; first to respond wins). 7B models
-# give the richest answers but may be cold on the free tier — we fall back to a
-# smaller model and finally to the rule-based KB so chat never dies.
+# Chat model cascade via HF Inference Providers (serverless, proper chat API).
+# Uses InferenceClient so models run via the provider network — no cold starts
+# for widely-used models. Falls back gracefully to the rule-based KB.
 _HF_CHAT_MODELS = [
+    "meta-llama/Llama-3.1-8B-Instruct",
     "Qwen/Qwen2.5-7B-Instruct",
     "mistralai/Mistral-7B-Instruct-v0.3",
     "microsoft/Phi-4-mini-instruct",
-    "Qwen/Qwen2.5-0.5B-Instruct",
 ]
 
 
@@ -844,32 +844,24 @@ def _chat(body: dict):
 
     hf_token = os.environ.get("HF_TOKEN", "")
     if hf_token:
+        from huggingface_hub import InferenceClient as _HFClient
         system_prompt = _build_system_prompt(context)
+        client = _HFClient(token=hf_token)
         for model in _HF_CHAT_MODELS:
             try:
-                r = requests.post(
-                    f"https://api-inference.huggingface.co/models/{model}",
-                    headers={"Authorization": f"Bearer {hf_token}"},
-                    json={
-                        "inputs": _format_prompt(model, system_prompt, message),
-                        "parameters": {
-                            "max_new_tokens": 220,
-                            "temperature": 0.6,
-                            "top_p": 0.9,
-                            "do_sample": True,
-                            "return_full_text": False,
-                        },
-                        "options": {"wait_for_model": False},
-                    },
-                    timeout=18,
+                completion = client.chat_completion(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": message},
+                    ],
+                    model=model,
+                    max_tokens=220,
+                    temperature=0.6,
+                    top_p=0.9,
                 )
-                if r.status_code == 200:
-                    rj = r.json()
-                    if isinstance(rj, list) and rj:
-                        text = _clean_llm_text(rj[0].get("generated_text", ""))
-                        if text:
-                            return {"response": text, "source": "llm", "model": model}
-                # 503 = model loading, 404 = unavailable → try the next one.
+                text = (completion.choices[0].message.content or "").strip()
+                if text and len(text) > 10:
+                    return {"response": text, "source": "llm", "model": model}
             except Exception:
                 continue
 

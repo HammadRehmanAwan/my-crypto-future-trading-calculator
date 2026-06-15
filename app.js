@@ -3688,12 +3688,17 @@ function renderRiskCard(techData) {
 
 // ── AI Chat ────────────────────────────────────────────────────────
 
-function addChatMessage(text, isUser) {
+function addChatMessage(text, isUser, source) {
   const container = document.getElementById('chatMessages');
   if (!container) return;
   const div = document.createElement('div');
   div.className = `chat-msg ${isUser ? 'user' : 'assistant'}`;
-  div.innerHTML = `<div class="chat-bubble">${text}</div>`;
+  let srcTag = '';
+  if (!isUser && source) {
+    const lbl = source === 'llm' ? '⚡ AI' : source === 'kb' ? '📖 Rule-based' : '🔍 Analytical';
+    srcTag = `<small class="chat-src">${lbl}</small>`;
+  }
+  div.innerHTML = `<div class="chat-bubble">${text}${srcTag}</div>`;
   container.appendChild(div);
   container.scrollTop = container.scrollHeight;
 }
@@ -3723,16 +3728,17 @@ async function sendChat() {
     // (price, technicals, funding, OI, sentiment, forecast, portfolio).
     const ctx = await AIService.gatherContext(hubState.coinId);
     const reply = await AIService.ask(msg, { context: ctx, timeoutMs: 8_000 });
+    const src = AIService._lastSource;
     const loadEl = document.getElementById(loadId);
     if (loadEl) loadEl.remove();
-    addChatMessage(reply, false);
+    addChatMessage(reply, false, src);
   } catch (e) {
     const loadEl = document.getElementById(loadId);
     if (loadEl) loadEl.remove();
     addChatMessage(localChatResponse(msg, {
       coinName: COINS[hubState.coinId]?.name || hubState.coinId,
       currentPrice: hubState.prices ? hubState.prices[hubState.prices.length - 1] : null,
-    }), false);
+    }), false, 'local');
   }
 }
 
@@ -3772,10 +3778,12 @@ const _pfCharts = { scenario: null, rebalCur: null, rebalSug: null };
 
 // ─── REUSABLE AI SERVICE LAYER ─────────────────────────────────────
 // Single entry point for every LLM-backed answer in the app. Gathers live
-// platform context and proxies to the backend /chat endpoint (HF Inference,
-// token stays server-side). Always returns instantly with a deterministic
-// local answer, upgraded to the model's answer when the backend is reachable.
+// platform context and proxies to the backend /chat endpoint (HF Inference
+// Providers, token stays server-side). Always returns a deterministic local
+// answer; upgraded to the LLM answer when the backend is reachable.
+// _lastSource is set after each ask(): "llm" | "kb" | "fallback" | "local"
 const AIService = {
+  _lastSource: null,
   async gatherContext(coinId) {
     coinId = coinId || hubState.coinId || state.coin || 'bitcoin';
     const ctx = { coin: coinId, coinName: COINS[coinId]?.name || coinId };
@@ -3846,6 +3854,7 @@ const AIService = {
   },
 
   // Ask the model. `localAnswer` overrides the default deterministic fallback.
+  // Sets AIService._lastSource to "llm" | "kb" | "fallback" | "local" after each call.
   async ask(message, { context = null, localAnswer = null, timeoutMs = 14_000 } = {}) {
     const ctx = context || await this.gatherContext();
     const local = localAnswer != null ? localAnswer : localChatResponse(message, {
@@ -3856,8 +3865,12 @@ const AIService = {
         method: 'POST', body: { message, context: ctx }, retries: 0, timeoutMs,
       });
       const r = (data.response || data.message || '').trim();
-      return r || local;
-    } catch (e) { return local; }
+      this._lastSource = data.source || 'llm';
+      return r || (this._lastSource = 'local', local);
+    } catch (e) {
+      this._lastSource = 'local';
+      return local;
+    }
   },
 };
 
@@ -4658,7 +4671,7 @@ function copilotComposeLocal(message, ctx, report) {
 
   // 6) Greeting / social opener
   if (/^\s*(hi|hey|hello|yo|sup|gm|good (morning|evening|afternoon)|greetings)\b/.test(m)) {
-    return `I'm Zorion — fully operational. Ask me about any coin's structure, forecast, funding, or technicals. Run a portfolio analysis and I can review concentration and rebalancing too.`;
+    return `I'm Zorion — fully operational. My analysis is built on live market data and signals; each response shows whether it came from the analytical engine or AI. Ask me about any coin's structure, forecast, funding, or technicals, or run a portfolio analysis.`;
   }
 
   // 7) Social / wellbeing questions
@@ -4668,7 +4681,7 @@ function copilotComposeLocal(message, ctx, report) {
 
   // 8) Capability / identity questions
   if (/\b(what can you do|what do you do|what are you|who are you|your (capabilities|abilities|features)|help me|how can you help|what('s| is) your (purpose|function|job))\b/.test(m)) {
-    return `I'm Zorion — an AI market intelligence analyst built into FutureX. I can:\n• Read live price, RSI, MACD, Bollinger Bands for 15 assets\n• Deliver a structured analyst read with confidence score and bull/bear probability\n• Analyse funding rates, open interest and long/short positioning\n• Review your portfolio health, concentration and rebalancing targets\n• Produce statistical 7-day forecasts\n\nTry: "Analyse BTC", "ETH funding", "SOL forecast", or "review my portfolio".`;
+    return `I'm Zorion — a market intelligence system built into FutureX. I work in two layers:\n• Core: a real-time analytical engine reading live OKX data, technical indicators and signals\n• When available: responses are enhanced by an LLM via Hugging Face Inference Providers\n\nEach response carries a source badge — "⚡ AI-enhanced" when the LLM ran, "🔍 Analytical" when local.\n\nWhat I cover:\n• Live price, RSI, MACD, Bollinger Bands for 15 assets\n• Structured analyst read with confidence score and bull/bear probability\n• Funding rates, open interest and long/short positioning\n• Portfolio health, concentration and rebalancing targets\n• Statistical 7-day forecasts\n\nTry: "Analyse BTC", "ETH funding", "SOL forecast", or "review my portfolio".`;
   }
 
   // 9) Limitations / cons / what I can't do
@@ -4736,21 +4749,25 @@ function _zorionIntro() {
   } catch (e) {}
 }
 
-function copilotAddMsg(text, isUser, report) {
+function copilotAddMsg(text, isUser, report, source) {
   const box = document.getElementById('copilotMessages');
   if (!box) return null;
   const div = document.createElement('div');
   div.className = `copilot-msg ${isUser ? 'user' : 'assistant'}`;
+  let srcTag = '';
+  if (!isUser && source) {
+    const lbl = source === 'llm' ? '⚡ AI-enhanced' : source === 'kb' ? '📖 Rule-based' : '🔍 Analytical';
+    srcTag = `<div class="zr-src-tag">${lbl}</div>`;
+  }
   if (!isUser && report && report.analytical) {
-    div.innerHTML = `<div class="copilot-bubble">${zorionReportHTML(text, report)}</div>`;
+    div.innerHTML = `<div class="copilot-bubble">${zorionReportHTML(text, report)}${srcTag}</div>`;
     box.appendChild(div);
-    // Animate the confidence meter once it's in the DOM
     requestAnimationFrame(() => {
       const f = div.querySelector('.zr-conf-fill');
       if (f) f.style.width = report.conf + '%';
     });
   } else {
-    div.innerHTML = `<div class="copilot-bubble">${escapeHtml(text)}</div>`;
+    div.innerHTML = `<div class="copilot-bubble">${escapeHtml(text)}${srcTag}</div>`;
     box.appendChild(div);
   }
   box.scrollTop = box.scrollHeight;
@@ -4791,9 +4808,10 @@ async function copilotSend(preset, coinHint, speak) {
   } catch (e) {
     reply = copilotComposeLocal(msg, { coinName: 'the market' });
   }
+  const _zSrc = AIService._lastSource || 'local';
   think.stop();
   load.remove();
-  copilotAddMsg(reply, false, report);
+  copilotAddMsg(reply, false, report, _zSrc);
 
   // Settle the orb into its resolved cognitive state, then ease back to idle.
   if (report && report.orbState) zorionSetState(report.orbState, 4200);
