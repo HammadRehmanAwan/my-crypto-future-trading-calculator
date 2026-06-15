@@ -1,0 +1,48 @@
+name: Volatility Alerts
+
+# Server-side volatility monitoring — runs independently of any browser.
+# Checks every subscribed user's watched coins and emails them when a
+# threshold is crossed. See scripts/check_alerts.py for the logic.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   FIREBASE_SERVICE_ACCOUNT   JSON service-account key (Firebase console)
+#   EMAILJS_SERVICE_ID         EmailJS service id
+#   EMAILJS_TEMPLATE_ID        EmailJS template id
+#   EMAILJS_PUBLIC_KEY         EmailJS public key (user id)
+#   EMAILJS_PRIVATE_KEY        EmailJS private key (server access token)
+#   CG_DEMO_API_KEY            CoinGecko Demo key (optional, higher limits)
+
+on:
+  schedule:
+    # Every 30 minutes. GitHub may delay scheduled runs under load.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}   # allow manual runs from the Actions tab
+
+# Prevent overlapping runs piling up if one is slow.
+concurrency:
+  group: volatility-alerts
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run alert worker
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          EMAILJS_SERVICE_ID: ${{ secrets.EMAILJS_SERVICE_ID }}
+          EMAILJS_TEMPLATE_ID: ${{ secrets.EMAILJS_TEMPLATE_ID }}
+          EMAILJS_PUBLIC_KEY: ${{ secrets.EMAILJS_PUBLIC_KEY }}
+          EMAILJS_PRIVATE_KEY: ${{ secrets.EMAILJS_PRIVATE_KEY }}
+          CG_DEMO_API_KEY: ${{ secrets.CG_DEMO_API_KEY }}
+        run: python scripts/check_alerts.py

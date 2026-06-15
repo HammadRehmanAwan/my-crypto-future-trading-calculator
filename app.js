@@ -816,6 +816,10 @@ function _alertDailyBump() {
 }
 
 function checkVolatilityConditions(coinId, coinName, currPrice, rsi, change24h, bbWidth) {
+  // NOTE: Automatic volatility checking now runs server-side (see
+  // scripts/check_alerts.py + .github/workflows/volatility-alerts.yml), so it
+  // fires 24/7 whether or not this page is open. This client-side function is
+  // retained only as a helper for the user-initiated "Send Test Email" button.
   const s = getAlertSettings();
   if (!s.enabled || !s.email) return;
   const watched = s.watchCoins || [];
@@ -881,23 +885,11 @@ function runDeepVolatilityCheck(coinId, prices, rsiArr, bb) {
   checkVolatilityConditions(coinId, coin.name, curr, rsi, chg24h, bbWidth);
 }
 
-let _deepCheckTimer = null;
-function startBackgroundAlertChecks() {
-  if (_deepCheckTimer) return;
-  _deepCheckTimer = setInterval(async () => {
-    const s = getAlertSettings();
-    if (!s.enabled || !s.watchCoins?.length) return;
-    for (const coinId of s.watchCoins) {
-      try {
-        const { prices } = await fetchHistory(coinId, 30);
-        const rsiArr = calcRSI(prices);
-        const bb     = calcBollinger(prices);
-        runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
-      } catch { /* ignore per-coin errors */ }
-      await new Promise(r => setTimeout(r, 1200));
-    }
-  }, 5 * 60 * 1000);
-}
+// Automatic volatility monitoring is handled server-side (a scheduled worker —
+// scripts/check_alerts.py via GitHub Actions) so alerts fire 24/7 even when no
+// browser is open. The client no longer polls or sends alert emails itself;
+// doing so would double-send, since the server tracks cooldowns independently.
+function startBackgroundAlertChecks() { /* server-side now; intentionally a no-op */ }
 
 // ─── Alert UI helpers ───
 
@@ -931,9 +923,21 @@ function saveAlerts() {
     consentAt: consent ? new Date().toISOString() : null,
     sensitivity: document.querySelector('.thresh-btn.active')?.dataset?.t || 'moderate',
     watchCoins:  [...document.querySelectorAll('.watch-coin-cb:checked')].map(c => c.value),
+    updatedAt:   new Date().toISOString(),
   };
   persistAlertSettings(s);
-  showAlertStatus('Saved. Monitoring ' + s.watchCoins.length + ' coin(s) every 5 minutes.', 'success');
+
+  // Server-side monitoring reads subscriptions from Firestore, so 24/7 alerts
+  // require being signed in. Without sign-in, settings live only in this browser.
+  if (enabled && email) {
+    if (state.user) {
+      showAlertStatus(`Saved to your account. Our server will monitor ${s.watchCoins.length} coin(s) 24/7 and email you on a volatility spike — even with this tab closed.`, 'success');
+    } else {
+      showAlertStatus('Saved in this browser. Sign in with Google (top-right) to enable 24/7 server-side alerts — otherwise no automatic emails are sent.', 'success');
+    }
+  } else {
+    showAlertStatus('Settings saved.', 'success');
+  }
 }
 
 async function testAlert() {
@@ -951,8 +955,11 @@ function forgetAlertData() {
   state.alertSettings = {};
   localStorage.removeItem('cryptoAlertSettings');
   if (_db && state.user) {
-    _db.collection('users').doc(state.user.uid).collection('data').doc('settings')
-      .delete().catch(() => {});
+    const data = _db.collection('users').doc(state.user.uid).collection('data');
+    // Remove both the subscription and the server-side alert state (cooldowns),
+    // so erasure halts all server alerts immediately.
+    data.doc('settings').delete().catch(() => {});
+    data.doc('alert_state').delete().catch(() => {});
   }
   document.getElementById('alertEmail').value = '';
   document.getElementById('alertEnabled').checked = false;

@@ -226,14 +226,14 @@
       <div class="alert-header" onclick="document.getElementById('alertBody').classList.toggle('collapsed')">
         <div>
           <h3 class="card-heading" style="margin-bottom:2px">Volatility Alerts</h3>
-          <div class="alert-subhead">Auto-email when a coin moves sharply</div>
+          <div class="alert-subhead">24/7 server emails when a coin moves sharply</div>
         </div>
         <span class="alert-caret" id="alertCaret">&#9660;</span>
       </div>
       <div class="alert-body" id="alertBody">
 
         <div class="alert-note">
-          Enter your email below — alerts are sent automatically when high volatility is detected. <strong style="color:var(--accent)">Sign in with Google</strong> (top-right) to sync your settings across all your devices.
+          <strong style="color:var(--accent)">Sign in with Google</strong> (top-right), enter your email, and pick the coins to watch. Our server then monitors them around the clock and emails you on a volatility spike — <strong>even when this tab is closed</strong>. Without signing in, your settings stay in this browser only and no automatic emails are sent.
         </div>
 
         <div class="alert-form-group toggle-row">
@@ -253,7 +253,7 @@
         <div class="gdpr-row">
           <input type="checkbox" id="gdprConsent" />
           <label for="gdprConsent">
-            I consent to my email address being stored locally in this browser and used solely to send volatility alert emails. No data is shared with third parties beyond the email delivery service (EmailJS). See our <a href="privacy.html" target="_blank">Privacy Notice</a>. You can delete your data at any time.
+            I consent to my email address and alert preferences being stored (in this browser, and — when signed in — in our Firebase database) and used solely to send the volatility alert emails I requested. A scheduled server job reads these to send alerts, and EmailJS delivers them. No data is shared with anyone else. See our <a href="privacy.html" target="_blank">Privacy Notice</a>. You can delete your data at any time.
           </label>
         </div>
 
@@ -268,7 +268,7 @@
         </div>
 
         <div class="alert-form-group">
-          <label class="alert-label">Watch These Coins <span class="hint">(checked = monitored every 5 min)</span></label>
+          <label class="alert-label">Watch These Coins <span class="hint">(checked = monitored by our server ~every 30 min)</span></label>
           <div class="watch-coins" id="watchCoins"></div>
         </div>
 

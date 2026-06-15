@@ -33,19 +33,22 @@
     </ul>
 
     <h2>Where it is stored</h2>
-    <p>Your email and preferences are stored <strong>locally in your own browser</strong> (via <code>localStorage</code>). We do not run a database and do not store your email on any server we control.</p>
+    <p>Your email and preferences are always stored <strong>locally in your own browser</strong> (via <code>localStorage</code>). In addition, <strong>if you sign in with Google</strong> to enable 24/7 alerts, they are stored in our <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Google Firebase (Firestore)</a> database so our server can monitor your coins while your browser is closed. If you never sign in, nothing is stored on our servers.</p>
+
+    <h2>How alerts are processed</h2>
+    <p>When you are signed in, a scheduled server job (running roughly every 30 minutes) reads your saved preferences from Firestore, checks live market data for the coins you watch, and — only when a volatility threshold you chose is crossed — sends you an email. The job also stores a small "last sent" timestamp per coin in Firestore so you are not emailed repeatedly for the same event.</p>
 
     <h2>Who it is shared with</h2>
-    <p>When an alert is triggered, your email address is passed to <a href="https://www.emailjs.com/legal/privacy-policy/" target="_blank" rel="noopener">EmailJS</a>, the third-party service that delivers the email on our behalf. No other parties receive your data. We never sell or advertise to you.</p>
+    <p>Your data is handled by two processors acting on our behalf: <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Google Firebase</a> (storage) and <a href="https://www.emailjs.com/legal/privacy-policy/" target="_blank" rel="noopener">EmailJS</a> (email delivery). No other parties receive your data. We never sell or advertise to you.</p>
 
     <h2>Legal basis</h2>
     <p>We process your email on the basis of your <strong>explicit consent</strong>, which you give by ticking the consent box before saving. You can withdraw consent at any time.</p>
 
     <h2>Your rights</h2>
     <ul>
-      <li><strong>Access &amp; portability:</strong> Your data lives in your browser; you can view it in your browser's developer tools.</li>
-      <li><strong>Erasure:</strong> Click "Delete my stored email &amp; settings" in the Volatility Alerts card, or clear your browser storage, to remove everything instantly.</li>
-      <li><strong>Withdraw consent:</strong> Untick the consent box and save, or delete your data as above.</li>
+      <li><strong>Access &amp; portability:</strong> Your browser copy is visible in your browser's developer tools; your signed-in copy is the same data held in Firestore.</li>
+      <li><strong>Erasure:</strong> Click "Delete my stored email &amp; settings" in the Volatility Alerts card. This clears your browser storage and, when you are signed in, deletes your record from our Firestore database — stopping all server alerts immediately.</li>
+      <li><strong>Withdraw consent:</strong> Untick the consent box and save, or delete your data as above. You can also disable alerts with the toggle.</li>
     </ul>
 
     <h2>Market data</h2>
