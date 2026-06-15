@@ -872,8 +872,8 @@ async def chat(body: dict):
 
 # ════════════════════════════════════════════════════════════════════
 # ENSEMBLE FORECAST  (5-minute cache)
-# 5-model pure-Python forecasting engine: chronos_bolt, chronos_2,
-# timesfm, lstm, xgboost
+# 2 ML models (Chronos-Bolt, XGBoost via HF Space) + 3 statistical baselines
+# (ETS Baseline, Holt-Winters, Linear Trend) used as fallbacks
 # ════════════════════════════════════════════════════════════════════
 
 # ── Helper: pure-Python math primitives ─────────────────────────────
@@ -976,8 +976,8 @@ def _detect_regime_ens(prices: list) -> str:
 
 # ── Individual forecasting models ────────────────────────────────────
 
-def _model_chronos_bolt(prices: list) -> float:
-    """Short-window ETS (alpha=0.55, 10-day window), slight amplification ×1.1."""
+def _model_ets_baseline(prices: list) -> float:
+    """ETS Baseline: short-window exponential smoothing (alpha=0.55, 10-day window)."""
     window = prices[-10:] if len(prices) >= 10 else prices
     if not window:
         return 0.0
@@ -985,14 +985,13 @@ def _model_chronos_bolt(prices: list) -> float:
     level = window[0]
     for p in window[1:]:
         level = alpha * p + (1 - alpha) * level
-    forecast = level * 1.1
-    pct = (forecast - prices[-1]) / prices[-1] * 100 if prices[-1] else 0.0
+    pct = (level - prices[-1]) / prices[-1] * 100 if prices[-1] else 0.0
     return _clamp_f(pct, -20.0, 20.0)
 
 
-def _model_chronos_2(prices: list) -> float:
-    """Damped Holt-Winters (alpha=0.30, beta=0.08, phi=0.88, 30-day window),
-    7-day damped trend extrapolation."""
+def _model_holt_winters(prices: list) -> float:
+    """Holt-Winters Trend: damped double-exponential smoothing (alpha=0.30, beta=0.08,
+    phi=0.88, 30-day window), 7-day damped trend extrapolation."""
     window = prices[-30:] if len(prices) >= 30 else prices
     if len(window) < 2:
         return 0.0
@@ -1003,7 +1002,6 @@ def _model_chronos_2(prices: list) -> float:
         prev_level = level
         level = alpha * p + (1 - alpha) * (prev_level + phi * trend)
         trend = beta * (level - prev_level) + (1 - beta) * phi * trend
-    # 7-day damped extrapolation
     forecast_price = level
     damp = 1.0
     for _ in range(7):
@@ -1013,8 +1011,8 @@ def _model_chronos_2(prices: list) -> float:
     return _clamp_f(pct, -25.0, 25.0)
 
 
-def _model_timesfm(prices: list) -> float:
-    """OLS linear regression slope on 60-day window × 7 days, clamped ±25%."""
+def _model_linear_trend(prices: list) -> float:
+    """Linear Trend: OLS regression slope on 60-day window extrapolated 7 days."""
     window = prices[-60:] if len(prices) >= 60 else prices
     if len(window) < 2:
         return 0.0
@@ -1022,33 +1020,6 @@ def _model_timesfm(prices: list) -> float:
     forecast_price = prices[-1] + slope * 7
     pct = (forecast_price - prices[-1]) / prices[-1] * 100 if prices[-1] else 0.0
     return _clamp_f(pct, -25.0, 25.0)
-
-
-def _model_lstm(prices: list, rsi: float, macd_v: float, sig_v: float) -> float:
-    """Exponentially-weighted memory on last 20 prices + RSI/MACD boosts."""
-    window = prices[-20:] if len(prices) >= 20 else prices
-    if not window:
-        return 0.0
-    n = len(window)
-    weights = [0.5 ** (n - 1 - i) for i in range(n)]
-    total_w = sum(weights)
-    weighted_price = sum(weights[i] * window[i] for i in range(n)) / total_w if total_w else window[-1]
-    pct = (weighted_price - prices[-1]) / prices[-1] * 100 if prices[-1] else 0.0
-    # RSI reversal boosts
-    if rsi < 28:
-        pct += 4.5
-    elif rsi > 72:
-        pct -= 4.5
-    elif rsi < 36:
-        pct += 2.0
-    elif rsi > 65:
-        pct -= 2.0
-    # MACD direction bonus
-    if macd_v > sig_v:
-        pct += 1.5
-    elif macd_v < sig_v:
-        pct -= 1.5
-    return _clamp_f(pct, -20.0, 20.0)
 
 
 def _model_xgboost(prices: list, rsi: float, macd_v: float, sig_v: float,
@@ -1132,7 +1103,7 @@ async def ensemble_forecast(coin_id: str):
             r = await client.get(
                 f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart",
                 params={"vs_currency": "usd", "days": "90"},
-                headers={"User-Agent": "FutureX/1.0"},
+                headers=_cg_headers(),
             )
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=502)
@@ -1163,12 +1134,13 @@ async def ensemble_forecast(coin_id: str):
     e50_series = _ema_py(prices, 50)
     e9, e21, e50 = e9_series[-1], e21_series[-1], e50_series[-1]
 
-    # ── Run individual models (statistical fallbacks) ────────────────
-    pct_chronos_bolt = _model_chronos_bolt(prices)
-    pct_chronos_2    = _model_chronos_2(prices)
-    pct_timesfm      = _model_timesfm(prices)
-    pct_lstm         = _model_lstm(prices, rsi, macd_v, sig_v)
+    # ── Run statistical baseline models (fallbacks when HF Space unreachable) ─
+    pct_ets_baseline = _model_ets_baseline(prices)
+    pct_holt_winters = _model_holt_winters(prices)
+    pct_linear_trend = _model_linear_trend(prices)
     pct_xgboost      = _model_xgboost(prices, rsi, macd_v, sig_v, atr, e9, e21, e50)
+    # chronos_bolt starts as None — only set if HF returns a real prediction
+    pct_chronos_bolt: float | None = None
 
     # ── Override with real ML predictions from HF Space ──────────────
     hf_preds  = await _call_hf_ml_models(prices)
@@ -1178,46 +1150,47 @@ async def ensemble_forecast(coin_id: str):
         pct_chronos_bolt = _clamp_f(float(hf_preds["chronos_bolt_pct"]), -20.0, 20.0)
         ml_powered["chronos_bolt"] = True
 
-    if "chronos_2_pct" in hf_preds:
-        pct_chronos_2 = _clamp_f(float(hf_preds["chronos_2_pct"]), -25.0, 25.0)
-        ml_powered["chronos_2"] = True
-
     if "xgboost_pct" in hf_preds:
         pct_xgboost = _clamp_f(float(hf_preds["xgboost_pct"]), -20.0, 20.0)
         ml_powered["xgboost"] = True
 
+    # Fall back to ETS baseline if Chronos-Bolt is unavailable
+    if pct_chronos_bolt is None:
+        pct_chronos_bolt = pct_ets_baseline
+
     # ── Convert pct → -1..+1 scores ─────────────────────────────────
     sc_chronos_bolt = _score(pct_chronos_bolt)
-    sc_chronos_2    = _score(pct_chronos_2)
-    sc_timesfm      = _score(pct_timesfm)
-    sc_lstm         = _score(pct_lstm)
     sc_xgboost      = _score(pct_xgboost)
+    sc_ets_baseline = _score(pct_ets_baseline)
+    sc_holt_winters = _score(pct_holt_winters)
+    sc_linear_trend = _score(pct_linear_trend)
 
     # ── Regime detection & weight adjustment ─────────────────────────
     regime = _detect_regime_ens(prices)
 
     w = {
-        "chronos_bolt": 0.20,
-        "chronos_2":    0.30,
-        "timesfm":      0.20,
-        "lstm":         0.15,
-        "xgboost":      0.15,
+        "chronos_bolt": 0.30,
+        "xgboost":      0.25,
+        "holt_winters": 0.20,
+        "ets_baseline": 0.15,
+        "linear_trend": 0.10,
     }
 
     if regime == "bull":
-        w["chronos_2"]    += 0.08
-        w["timesfm"]      += 0.05
-        w["lstm"]         -= 0.07
-        w["xgboost"]      -= 0.06
+        w["chronos_bolt"] += 0.06
+        w["xgboost"]      += 0.04
+        w["linear_trend"] += 0.03
+        w["holt_winters"] -= 0.07
+        w["ets_baseline"] -= 0.06
     elif regime == "bear":
-        w["lstm"]         += 0.08
-        w["xgboost"]      += 0.07
-        w["chronos_2"]    -= 0.05
-        w["timesfm"]      -= 0.10
+        w["xgboost"]      += 0.08
+        w["chronos_bolt"] += 0.04
+        w["ets_baseline"] -= 0.06
+        w["linear_trend"] -= 0.06
     else:  # sideways
-        w["xgboost"]      += 0.05
         w["chronos_bolt"] += 0.03
-        w["timesfm"]      -= 0.08
+        w["ets_baseline"] += 0.03
+        w["linear_trend"] -= 0.06
 
     # Renormalize weights to sum = 1
     total_w = sum(w.values())
@@ -1226,10 +1199,10 @@ async def ensemble_forecast(coin_id: str):
     # ── Weighted ensemble score ──────────────────────────────────────
     model_scores = {
         "chronos_bolt": sc_chronos_bolt,
-        "chronos_2":    sc_chronos_2,
-        "timesfm":      sc_timesfm,
-        "lstm":         sc_lstm,
         "xgboost":      sc_xgboost,
+        "ets_baseline": sc_ets_baseline,
+        "holt_winters": sc_holt_winters,
+        "linear_trend": sc_linear_trend,
     }
     final_score = sum(model_scores[k] * w[k] for k in w)
 
@@ -1260,10 +1233,10 @@ async def ensemble_forecast(coin_id: str):
         "model_scores": {k: round(v, 4) for k, v in model_scores.items()},
         "model_pct": {
             "chronos_bolt": round(pct_chronos_bolt, 4),
-            "chronos_2":    round(pct_chronos_2, 4),
-            "timesfm":      round(pct_timesfm, 4),
-            "lstm":         round(pct_lstm, 4),
             "xgboost":      round(pct_xgboost, 4),
+            "ets_baseline": round(pct_ets_baseline, 4),
+            "holt_winters": round(pct_holt_winters, 4),
+            "linear_trend": round(pct_linear_trend, 4),
         },
         "ml_powered": ml_powered,
         "indicators": {
@@ -1279,6 +1252,19 @@ async def ensemble_forecast(coin_id: str):
 
     cache_set(f"ensemble-{coin_id}", result)
     return result
+
+
+@app.get("/model-status")
+async def model_status():
+    """Proxy to HF Space /api/model-status. Returns {} on failure."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{HF_SPACE_URL}/api/model-status")
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        pass
+    return {}
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """
 Crypto Futures Trading Calculator
-Powered by Amazon Chronos-T5-Small (Hugging Face) + CoinGecko API
+Powered by Amazon Chronos-Bolt-Small + XGBoost + CoinGecko API
 """
 
 import warnings
@@ -50,9 +50,9 @@ def load_model():
     if _pipeline is not None:
         return _pipeline, None
     try:
-        from chronos import ChronosPipeline
-        _pipeline = ChronosPipeline.from_pretrained(
-            "amazon/chronos-t5-small",
+        from chronos import BaseChronosPipeline
+        _pipeline = BaseChronosPipeline.from_pretrained(
+            "amazon/chronos-bolt-small",
             device_map="cpu",
             torch_dtype=torch.float32,
         )
@@ -68,7 +68,7 @@ def load_model():
 def fetch_ohlcv(coin_id: str, days: int = 90):
     """Fetch daily price + volume from CoinGecko (free, no key)."""
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-    params = {"vs_currency": "usd", "days": days, "interval": "daily"}
+    params = {"vs_currency": "usd", "days": days}
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
@@ -134,15 +134,15 @@ def ai_forecast(prices: np.ndarray, horizon: int = 7):
         return None, err
     context = torch.tensor(prices[-60:], dtype=torch.float32).unsqueeze(0)
     try:
-        forecast = pipe.predict(
-            context=context,
+        q_pred, _ = pipe.predict_quantiles(
+            context,
             prediction_length=horizon,
-            num_samples=100,
+            quantile_levels=[0.1, 0.5, 0.9],
         )
-        samples = forecast[0].numpy()          # (100, horizon)
-        lo  = np.quantile(samples, 0.10, axis=0)
-        med = np.quantile(samples, 0.50, axis=0)
-        hi  = np.quantile(samples, 0.90, axis=0)
+        # q_pred shape: (1, horizon, 3)
+        lo  = q_pred[0, :, 0].numpy()
+        med = q_pred[0, :, 1].numpy()
+        hi  = q_pred[0, :, 2].numpy()
         return {"low": lo, "median": med, "high": hi}, None
     except Exception as exc:
         return None, str(exc)
@@ -230,7 +230,7 @@ def chart_prediction(df, fcst, horizon, coin_label):
         ))
 
     fig.update_layout(
-        title=f"{coin_label} — Chronos-T5 AI Price Forecast",
+        title=f"{coin_label} — Chronos-Bolt AI Price Forecast",
         xaxis_title="Date",
         yaxis_title="Price (USD)",
         template="plotly_dark",
@@ -376,11 +376,11 @@ def fmt_signal(
     if fcst:
         chg = (fcst["median"][-1] - px) / px * 100
         if chg > 2:
-            bullets.append(f"🟢 Chronos AI forecasts **+{chg:.1f}%** over {h} days"); score += 2
+            bullets.append(f"🟢 Chronos-Bolt AI forecasts **+{chg:.1f}%** over {h} days"); score += 2
         elif chg < -2:
-            bullets.append(f"🔴 Chronos AI forecasts **{chg:.1f}%** over {h} days"); score -= 2
+            bullets.append(f"🔴 Chronos-Bolt AI forecasts **{chg:.1f}%** over {h} days"); score -= 2
         else:
-            bullets.append(f"🟡 Chronos AI sees minimal move ({chg:+.1f}%)")
+            bullets.append(f"🟡 Chronos-Bolt AI sees minimal move ({chg:+.1f}%)")
 
     ld = m["liq_dist"]
     if ld < 5:
@@ -481,10 +481,11 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 
     gr.Markdown("""
 # 📈 Crypto Futures Trading Calculator
-### Powered by [Amazon Chronos-T5-Small](https://huggingface.co/amazon/chronos-t5-small) · CoinGecko · RSI · MACD · Bollinger Bands
+### Powered by [Amazon Chronos-Bolt-Small](https://huggingface.co/amazon/chronos-bolt-small) · XGBoost · CoinGecko · RSI · MACD · Bollinger Bands
 
-> **Chronos-T5-Small** is Amazon's state-of-the-art zero-shot probabilistic time-series model,
-> pre-trained on **27 billion data points** — the most accurate open-source crypto forecasting model on Hugging Face.
+> **Chronos-Bolt-Small** is Amazon's fast zero-shot probabilistic time-series model.
+> **XGBoost** provides a feature-based gradient-boosted regression trained on rolling indicators.
+> Both models run live on this Space — no heuristics.
     """)
 
     with gr.Row():
@@ -539,11 +540,12 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 
 | Component | Detail |
 |---|---|
-| **AI Model** | [amazon/chronos-t5-small](https://huggingface.co/amazon/chronos-t5-small) — zero-shot probabilistic time-series forecasting |
+| **ML Forecast** | [amazon/chronos-bolt-small](https://huggingface.co/amazon/chronos-bolt-small) — zero-shot probabilistic time-series forecasting |
+| **ML Regression** | XGBoost regressor trained on rolling RSI, MACD, EMA, ATR, and return features |
 | **Price Data** | CoinGecko free public API (no API key required) |
 | **Indicators** | RSI(14), MACD(12/26/9), Bollinger Bands(20, 2σ) |
 | **Futures Math** | Liquidation price, PnL, ROE, Risk/Reward ratio |
-| **Trade Signal** | Composite score from AI + 3 technical indicators |
+| **Trade Signal** | Composite score from Chronos-Bolt + XGBoost + 3 technical indicators |
 
 ⚠️ *For educational purposes only. Crypto trading carries significant risk. Not financial advice.*
     """)
@@ -884,13 +886,13 @@ def _chat(body: dict):
 
 # ──────────────────────────────────────────────────────────────────────────────
 # ML FORECAST API  — called by the Render backend so the ensemble uses real
-# Chronos and sklearn GradientBoosting instead of statistical approximations.
+# Chronos-Bolt and XGBoost instead of statistical approximations.
 #
 #  POST /api/ml-forecast  {"prices": [float, ...]}   (up to 90 daily closes)
 #
-#  Returns: {"chronos_bolt_pct": float, "chronos_2_pct": float,
-#             "xgboost_pct": float}   (% change over 7 days, may be absent on
-#             error so the caller falls back gracefully to its statistical value)
+#  Returns: {"chronos_bolt_pct": float, "xgboost_pct": float}
+#             (% change over 7 days; key absent on error so caller falls back
+#              gracefully to its statistical baseline value)
 # ──────────────────────────────────────────────────────────────────────────────
 
 @_fastapi.post("/api/ml-forecast", include_in_schema=False)
@@ -905,34 +907,32 @@ def api_ml_forecast(body: dict):
     curr = float(pa[-1])
     out: dict = {}
 
-    # ── Chronos (real model, two context windows) ─────────────────────────────
-    # chronos_bolt  → short 14-day context (fast-reacting, micro movements)
-    # chronos_2     → full  60-day context (balanced, general-purpose)
+    # ── Chronos-Bolt (real model) ─────────────────────────────────────
     pipe, _err = load_model()
     if pipe is not None:
-        for key, ctx_len in [("chronos_bolt", 14), ("chronos_2", 60)]:
-            try:
-                ctx   = torch.tensor(pa[-ctx_len:], dtype=torch.float32).unsqueeze(0)
-                fc    = pipe.predict(ctx, prediction_length=7, num_samples=50)
-                med7  = float(_np.quantile(fc[0].numpy(), 0.5, axis=0)[-1])
-                out[f"{key}_pct"] = round((med7 - curr) / curr * 100, 3)
-            except Exception:
-                pass   # absent key → backend keeps its statistical fallback
+        try:
+            ctx       = torch.tensor(pa[-60:], dtype=torch.float32).unsqueeze(0)
+            q_pred, _ = pipe.predict_quantiles(ctx, prediction_length=7,
+                                               quantile_levels=[0.1, 0.5, 0.9])
+            # q_pred shape: (1, 7, 3) — take day-7 median (index 1)
+            med7 = float(q_pred[0, -1, 1].item())
+            out["chronos_bolt_pct"] = round((med7 - curr) / curr * 100, 3)
+        except Exception:
+            pass  # absent key → backend keeps its statistical fallback
 
-    # ── XGBoost: sklearn GradientBoostingRegressor trained on rolling features ─
+    # ── XGBoost: real XGBRegressor trained on rolling features ────────
     try:
-        from sklearn.ensemble import GradientBoostingRegressor
+        from xgboost import XGBRegressor
         from sklearn.preprocessing import StandardScaler
 
         n = len(pa)
         s = pd.Series(pa)
-        rsi_a     = calc_rsi(pa)
-        ml_v, ms_v, _ = calc_macd(pa)
+        rsi_a          = calc_rsi(pa)
+        ml_v, ms_v, _  = calc_macd(pa)
         e9  = s.ewm(span=9,  adjust=False).mean().values
         e21 = s.ewm(span=21, adjust=False).mean().values
         e50 = s.ewm(span=50, adjust=False).mean().values
 
-        # Build feature matrix: each row = indicators on day i, target = 7d fwd ret
         X_rows, y_rows = [], []
         for i in range(50, n - 7):
             p     = pa[i]
@@ -955,11 +955,11 @@ def api_ml_forecast(body: dict):
             Xa, ya = _np.array(X_rows), _np.array(y_rows)
             scaler = StandardScaler()
             Xs     = scaler.fit_transform(Xa)
-            gbr    = GradientBoostingRegressor(
+            xgbr   = XGBRegressor(
                 n_estimators=100, learning_rate=0.08,
-                max_depth=3, subsample=0.8, random_state=42,
+                max_depth=3, subsample=0.8, random_state=42, verbosity=0,
             )
-            gbr.fit(Xs, ya)
+            xgbr.fit(Xs, ya)
 
             p     = curr
             atr_c = float(_np.mean(_np.abs(_np.diff(pa[-15:]))))
@@ -974,11 +974,23 @@ def api_ml_forecast(body: dict):
                 (p - pa[-11]) / pa[-11] * 100 if n >= 11 else 0.0,
                 (p - pa[-21]) / pa[-21] * 100 if n >= 21 else 0.0,
             ]]
-            out["xgboost_pct"] = round(float(gbr.predict(scaler.transform(feat))[0]), 3)
+            out["xgboost_pct"] = round(float(xgbr.predict(scaler.transform(feat))[0]), 3)
     except Exception as xgb_err:
         out["xgboost_error"] = str(xgb_err)
 
     return out
+
+
+@_fastapi.get("/api/model-status", include_in_schema=False)
+def api_model_status():
+    pipe, _ = load_model()
+    xgb_ok = False
+    try:
+        import xgboost  # noqa: F401
+        xgb_ok = True
+    except ImportError:
+        pass
+    return {"chronos_bolt": pipe is not None, "xgboost": xgb_ok}
 
 
 # Gradio AI calculator at /ai  (does NOT override the HTML frontend at /)

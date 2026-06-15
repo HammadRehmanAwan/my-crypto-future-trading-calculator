@@ -2801,11 +2801,11 @@ async function runHubAnalysis() {
 let _ensembleChart = null;
 
 const ENS_MODEL_META = {
-  chronos_bolt: { name: 'Chronos-Bolt',  desc: 'Short-term micro movements',   color: '#00D4FF', canBeReal: true  },
-  chronos_2:    { name: 'Chronos-2',     desc: 'General-purpose baseline',      color: '#8B5CF6', canBeReal: true  },
-  timesfm:      { name: 'TimesFM',       desc: 'Long-horizon macro trend',      color: '#F59E0B', canBeReal: false },
-  lstm:         { name: 'LSTM / GRU',    desc: 'Sequential memory & reversals', color: '#10B981', canBeReal: false },
-  xgboost:      { name: 'XGBoost',       desc: 'Feature-based analysis',        color: '#FF6B6B', canBeReal: true  },
+  chronos_bolt: { name: 'Chronos-Bolt',  desc: 'ML: Amazon zero-shot time-series model', color: '#00D4FF', canBeReal: true  },
+  xgboost:      { name: 'XGBoost',       desc: 'ML: Gradient-boosted regressor',         color: '#FF6B6B', canBeReal: true  },
+  ets_baseline: { name: 'ETS Baseline',  desc: 'Stat: Exponential smoothing',            color: '#8B5CF6', canBeReal: false },
+  holt_winters: { name: 'Holt-Winters',  desc: 'Stat: Damped trend extrapolation',       color: '#10B981', canBeReal: false },
+  linear_trend: { name: 'Linear Trend',  desc: 'Stat: OLS regression slope',             color: '#F59E0B', canBeReal: false },
 };
 
 function renderEnsembleForecast(data) {
@@ -2838,7 +2838,7 @@ function renderEnsembleForecast(data) {
   const consensusStr = `${aligning}/5 ${dir > 0 ? 'bullish-leaning' : dir < 0 ? 'bearish-leaning' : 'near-neutral'}`;
 
   // Per-model rows
-  const modelRows = ['chronos_bolt','chronos_2','timesfm','lstm','xgboost'].map(key => {
+  const modelRows = ['chronos_bolt','xgboost','ets_baseline','holt_winters','linear_trend'].map(key => {
     const meta   = ENS_MODEL_META[key];
     const score  = model_scores[key] ?? 0;
     const pct    = model_pct[key] ?? 0;
@@ -2928,7 +2928,7 @@ function renderEnsembleForecast(data) {
       <div class="enm-canvas-wrap"><canvas id="ensembleChart"></canvas></div>
     </div>
 
-    <div class="hub-note">Ensemble fuses ${Object.keys(ENS_MODEL_META).map(k=>ENS_MODEL_META[k].name).join(' · ')} with ${regime}-regime-adaptive weighting. Bear regime boosts LSTM &amp; XGBoost; bull regime boosts Chronos-2 &amp; TimesFM. Educational forecast — not financial advice.</div>`;
+    <div class="hub-note">Ensemble fuses ${Object.keys(ENS_MODEL_META).map(k=>ENS_MODEL_META[k].name).join(' · ')} with ${regime}-regime-adaptive weighting. ML models (Chronos-Bolt, XGBoost) run on HuggingFace; statistical baselines are used as fallbacks. Educational forecast — not financial advice.</div>`;
 
   _buildEnsembleChart(price_history, model_pct, p || (price_history?.[price_history.length - 1] ?? 0));
 }
