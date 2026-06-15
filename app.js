@@ -59,14 +59,64 @@ const state = {
 // API  (60 s in-memory cache)
 // ═══════════════════════════════════════════════════════════════════
 
+// ── Rate-limited queue for all direct (non-backend) API calls ────────
+// Caps concurrent requests at 2 and enforces ≥300 ms between starts,
+// which keeps CoinGecko / alternative.me below their rate limits even
+// when the 15-coin portfolio analysis fires many calls at once.
+const _apiQueue = (() => {
+  const q = [];
+  let inFlight = 0;
+  let lastAt = 0;
+  const MAX = 2, GAP = 300;
+  function drain() {
+    if (inFlight >= MAX || !q.length) return;
+    const wait = Math.max(0, GAP - (Date.now() - lastAt));
+    if (wait > 0) { setTimeout(drain, wait); return; }
+    const { fn, res, rej } = q.shift();
+    inFlight++; lastAt = Date.now();
+    Promise.resolve().then(fn).then(res, rej).finally(() => { inFlight--; drain(); });
+  }
+  return fn => new Promise((res, rej) => { q.push({ fn, res, rej }); drain(); });
+})();
+
+// Track whether a backend cold-start has been detected this session
+let _backendWaking = false;
+
 async function apiFetch(url, key, ttl = 60_000) {
-  const hit = state.cache[key];
-  if (hit && Date.now() - hit.ts < ttl) return hit.data;
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const data = await r.json();
-  state.cache[key] = { data, ts: Date.now() };
-  return data;
+  // 1. In-memory cache
+  if (key) {
+    const hit = state.cache[key];
+    if (hit && Date.now() - hit.ts < ttl) return hit.data;
+  }
+  // 2. localStorage persistence — survive page reloads within TTL
+  if (key) {
+    try {
+      const raw = localStorage.getItem('fxc_' + key);
+      if (raw) {
+        const e = JSON.parse(raw);
+        if (Date.now() - e.ts < ttl) { state.cache[key] = e; return e.data; }
+      }
+    } catch (_) {}
+  }
+  // 3. Queue-throttled fetch with 429 retry + exponential back-off
+  return _apiQueue(async () => {
+    for (let i = 0; i < 4; i++) {
+      const r = await fetch(url);
+      if (r.status === 429) {
+        if (i === 3) throw new Error('Rate limited (429) after retries');
+        await new Promise(res => setTimeout(res, (1000 << i) + Math.random() * 400));
+        continue;
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const data = await r.json();
+      const entry = { data, ts: Date.now() };
+      if (key) {
+        state.cache[key] = entry;
+        try { localStorage.setItem('fxc_' + key, JSON.stringify(entry)); } catch (_) {}
+      }
+      return data;
+    }
+  });
 }
 
 // Render's free tier sleeps after ~15 min idle; the first request after that
@@ -92,12 +142,20 @@ async function backendFetch(url, key, ttl = 60_000, { method = 'GET', body = nul
       clearTimeout(timer);
       // 502/503/504 mean the dyno is still waking up — back off and retry.
       if ((r.status === 502 || r.status === 503 || r.status === 504) && attempt < retries) {
+        if (!_backendWaking) {
+          _backendWaking = true;
+          document.dispatchEvent(new CustomEvent('backend-waking'));
+        }
         await new Promise(res => setTimeout(res, 2500 * (attempt + 1)));
         continue;
       }
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const data = await r.json();
       if (key) state.cache[key] = { data, ts: Date.now() };
+      if (_backendWaking) {
+        _backendWaking = false;
+        document.dispatchEvent(new CustomEvent('backend-online'));
+      }
       return data;
     } catch (e) {
       clearTimeout(timer);
@@ -120,18 +178,43 @@ function wakeBackend() {
 }
 
 async function fetchHistory(coinId, days) {
-  const url = `${BASE}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}&interval=daily`;
-  const raw = await apiFetch(url, `h-${coinId}-${days}`);
-  return {
+  const cacheKey = `h-${coinId}-${days}`;
+  const parseRaw = raw => ({
     dates:   raw.prices.map(p => new Date(p[0])),
     prices:  raw.prices.map(p => p[1]),
     volumes: raw.total_volumes.map(v => v[1]),
-  };
+  });
+  // Try backend CG proxy first (server-side Demo key + 5-min cache)
+  if (BACKEND_URL) {
+    try {
+      const raw = await backendFetch(
+        `${BACKEND_URL}/cg/history/${coinId}?days=${days}`,
+        cacheKey, 300_000, { retries: 1, timeoutMs: 15_000 }
+      );
+      return parseRaw(raw);
+    } catch (_) { /* fall through to direct */ }
+  }
+  // Direct CoinGecko fallback (no interval=daily — deprecated param)
+  const url = `${BASE}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`;
+  return parseRaw(await apiFetch(url, cacheKey));
 }
 
 async function fetchTicker(ids) {
-  const url = `${BASE}/simple/price?ids=${ids.join(',')}&vs_currencies=usd&include_24hr_change=true`;
-  return apiFetch(url, `tick-${ids.join(',')}`, 30_000);
+  const idsStr  = ids.join(',');
+  const cacheKey = `tick-${idsStr}`;
+  const ttl     = 30_000;
+  // Try backend CG proxy first (server-side Demo key + 30-sec cache)
+  if (BACKEND_URL) {
+    try {
+      return await backendFetch(
+        `${BACKEND_URL}/cg/price?ids=${encodeURIComponent(idsStr)}`,
+        cacheKey, ttl, { retries: 1, timeoutMs: 10_000 }
+      );
+    } catch (_) { /* fall through */ }
+  }
+  // Direct CoinGecko fallback
+  const url = `${BASE}/simple/price?ids=${idsStr}&vs_currencies=usd&include_24hr_change=true`;
+  return apiFetch(url, cacheKey, ttl);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -2517,6 +2600,18 @@ async function runHubAnalysis() {
   if (statusLbl) statusLbl.textContent = 'Computing technicals…';
   wakeBackend();
 
+  // Cold-start awareness: Render free dynos sleep after ~15 min idle.
+  // When backendFetch detects a 502/503 it dispatches 'backend-waking';
+  // we surface a friendly message so users don't think it's broken.
+  const _onWaking = () => {
+    if (statusLbl) statusLbl.textContent = 'Waking AI engine — first load may take 20–50 s…';
+  };
+  const _onOnline = () => {
+    if (statusLbl) statusLbl.textContent = 'AI engine online — loading final data…';
+  };
+  document.addEventListener('backend-waking', _onWaking);
+  document.addEventListener('backend-online', _onOnline);
+
   const progress = {};
   HUB_STEPS.forEach(s => (progress[s] = 'pending'));
   progress['Price Data'] = 'active';
@@ -2690,6 +2785,8 @@ async function runHubAnalysis() {
     : Promise.resolve();
 
   await Promise.allSettled([futuresP, orderFlowP, tokP, onchainP, newsP, sentP, ensembleP]);
+  document.removeEventListener('backend-waking', _onWaking);
+  document.removeEventListener('backend-online', _onOnline);
   HUB_STEPS.forEach(s => { if (progress[s] !== 'done') progress[s] = 'done'; });
   progress['Signal Generation'] = 'done';
   renderHubProgress(progress);

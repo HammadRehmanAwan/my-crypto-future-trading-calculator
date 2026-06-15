@@ -1,6 +1,7 @@
 """
 FutureX Backend — Render FastAPI deployment.
 Endpoints: /health, /firebase-config, /news,
+           /cg/price, /cg/history/{coin},
            /futures/{coin_id}, /tokenomics/{coin_id},
            /onchain/{coin_id}, /sentiment, /chat
 """
@@ -13,6 +14,10 @@ import httpx
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+# CoinGecko Demo API key (free tier, 30 req/min keyed vs ~5/min keyless).
+# Set CG_DEMO_API_KEY as an env var on Render; leave blank for keyless fallback.
+CG_DEMO_KEY = os.environ.get("CG_DEMO_API_KEY", "")
 
 app = FastAPI()
 
@@ -169,6 +174,59 @@ async def get_news():
     if result:
         cache_set("news", result)
     return result
+
+
+# ════════════════════════════════════════════════════════════════════
+# COINGECKO PROXY  (server-side Demo key + server-side cache)
+# Fronts the two highest-traffic CoinGecko endpoints so the browser
+# never hits CoinGecko directly and never rate-limits.
+# ════════════════════════════════════════════════════════════════════
+
+def _cg_headers() -> dict:
+    h = {"User-Agent": "FutureX/1.0"}
+    if CG_DEMO_KEY:
+        h["x-cg-demo-api-key"] = CG_DEMO_KEY
+    return h
+
+
+@app.get("/cg/price")
+async def cg_price(ids: str = Query(...)):
+    """Proxy /simple/price for one or more coin ids (comma-separated)."""
+    cache_key = f"cg-price-{ids}"
+    cached = cache_get(cache_key, 30)
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient(timeout=12.0) as client:
+        r = await client.get(
+            "https://api.coingecko.com/api/v3/simple/price",
+            params={"ids": ids, "vs_currencies": "usd", "include_24hr_change": "true"},
+            headers=_cg_headers(),
+        )
+    if r.status_code != 200:
+        return JSONResponse({"error": f"CoinGecko {r.status_code}"}, status_code=r.status_code)
+    data = r.json()
+    cache_set(cache_key, data)
+    return data
+
+
+@app.get("/cg/history/{coin}")
+async def cg_history(coin: str, days: int = Query(90)):
+    """Proxy /coins/{coin}/market_chart — no interval=daily (deprecated)."""
+    cache_key = f"cg-hist-{coin}-{days}"
+    cached = cache_get(cache_key, 300)   # 5-min server-side cache
+    if cached is not None:
+        return cached
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        r = await client.get(
+            f"https://api.coingecko.com/api/v3/coins/{coin}/market_chart",
+            params={"vs_currency": "usd", "days": str(days)},
+            headers=_cg_headers(),
+        )
+    if r.status_code != 200:
+        return JSONResponse({"error": f"CoinGecko {r.status_code}"}, status_code=r.status_code)
+    data = r.json()
+    cache_set(cache_key, data)
+    return data
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -1073,7 +1131,7 @@ async def ensemble_forecast(coin_id: str):
         async with httpx.AsyncClient(timeout=15.0) as client:
             r = await client.get(
                 f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart",
-                params={"vs_currency": "usd", "days": "90", "interval": "daily"},
+                params={"vs_currency": "usd", "days": "90"},
                 headers={"User-Agent": "FutureX/1.0"},
             )
     except Exception as e:
