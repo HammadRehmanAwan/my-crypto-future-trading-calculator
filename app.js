@@ -4769,6 +4769,7 @@ function copilotAddMsg(text, isUser, report, source) {
   if (!isUser && report && report.analytical) {
     div.innerHTML = `<div class="copilot-bubble">${zorionReportHTML(text, report)}${srcTag}</div>`;
     box.appendChild(div);
+    // Animate the confidence meter once it's in the DOM
     requestAnimationFrame(() => {
       const f = div.querySelector('.zr-conf-fill');
       if (f) f.style.width = report.conf + '%';
