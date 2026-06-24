@@ -1,18 +1,18 @@
-name: Deploy site to GitHub Pages
+name: Deploy Frontend to GitHub Pages
 
 # Deploys the static frontend straight from `main`. Only the frontend files
-# are staged into _site (backend.py / app.py / configs are never published),
-# so there is no more manual mirror to the gh-pages branch.
+# in the frontend/ directory are deployed (backend.py / app.py / configs are
+# never published), so there is no more manual mirror to the gh-pages branch.
 
 on:
   push:
     branches: ["main"]
     paths:
-      - "index.html"
-      - "app.js"
-      - "style.css"
-      - "favicon.svg"
-      - "privacy.html"
+      - "frontend/index.html"
+      - "frontend/app.js"
+      - "frontend/style.css"
+      - "frontend/favicon.svg"
+      - "frontend/privacy.html"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
@@ -32,22 +32,16 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout main
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Stage frontend into _site
-        run: |
-          mkdir -p _site
-          for f in index.html app.js style.css favicon.svg privacy.html; do
-            if [ -f "$f" ]; then cp "$f" _site/; echo "staged $f"; fi
-          done
-          echo "--- _site contents ---"
-          ls -la _site
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
 
-      - name: Upload Pages artifact
+      - name: Upload frontend as Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: _site
+          path: frontend/
 
       - name: Deploy to GitHub Pages
         id: deployment

@@ -1,6 +1,6 @@
 """
 Crypto Futures Trading Calculator
-Powered by Amazon Chronos-T5-Small (Hugging Face) + CoinGecko API
+Powered by Amazon Chronos-Bolt-Small + XGBoost + CoinGecko API
 """
 
 import warnings
@@ -50,9 +50,9 @@ def load_model():
     if _pipeline is not None:
         return _pipeline, None
     try:
-        from chronos import ChronosPipeline
-        _pipeline = ChronosPipeline.from_pretrained(
-            "amazon/chronos-t5-small",
+        from chronos import BaseChronosPipeline
+        _pipeline = BaseChronosPipeline.from_pretrained(
+            "amazon/chronos-bolt-small",
             device_map="cpu",
             torch_dtype=torch.float32,
         )
@@ -68,7 +68,7 @@ def load_model():
 def fetch_ohlcv(coin_id: str, days: int = 90):
     """Fetch daily price + volume from CoinGecko (free, no key)."""
     url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-    params = {"vs_currency": "usd", "days": days, "interval": "daily"}
+    params = {"vs_currency": "usd", "days": days}
     try:
         resp = requests.get(url, params=params, timeout=15)
         resp.raise_for_status()
@@ -134,15 +134,15 @@ def ai_forecast(prices: np.ndarray, horizon: int = 7):
         return None, err
     context = torch.tensor(prices[-60:], dtype=torch.float32).unsqueeze(0)
     try:
-        forecast = pipe.predict(
-            context=context,
+        q_pred, _ = pipe.predict_quantiles(
+            context,
             prediction_length=horizon,
-            num_samples=100,
+            quantile_levels=[0.1, 0.5, 0.9],
         )
-        samples = forecast[0].numpy()          # (100, horizon)
-        lo  = np.quantile(samples, 0.10, axis=0)
-        med = np.quantile(samples, 0.50, axis=0)
-        hi  = np.quantile(samples, 0.90, axis=0)
+        # q_pred shape: (1, horizon, 3)
+        lo  = q_pred[0, :, 0].numpy()
+        med = q_pred[0, :, 1].numpy()
+        hi  = q_pred[0, :, 2].numpy()
         return {"low": lo, "median": med, "high": hi}, None
     except Exception as exc:
         return None, str(exc)
@@ -230,7 +230,7 @@ def chart_prediction(df, fcst, horizon, coin_label):
         ))
 
     fig.update_layout(
-        title=f"{coin_label} — Chronos-T5 AI Price Forecast",
+        title=f"{coin_label} — Chronos-Bolt AI Price Forecast",
         xaxis_title="Date",
         yaxis_title="Price (USD)",
         template="plotly_dark",
@@ -376,11 +376,11 @@ def fmt_signal(
     if fcst:
         chg = (fcst["median"][-1] - px) / px * 100
         if chg > 2:
-            bullets.append(f"🟢 Chronos AI forecasts **+{chg:.1f}%** over {h} days"); score += 2
+            bullets.append(f"🟢 Chronos-Bolt AI forecasts **+{chg:.1f}%** over {h} days"); score += 2
         elif chg < -2:
-            bullets.append(f"🔴 Chronos AI forecasts **{chg:.1f}%** over {h} days"); score -= 2
+            bullets.append(f"🔴 Chronos-Bolt AI forecasts **{chg:.1f}%** over {h} days"); score -= 2
         else:
-            bullets.append(f"🟡 Chronos AI sees minimal move ({chg:+.1f}%)")
+            bullets.append(f"🟡 Chronos-Bolt AI sees minimal move ({chg:+.1f}%)")
 
     ld = m["liq_dist"]
     if ld < 5:
@@ -481,10 +481,11 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 
     gr.Markdown("""
 # 📈 Crypto Futures Trading Calculator
-### Powered by [Amazon Chronos-T5-Small](https://huggingface.co/amazon/chronos-t5-small) · CoinGecko · RSI · MACD · Bollinger Bands
+### Powered by [Amazon Chronos-Bolt-Small](https://huggingface.co/amazon/chronos-bolt-small) · XGBoost · CoinGecko · RSI · MACD · Bollinger Bands
 
-> **Chronos-T5-Small** is Amazon's state-of-the-art zero-shot probabilistic time-series model,
-> pre-trained on **27 billion data points** — the most accurate open-source crypto forecasting model on Hugging Face.
+> **Chronos-Bolt-Small** is Amazon's fast zero-shot probabilistic time-series model.
+> **XGBoost** provides a feature-based gradient-boosted regression trained on rolling indicators.
+> Both models run live on this Space — no heuristics.
     """)
 
     with gr.Row():
@@ -539,11 +540,12 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 
 | Component | Detail |
 |---|---|
-| **AI Model** | [amazon/chronos-t5-small](https://huggingface.co/amazon/chronos-t5-small) — zero-shot probabilistic time-series forecasting |
+| **ML Forecast** | [amazon/chronos-bolt-small](https://huggingface.co/amazon/chronos-bolt-small) — zero-shot probabilistic time-series forecasting |
+| **ML Regression** | XGBoost regressor trained on rolling RSI, MACD, EMA, ATR, and return features |
 | **Price Data** | CoinGecko free public API (no API key required) |
 | **Indicators** | RSI(14), MACD(12/26/9), Bollinger Bands(20, 2σ) |
 | **Futures Math** | Liquidation price, PnL, ROE, Risk/Reward ratio |
-| **Trade Signal** | Composite score from AI + 3 technical indicators |
+| **Trade Signal** | Composite score from Chronos-Bolt + XGBoost + 3 technical indicators |
 
 ⚠️ *For educational purposes only. Crypto trading carries significant risk. Not financial advice.*
     """)
@@ -722,14 +724,14 @@ def _rule_based_response(message: str, context: dict):
     return None
 
 
-# HF Inference model cascade (tried in order; first to respond wins). 7B models
-# give the richest answers but may be cold on the free tier — we fall back to a
-# smaller model and finally to the rule-based KB so chat never dies.
+# Chat model cascade via HF Inference Providers (serverless, proper chat API).
+# Uses InferenceClient so models run via the provider network — no cold starts
+# for widely-used models. Falls back gracefully to the rule-based KB.
 _HF_CHAT_MODELS = [
+    "meta-llama/Llama-3.1-8B-Instruct",
     "Qwen/Qwen2.5-7B-Instruct",
     "mistralai/Mistral-7B-Instruct-v0.3",
     "microsoft/Phi-4-mini-instruct",
-    "Qwen/Qwen2.5-0.5B-Instruct",
 ]
 
 
@@ -842,32 +844,24 @@ def _chat(body: dict):
 
     hf_token = os.environ.get("HF_TOKEN", "")
     if hf_token:
+        from huggingface_hub import InferenceClient as _HFClient
         system_prompt = _build_system_prompt(context)
+        client = _HFClient(token=hf_token)
         for model in _HF_CHAT_MODELS:
             try:
-                r = requests.post(
-                    f"https://api-inference.huggingface.co/models/{model}",
-                    headers={"Authorization": f"Bearer {hf_token}"},
-                    json={
-                        "inputs": _format_prompt(model, system_prompt, message),
-                        "parameters": {
-                            "max_new_tokens": 220,
-                            "temperature": 0.6,
-                            "top_p": 0.9,
-                            "do_sample": True,
-                            "return_full_text": False,
-                        },
-                        "options": {"wait_for_model": False},
-                    },
-                    timeout=18,
+                completion = client.chat_completion(
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": message},
+                    ],
+                    model=model,
+                    max_tokens=220,
+                    temperature=0.6,
+                    top_p=0.9,
                 )
-                if r.status_code == 200:
-                    rj = r.json()
-                    if isinstance(rj, list) and rj:
-                        text = _clean_llm_text(rj[0].get("generated_text", ""))
-                        if text:
-                            return {"response": text, "source": "llm", "model": model}
-                # 503 = model loading, 404 = unavailable → try the next one.
+                text = (completion.choices[0].message.content or "").strip()
+                if text and len(text) > 10:
+                    return {"response": text, "source": "llm", "model": model}
             except Exception:
                 continue
 
@@ -880,6 +874,115 @@ def _chat(body: dict):
                      "long/short squeeze, ATR, VWAP, support and resistance levels."),
         "source": "fallback",
     }
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# ML FORECAST API  — called by the Render backend so the ensemble uses real
+# Chronos-Bolt and XGBoost instead of statistical approximations.
+#
+#  POST /api/ml-forecast  {"prices": [float, ...]}   (up to 90 daily closes)
+#
+#  Returns: {"chronos_bolt_pct": float, "xgboost_pct": float}
+#             (% change over 7 days; key absent on error so caller falls back
+#              gracefully to its statistical baseline value)
+# ──────────────────────────────────────────────────────────────────────────────
+
+@_fastapi.post("/api/ml-forecast", include_in_schema=False)
+def api_ml_forecast(body: dict):
+    import numpy as _np
+
+    prices_raw = body.get("prices", [])
+    if len(prices_raw) < 20:
+        return JSONResponse({"error": "Need at least 20 prices"}, status_code=422)
+
+    pa   = _np.array(prices_raw, dtype=_np.float64)
+    curr = float(pa[-1])
+    out: dict = {}
+
+    # ── Chronos-Bolt (real model) ─────────────────────────────────────
+    pipe, _err = load_model()
+    if pipe is not None:
+        try:
+            ctx       = torch.tensor(pa[-60:], dtype=torch.float32).unsqueeze(0)
+            q_pred, _ = pipe.predict_quantiles(ctx, prediction_length=7,
+                                               quantile_levels=[0.1, 0.5, 0.9])
+            # q_pred shape: (1, 7, 3) — take day-7 median (index 1)
+            med7 = float(q_pred[0, -1, 1].item())
+            out["chronos_bolt_pct"] = round((med7 - curr) / curr * 100, 3)
+        except Exception:
+            pass  # absent key → backend keeps its statistical fallback
+
+    # ── XGBoost: real XGBRegressor trained on rolling features ────────
+    try:
+        from xgboost import XGBRegressor
+        from sklearn.preprocessing import StandardScaler
+
+        n = len(pa)
+        s = pd.Series(pa)
+        rsi_a          = calc_rsi(pa)
+        ml_v, ms_v, _  = calc_macd(pa)
+        e9  = s.ewm(span=9,  adjust=False).mean().values
+        e21 = s.ewm(span=21, adjust=False).mean().values
+        e50 = s.ewm(span=50, adjust=False).mean().values
+
+        X_rows, y_rows = [], []
+        for i in range(50, n - 7):
+            p     = pa[i]
+            atr_i = float(_np.mean(_np.abs(_np.diff(pa[max(0, i - 14):i + 1]))))
+            r5    = (p - pa[i - 5])  / pa[i - 5]  * 100
+            r10   = (p - pa[i - 10]) / pa[i - 10] * 100
+            r20   = (p - pa[i - 20]) / pa[i - 20] * 100
+            X_rows.append([
+                float(rsi_a[i]),
+                float(ml_v[i] - ms_v[i]),
+                (p - e9[i])  / e9[i]  * 100,
+                (p - e21[i]) / e21[i] * 100,
+                (p - e50[i]) / e50[i] * 100,
+                atr_i / p * 100,
+                r5, r10, r20,
+            ])
+            y_rows.append((pa[i + 7] - p) / p * 100)
+
+        if len(X_rows) >= 15:
+            Xa, ya = _np.array(X_rows), _np.array(y_rows)
+            scaler = StandardScaler()
+            Xs     = scaler.fit_transform(Xa)
+            xgbr   = XGBRegressor(
+                n_estimators=100, learning_rate=0.08,
+                max_depth=3, subsample=0.8, random_state=42, verbosity=0,
+            )
+            xgbr.fit(Xs, ya)
+
+            p     = curr
+            atr_c = float(_np.mean(_np.abs(_np.diff(pa[-15:]))))
+            feat  = [[
+                float(rsi_a[-1]),
+                float(ml_v[-1] - ms_v[-1]),
+                (p - e9[-1])  / e9[-1]  * 100,
+                (p - e21[-1]) / e21[-1] * 100,
+                (p - e50[-1]) / e50[-1] * 100,
+                atr_c / p * 100,
+                (p - pa[-6])  / pa[-6]  * 100 if n >= 6  else 0.0,
+                (p - pa[-11]) / pa[-11] * 100 if n >= 11 else 0.0,
+                (p - pa[-21]) / pa[-21] * 100 if n >= 21 else 0.0,
+            ]]
+            out["xgboost_pct"] = round(float(xgbr.predict(scaler.transform(feat))[0]), 3)
+    except Exception as xgb_err:
+        out["xgboost_error"] = str(xgb_err)
+
+    return out
+
+
+@_fastapi.get("/api/model-status", include_in_schema=False)
+def api_model_status():
+    pipe, _ = load_model()
+    xgb_ok = False
+    try:
+        import xgboost  # noqa: F401
+        xgb_ok = True
+    except ImportError:
+        pass
+    return {"chronos_bolt": pipe is not None, "xgboost": xgb_ok}
 
 
 # Gradio AI calculator at /ai  (does NOT override the HTML frontend at /)

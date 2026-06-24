@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Notice — FutureX</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    .privacy-wrap { max-width: 760px; margin: 0 auto; padding: 32px 20px 60px; }
+    .privacy-wrap h1 { font-size: 26px; color: var(--text-hi); margin-bottom: 6px; }
+    .privacy-wrap .updated { font-size: 12px; color: var(--text-lo); margin-bottom: 24px; }
+    .privacy-wrap h2 { font-size: 16px; color: var(--accent); margin: 24px 0 8px; }
+    .privacy-wrap p, .privacy-wrap li { font-size: 14px; color: var(--text); line-height: 1.7; }
+    .privacy-wrap ul { margin: 8px 0 8px 20px; }
+    .privacy-wrap a.back { display: inline-block; margin-bottom: 20px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="privacy-wrap">
+    <a class="back" href="index.html">&larr; Back to FutureX</a>
+    <h1>Privacy Notice</h1>
+    <div class="updated">Last updated: 5 June 2026</div>
+
+    <p>FutureX is a free, educational crypto futures calculator. This notice explains what limited personal data we handle and your rights under the UK GDPR and EU GDPR.</p>
+
+    <h2>What we collect</h2>
+    <ul>
+      <li><strong>Email address (optional):</strong> Only if you choose to enable Volatility Alerts and enter your email. It is used solely to send you the alert emails you requested.</li>
+      <li><strong>Alert preferences:</strong> The coins you watch, your sensitivity setting, and your consent flag.</li>
+    </ul>
+
+    <h2>Where it is stored</h2>
+    <p>Your email and preferences are always stored <strong>locally in your own browser</strong> (via <code>localStorage</code>). In addition, <strong>if you sign in with Google</strong> to enable 24/7 alerts, they are stored in our <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Google Firebase (Firestore)</a> database so our server can monitor your coins while your browser is closed. If you never sign in, nothing is stored on our servers.</p>
+
+    <h2>How alerts are processed</h2>
+    <p>When you are signed in, a scheduled server job (running roughly every 30 minutes) reads your saved preferences from Firestore, checks live market data for the coins you watch, and — only when a volatility threshold you chose is crossed — sends you an email. The job also stores a small "last sent" timestamp per coin in Firestore so you are not emailed repeatedly for the same event.</p>
+
+    <h2>Who it is shared with</h2>
+    <p>Your data is handled by two processors acting on our behalf: <a href="https://firebase.google.com/support/privacy" target="_blank" rel="noopener">Google Firebase</a> (storage) and <a href="https://www.emailjs.com/legal/privacy-policy/" target="_blank" rel="noopener">EmailJS</a> (email delivery). No other parties receive your data. We never sell or advertise to you.</p>
+
+    <h2>Legal basis</h2>
+    <p>We process your email on the basis of your <strong>explicit consent</strong>, which you give by ticking the consent box before saving. You can withdraw consent at any time.</p>
+
+    <h2>Your rights</h2>
+    <ul>
+      <li><strong>Access &amp; portability:</strong> Your browser copy is visible in your browser's developer tools; your signed-in copy is the same data held in Firestore.</li>
+      <li><strong>Erasure:</strong> Click "Delete my stored email &amp; settings" in the Volatility Alerts card. This clears your browser storage and, when you are signed in, deletes your record from our Firestore database — stopping all server alerts immediately.</li>
+      <li><strong>Withdraw consent:</strong> Untick the consent box and save, or delete your data as above. You can also disable alerts with the toggle.</li>
+    </ul>
+
+    <h2>Market data</h2>
+    <p>Price, sentiment and news data are fetched directly from third-party APIs (CoinGecko, alternative.me, CryptoCompare and Hugging Face). Your browser contacts these services directly; we do not log those requests.</p>
+
+    <h2>Contact</h2>
+    <p>For any privacy question, contact the project maintainer via the <a href="https://github.com/HammadRehmanAwan/my-crypto-future-trading-calculator" target="_blank" rel="noopener">GitHub repository</a>.</p>
+
+    <p style="margin-top:28px; font-size:12px; color:var(--text-lo);"><strong>Not financial advice.</strong> FutureX is for education only. Crypto futures trading carries substantial risk of loss.</p>
+  </div>
+</body>
+</html>

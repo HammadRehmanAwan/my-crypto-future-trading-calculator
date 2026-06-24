@@ -21,3 +21,7 @@ services:
         sync: false
       - key: FIREBASE_MEASUREMENT_ID
         sync: false
+      - key: CG_DEMO_API_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
