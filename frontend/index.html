@@ -11,22 +11,30 @@
   <meta property="og:description" content="Real-time crypto futures calculator: live prices, AI 7-day forecast, Fear & Greed gauge, FinBERT news sentiment, and volatility email alerts for 15 coins." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/" />
-  <meta property="og:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/frontend/og-preview.png" />
+  <meta property="og:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/og-preview.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/og-preview.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="FutureX — AI Crypto Futures Calculator" />
   <meta name="twitter:description" content="Real-time crypto futures calculator with AI forecasting & sentiment analysis." />
-  <meta name="twitter:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/frontend/og-preview.png" />
 
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <!-- Warm up the data-API origins so the first requests are faster -->
+  <link rel="preconnect" href="https://api.coingecko.com" crossorigin />
+  <link rel="preconnect" href="https://www.okx.com" crossorigin />
+  <link rel="dns-prefetch" href="https://api.alternative.me" />
+  <link rel="dns-prefetch" href="https://min-api.cryptocompare.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+  <!-- Libraries deferred so they never block first paint; they execute in
+       order before DOMContentLoaded, so app.js still sees Chart/emailjs/firebase. -->
+  <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
   <!-- Firebase compat SDK (v10) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 </head>
 <body>
 
@@ -77,9 +85,51 @@
 
 <!-- ─── PAGE TABS (sticky) ─── -->
 <nav class="page-tabs">
-  <button class="page-tab active" id="tabCalc" onclick="switchTab('calc')">Calculator</button>
+  <button class="page-tab active" id="tabCalc" onclick="switchTab('calc')">Dashboard</button>
   <button class="page-tab" id="tabDash" onclick="switchTab('dash')">Portfolio Dashboard</button>
+  <button class="page-tab" id="tabHub" onclick="switchTab('hub')">Intelligence Hub</button>
+  <button class="page-tab" id="tabEdu" onclick="switchTab('edu')">Learn</button>
 </nav>
+
+<!-- ─── HERO ─── -->
+<section class="hero" id="heroSection">
+  <div class="hero-glow"></div>
+  <div class="hero-inner">
+    <div class="hero-copy">
+      <div class="hero-eyebrow"><span class="hero-dot"></span> Live market intelligence &middot; 15 assets</div>
+      <h1 class="hero-title">AI-Powered Crypto<br><span class="grad-text">Futures Intelligence</span></h1>
+      <p class="hero-sub">Combine technical indicators, futures data, market sentiment, whale activity, and AI forecasting into one trading decision engine.</p>
+      <div class="hero-cta">
+        <button class="btn-hero-primary" onclick="heroAnalyze()">&#9889; Analyze Market</button>
+        <button class="btn-hero-ghost" onclick="heroSignals()">&#128225; View Live Signals</button>
+      </div>
+      <div class="hero-trust">
+        <span class="trust-chip">&#10003; 100% Free</span>
+        <span class="trust-chip">&#10003; No signup</span>
+        <span class="trust-chip">&#10003; Real-time data</span>
+        <span class="trust-chip">&#10003; Amazon Chronos AI</span>
+      </div>
+    </div>
+    <div class="hero-metrics">
+      <div class="hero-metric" id="heroBtc">
+        <div class="hm-top"><span class="hm-icon">&#8383;</span><span class="hm-label">BTC Price</span></div>
+        <div class="hm-value">&mdash;</div><div class="hm-sub">&mdash;</div>
+      </div>
+      <div class="hero-metric" id="heroSentiment">
+        <div class="hm-top"><span class="hm-icon">&#127777;</span><span class="hm-label">Market Sentiment</span></div>
+        <div class="hm-value">&mdash;</div><div class="hm-sub">Fear &amp; Greed</div>
+      </div>
+      <div class="hero-metric" id="heroConfidence">
+        <div class="hm-top"><span class="hm-icon">&#129302;</span><span class="hm-label">AI Confidence</span></div>
+        <div class="hm-value">&mdash;</div><div class="hm-sub">BTC signal</div>
+      </div>
+      <div class="hero-metric" id="heroOpportunity">
+        <div class="hm-top"><span class="hm-icon">&#127919;</span><span class="hm-label">Best Opportunity</span></div>
+        <div class="hm-value">&mdash;</div><div class="hm-sub">Top signal now</div>
+      </div>
+    </div>
+  </div>
+</section>
 
 <!-- ─── MAIN ─── -->
 <main class="layout" id="calcView">
@@ -152,6 +202,14 @@
         </div>
       </div>
     </div>
+
+    <!-- Advanced Technical Analysis card -->
+    <div class="card adv-tech-card" id="advTechCard">
+      <h3 class="card-heading">Advanced Technical Analysis <span class="heading-sub">&mdash; moving averages, volatility &amp; key levels</span></h3>
+      <div id="advTechBody">
+        <div class="hub-card-loader"><div class="spin"></div><span>Select a coin to compute&hellip;</span></div>
+      </div>
+    </div>
   </div>
 
   <!-- RIGHT PANEL -->
@@ -159,66 +217,98 @@
 
     <!-- Calculator card -->
     <div class="card calc-card">
-      <h3 class="card-heading">Position Setup</h3>
-
-      <div class="form-group">
-        <label>Direction &mdash; Which way do you think the price will move?</label>
-        <div class="dir-toggle">
-          <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">&#9650; Long &mdash; Price will rise</button>
-          <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">&#9660; Short &mdash; Price will fall</button>
+      <div class="wiz-head">
+        <h3 class="card-heading">Guided Trade Setup</h3>
+        <div class="wiz-steps" id="wizSteps">
+          <span class="wiz-dot active" data-step="1">1</span>
+          <span class="wiz-dot" data-step="2">2</span>
+          <span class="wiz-dot" data-step="3">3</span>
+          <span class="wiz-dot" data-step="4">4</span>
+          <span class="wiz-dot" data-step="5">5</span>
         </div>
       </div>
 
-      <div class="form-group">
-        <label for="entryPrice">Entry Price (USD) <span class="hint">&mdash; 0 = live price</span></label>
-        <input type="number" id="entryPrice" value="0" min="0" step="0.01" oninput="this.dataset.userSet='1'" />
-      </div>
-
-      <div class="form-group">
-        <label>Leverage &mdash; <span id="levDisplay" class="accent">10&times;</span> <span class="lev-risk-badge" id="levRiskBadge">Moderate Risk</span></label>
-        <input type="range" id="leverage" class="range-slider" min="1" max="125" value="10"
-               oninput="updateLeverage(this.value)" />
-        <div class="range-marks"><span>1&times;</span><span>25&times;</span><span>50&times;</span><span>100&times;</span><span>125&times;</span></div>
-        <div class="lev-hint" id="levHint">Multiplies both profits AND losses by 10&times;. A 1% price drop wipes 10% of your money.</div>
-      </div>
-
-      <div class="form-group">
-        <label for="posSize">Total Trade Size (USD) <span class="hint">&mdash; total value, not what you actually put in</span></label>
-        <input type="number" id="posSize" value="1000" min="1" />
-      </div>
-
-      <div class="divider"><span>Risk Management</span></div>
-
-      <div class="form-group">
-        <label for="takeProfit">Take Profit Price (USD) <span class="hint">&mdash; price to auto-close with profit (0 = use AI forecast)</span></label>
-        <input type="number" id="takeProfit" value="0" min="0" step="0.01" />
-      </div>
-
-      <div class="form-group">
-        <label for="stopLoss">Stop Loss Price (USD) <span class="hint">&mdash; price to auto-close to limit your loss (0 = skip)</span></label>
-        <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
-      </div>
-
-      <div class="form-group">
-        <label>Forecast Horizon</label>
-        <div class="hz-btn-row" id="horizonBtns">
-          <button class="hz-btn" data-hz="5m">5 min</button>
-          <button class="hz-btn" data-hz="10m">10 min</button>
-          <button class="hz-btn" data-hz="30m">30 min</button>
-          <button class="hz-btn" data-hz="1h">1 hr</button>
-          <button class="hz-btn" data-hz="24h">24 hr</button>
-          <button class="hz-btn" data-hz="48h">48 hr</button>
-          <button class="hz-btn active" data-hz="7d">7 days</button>
+      <!-- Step 1: Coin & Direction -->
+      <div class="wiz-step active" data-step="1">
+        <div class="wiz-step-title">Step 1 &middot; Coin &amp; direction</div>
+        <div class="form-group">
+          <label for="wizCoinSelect">Cryptocurrency</label>
+          <select id="wizCoinSelect" class="coin-select wiz-coin"></select>
         </div>
-        <div id="hzWarning" class="hz-warning" style="display:none">
-          &#9888; Sub-hour forecasts are noise-dominated &mdash; uncertainty bands are very wide. Treat as directional only, not a reliable price target.
+        <div class="form-group">
+          <label>Direction &mdash; Which way do you think the price will move?</label>
+          <div class="dir-toggle">
+            <button id="btnLong"  class="dir-btn long  active" onclick="setDir('Long')">&#9650; Long &mdash; Price will rise</button>
+            <button id="btnShort" class="dir-btn short"        onclick="setDir('Short')">&#9660; Short &mdash; Price will fall</button>
+          </div>
         </div>
       </div>
 
-      <button id="analyzeBtn" class="btn-analyze" onclick="analyze()">Analyze Trade</button>
+      <!-- Step 2: Entry & Size -->
+      <div class="wiz-step" data-step="2">
+        <div class="wiz-step-title">Step 2 &middot; Entry price &amp; trade size</div>
+        <div class="form-group">
+          <label for="entryPrice">Entry Price (USD) <span class="hint">&mdash; 0 = live price</span></label>
+          <input type="number" id="entryPrice" value="0" min="0" step="0.01" oninput="this.dataset.userSet='1'" />
+        </div>
+        <div class="form-group">
+          <label for="posSize">Total Trade Size (USD) <span class="hint">&mdash; total value, not what you actually put in</span></label>
+          <input type="number" id="posSize" value="1000" min="1" />
+        </div>
+      </div>
+
+      <!-- Step 3: Leverage -->
+      <div class="wiz-step" data-step="3">
+        <div class="wiz-step-title">Step 3 &middot; Leverage</div>
+        <div class="form-group">
+          <label>Leverage &mdash; <span id="levDisplay" class="accent">10&times;</span> <span class="lev-risk-badge" id="levRiskBadge">Moderate Risk</span></label>
+          <input type="range" id="leverage" class="range-slider" min="1" max="125" value="10"
+                 oninput="updateLeverage(this.value)" />
+          <div class="range-marks"><span>1&times;</span><span>25&times;</span><span>50&times;</span><span>100&times;</span><span>125&times;</span></div>
+          <div class="lev-hint" id="levHint">Multiplies both profits AND losses by 10&times;. A 1% price drop wipes 10% of your money.</div>
+        </div>
+      </div>
+
+      <!-- Step 4: Stop Loss -->
+      <div class="wiz-step" data-step="4">
+        <div class="wiz-step-title">Step 4 &middot; Stop loss &amp; forecast window</div>
+        <div class="form-group">
+          <label for="stopLoss">Stop Loss Price (USD) <span class="hint">&mdash; price to auto-close to limit your loss (0 = skip)</span></label>
+          <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
+        </div>
+        <div class="form-group">
+          <label>Forecast Horizon</label>
+          <div class="hz-btn-row" id="horizonBtns">
+            <button class="hz-btn" data-hz="5m">5 min</button>
+            <button class="hz-btn" data-hz="10m">10 min</button>
+            <button class="hz-btn" data-hz="30m">30 min</button>
+            <button class="hz-btn" data-hz="1h">1 hr</button>
+            <button class="hz-btn" data-hz="24h">24 hr</button>
+            <button class="hz-btn" data-hz="48h">48 hr</button>
+            <button class="hz-btn active" data-hz="7d">7 days</button>
+          </div>
+          <div id="hzWarning" class="hz-warning" style="display:none">
+            &#9888; Sub-hour forecasts are noise-dominated &mdash; uncertainty bands are very wide. Treat as directional only, not a reliable price target.
+          </div>
+        </div>
+      </div>
+
+      <!-- Step 5: Take Profit -->
+      <div class="wiz-step" data-step="5">
+        <div class="wiz-step-title">Step 5 &middot; Take profit &amp; analyze</div>
+        <div class="form-group">
+          <label for="takeProfit">Take Profit Price (USD) <span class="hint">&mdash; price to auto-close with profit (0 = use AI forecast)</span></label>
+          <input type="number" id="takeProfit" value="0" min="0" step="0.01" />
+        </div>
+      </div>
+
+      <div class="wiz-nav">
+        <button class="wiz-back" id="wizBack" onclick="wizGo(-1)">&larr; Back</button>
+        <button class="wiz-next" id="wizNext" onclick="wizGo(1)">Next &rarr;</button>
+        <button id="analyzeBtn" class="btn-analyze" onclick="analyze()" style="display:none">Analyze Trade</button>
+      </div>
     </div>
 
-    <!-- Results card -->
     <!-- Intraday forecast card (sub-hour horizons only) -->
     <div class="card" id="intradayCard" style="display:none">
       <h3 class="card-heading">Short-term Forecast &mdash; <span id="intradayLabel"></span></h3>
@@ -227,10 +317,14 @@
       <div id="intradayResult" style="margin-top:12px"></div>
     </div>
 
+    <!-- Results card -->
     <div class="card results-card" id="resultsCard" style="display:none">
       <h3 class="card-heading">Trade Summary</h3>
       <div id="resultsBody"></div>
     </div>
+
+    <!-- AI Trade Coach card -->
+    <div class="card coach-card" id="coachCard" style="display:none"></div>
 
     <!-- Signal card -->
     <div class="card signal-card" id="signalCard" style="display:none">
@@ -244,14 +338,14 @@
       <div class="alert-header" onclick="document.getElementById('alertBody').classList.toggle('collapsed')">
         <div>
           <h3 class="card-heading" style="margin-bottom:2px">Volatility Alerts</h3>
-          <div class="alert-subhead">24/7 server emails when a coin moves sharply</div>
+          <div class="alert-subhead">Auto-email when a coin moves sharply</div>
         </div>
         <span class="alert-caret" id="alertCaret">&#9660;</span>
       </div>
       <div class="alert-body" id="alertBody">
 
         <div class="alert-note">
-          <strong style="color:var(--accent)">Sign in with Google</strong> (top-right), enter your email, and pick the coins to watch. Our server then monitors them around the clock and emails you on a volatility spike — <strong>even when this tab is closed</strong>. Without signing in, your settings stay in this browser only and no automatic emails are sent.
+          Enter your email below — alerts are sent automatically when high volatility is detected. <strong style="color:var(--accent)">Sign in with Google</strong> (top-right) to sync your settings across all your devices.
         </div>
 
         <div class="alert-form-group toggle-row">
@@ -271,7 +365,7 @@
         <div class="gdpr-row">
           <input type="checkbox" id="gdprConsent" />
           <label for="gdprConsent">
-            I consent to my email address and alert preferences being stored (in this browser, and — when signed in — in our Firebase database) and used solely to send the volatility alert emails I requested. A scheduled server job reads these to send alerts, and EmailJS delivers them. No data is shared with anyone else. See our <a href="privacy.html" target="_blank">Privacy Notice</a>. You can delete your data at any time.
+            I consent to my email address being stored locally in this browser and used solely to send volatility alert emails. No data is shared with third parties beyond the email delivery service (EmailJS). See our <a href="privacy.html" target="_blank">Privacy Notice</a>. You can delete your data at any time.
           </label>
         </div>
 
@@ -286,7 +380,7 @@
         </div>
 
         <div class="alert-form-group">
-          <label class="alert-label">Watch These Coins <span class="hint">(checked = monitored by our server ~every 30 min)</span></label>
+          <label class="alert-label">Watch These Coins <span class="hint">(checked = monitored every 5 min)</span></label>
           <div class="watch-coins" id="watchCoins"></div>
         </div>
 
@@ -331,6 +425,17 @@
 
   </div>
 
+  <!-- Daily AI Briefing (market-wide, loads on tab open + refreshes) -->
+  <div class="card briefing-card" id="dashBriefingCard">
+    <div class="aidash-head">
+      <h3 class="card-heading">Daily AI Briefing <span class="heading-sub">&mdash; live market pulse</span></h3>
+      <span class="ai-chip">AI</span>
+    </div>
+    <div class="briefing-body" id="briefingBody">
+      <div class="hub-card-loader"><div class="spin"></div><span>Loading today&rsquo;s market briefing&hellip;</span></div>
+    </div>
+  </div>
+
   <!-- Loader -->
   <div class="dash-loader" id="dashLoader" style="display:none">
     <div class="spin"></div>
@@ -350,6 +455,14 @@
   <!-- Error -->
   <div class="dash-error" id="dashError" style="display:none"></div>
 
+  <!-- Portfolio Intelligence — appears once an analysis builds the portfolio -->
+  <div id="dashIntel" style="display:none">
+    <!-- Feature 1: Portfolio Health Score -->
+    <div class="card health-card" id="healthCard"></div>
+    <!-- Feature 2: AI Portfolio Analysis -->
+    <div class="card aip-card" id="aiSummaryCard"></div>
+  </div>
+
   <!-- Results -->
   <div id="dashResults" style="display:none">
     <div class="card dash-summary-card">
@@ -359,8 +472,298 @@
     <div class="dash-trades-grid" id="dashTradesGrid"></div>
   </div>
 
+  <!-- Feature 3: Scenario Simulator -->
+  <div class="card scenario-card" id="scenarioCard" style="display:none"></div>
+
+  <!-- Feature 4: Rebalancing Recommendations -->
+  <div class="card rebalance-card" id="rebalanceCard" style="display:none"></div>
+
   <div class="dash-disclaimer">Signals are based on technical analysis and statistical forecasting. For educational purposes only &mdash; not financial advice.</div>
 </section>
+
+<!-- ─── INTELLIGENCE HUB VIEW ─── -->
+<section class="hub-view" id="hubView" style="display:none">
+
+  <!-- Hub controls -->
+  <div class="card hub-controls">
+    <div class="hub-ctrl-row">
+      <select id="hubCoinSelect" class="coin-select hub-coin-select"></select>
+      <span class="hub-status-label" id="hubStatusLabel">Select a coin and click Analyze</span>
+      <button class="btn-hub-analyze" id="hubAnalyzeBtn" onclick="runHubAnalysis()">&#9889; Run Full Analysis</button>
+    </div>
+    <div class="hub-progress" id="hubProgress" style="display:none"></div>
+  </div>
+
+  <!-- AI Intelligence Dashboard (full width) -->
+  <div class="card hub-score-card" id="hubScoreCard">
+    <div class="hub-score-placeholder">
+      <div class="score-ring-placeholder">?</div>
+      <div class="score-placeholder-text">Run a full analysis to generate your AI Intelligence Dashboard</div>
+    </div>
+  </div>
+
+  <!-- Trade Probability Engine (full width) -->
+  <div class="card hub-tpe-card" id="hubTpeCard">
+    <h3 class="card-heading">Trade Probability Engine</h3>
+    <div class="hub-card-loader"><div class="spin"></div><span>Run analysis to compute trade probabilities&hellip;</span></div>
+  </div>
+
+  <!-- AI Ensemble Forecast (full width) -->
+  <div class="card hub-ensemble-card" id="hubEnsembleCard">
+    <h3 class="card-heading">AI Ensemble Forecast <span class="heading-sub">&mdash; 7-day multi-model projection</span></h3>
+    <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+  </div>
+
+  <!-- Liquidation Heatmap (full width) -->
+  <div class="card hub-liq-card" id="hubLiqCard">
+    <h3 class="card-heading">Liquidation Heatmap</h3>
+    <div class="hub-card-loader"><div class="spin"></div><span>Run analysis to model liquidation zones&hellip;</span></div>
+  </div>
+
+  <!-- 3-column grid: Tech, Futures, Sentiment -->
+  <div class="hub-grid-3">
+    <div class="card hub-inner-card" id="hubTechCard">
+      <h3 class="card-heading">Technical Analysis</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubFuturesCard">
+      <h3 class="card-heading">Futures Intelligence</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubSentHubCard">
+      <h3 class="card-heading">Market Sentiment</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+  </div>
+
+  <!-- 3-column grid: News, Narratives, Tokenomics -->
+  <div class="hub-grid-3">
+    <div class="card hub-inner-card" id="hubNewsCard">
+      <h3 class="card-heading">News Impact</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubNarrCard">
+      <h3 class="card-heading">Narrative Detection</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubTokCard">
+      <h3 class="card-heading">Tokenomics</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+  </div>
+
+  <!-- 2-column grid: Whale Intelligence, Order Flow & Structure -->
+  <div class="hub-grid-2">
+    <div class="card hub-inner-card" id="hubWhaleCard">
+      <h3 class="card-heading">Whale Intelligence</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubOrderFlowCard">
+      <h3 class="card-heading">Order Flow &amp; Structure</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+  </div>
+
+  <!-- 2-column grid: On-Chain, Risk -->
+  <div class="hub-grid-2">
+    <div class="card hub-inner-card" id="hubOnChainCard">
+      <h3 class="card-heading">On-Chain Analytics</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+    <div class="card hub-inner-card" id="hubRiskCard">
+      <h3 class="card-heading">Risk Dashboard</h3>
+      <div class="hub-card-loader"><div class="spin"></div><span>Awaiting analysis&hellip;</span></div>
+    </div>
+  </div>
+
+  <!-- AI Chat (full width) -->
+  <div class="card hub-chat-card" id="hubChatCard">
+    <h3 class="card-heading">AI Crypto Assistant <span class="heading-sub">&mdash; Ask anything about crypto trading</span></h3>
+    <div class="chat-messages" id="chatMessages">
+      <div class="chat-msg assistant">
+        <div class="chat-bubble">Hello! I am your AI crypto trading assistant. Ask me about RSI, MACD, funding rates, support/resistance, liquidation risks, or any crypto concept. Run an analysis first for coin-specific insights!</div>
+      </div>
+    </div>
+    <div class="chat-input-row">
+      <input type="text" id="chatInput" class="chat-input" placeholder="Ask about RSI, funding rates, support levels..." onkeydown="if(event.key==='Enter')sendChat()" />
+      <button class="btn-chat-send" onclick="sendChat()">Send</button>
+    </div>
+  </div>
+
+  <div class="dash-disclaimer">Intelligence Hub uses OKX Futures API, CoinGecko data, and AI models for educational analysis only. Not financial advice.</div>
+</section>
+
+<!-- ─── EDUCATION & RISK MANAGEMENT VIEW ─── -->
+<section class="edu-view" id="eduView" style="display:none">
+  <div class="edu-hero">
+    <h2 class="edu-title">Education &amp; Risk Management</h2>
+    <p class="edu-sub">Master the fundamentals before you risk capital. Futures trading is high-risk — these principles help you survive long enough to succeed.</p>
+  </div>
+
+  <div class="edu-grid">
+    <!-- Risk Management Essentials -->
+    <div class="card edu-card">
+      <h3 class="card-heading">Risk Management Essentials</h3>
+      <ul class="edu-list">
+        <li><strong>Risk 1–2% per trade.</strong> Never put more than a small slice of your capital on a single position — survive losing streaks.</li>
+        <li><strong>Always set a stop-loss.</strong> Decide your exit before you enter. No stop = unlimited emotional risk.</li>
+        <li><strong>Target 1:2 reward-to-risk or better.</strong> Win less than half your trades and still come out ahead.</li>
+        <li><strong>Size down on counter-trend trades.</strong> Fighting the dominant trend needs smaller positions.</li>
+        <li><strong>Never add to a losing position</strong> hoping it recovers — that's how accounts blow up.</li>
+      </ul>
+    </div>
+
+    <!-- Leverage & Liquidation -->
+    <div class="card edu-card">
+      <h3 class="card-heading">Leverage &amp; Liquidation</h3>
+      <ul class="edu-list">
+        <li><strong>Leverage multiplies both ways.</strong> 10× turns a 1% move into 10% of your margin — profit <em>and</em> loss.</li>
+        <li><strong>Liquidation</strong> is forced closure when losses exhaust your margin. At 100× a ~1% adverse move wipes you out.</li>
+        <li><strong>Liquidation distance ≈ 1 / leverage.</strong> 5× ≈ 20% buffer; 25× ≈ 4%; 100× ≈ 1%.</li>
+        <li><strong>Lower leverage = more survivable.</strong> Most disciplined traders stay under 10–20×.</li>
+        <li><strong>Liquidation clusters act as magnets</strong> — price often hunts dense zones (see the Liquidation Heatmap).</li>
+      </ul>
+    </div>
+
+    <!-- Indicator Glossary -->
+    <div class="card edu-card">
+      <h3 class="card-heading">Indicator Glossary</h3>
+      <dl class="edu-gloss">
+        <dt>RSI (14)</dt><dd>Momentum 0–100. &lt;30 oversold (bounce potential), &gt;70 overbought (pullback risk).</dd>
+        <dt>MACD</dt><dd>Trend momentum. Line above signal = bullish; below = bearish.</dd>
+        <dt>Bollinger Bands</dt><dd>Volatility envelope. A squeeze often precedes a big move.</dd>
+        <dt>EMA 20/50/200</dt><dd>Trend structure. Price above all three = strong uptrend.</dd>
+        <dt>ATR</dt><dd>Average volatility — used to size stops (1.5–2× ATR).</dd>
+        <dt>Funding Rate</dt><dd>Perp payment between longs/shorts. Extreme positive often precedes corrections.</dd>
+        <dt>Open Interest</dt><dd>Total open contracts. Rising OI + rising price = conviction.</dd>
+        <dt>Long/Short Ratio</dt><dd>Crowd positioning — extremes set up squeezes.</dd>
+      </dl>
+    </div>
+
+    <!-- Common Mistakes -->
+    <div class="card edu-card">
+      <h3 class="card-heading">Common Mistakes to Avoid</h3>
+      <ul class="edu-list edu-list-bad">
+        <li><strong>Over-leveraging.</strong> The #1 account killer. High leverage feels powerful until one wick liquidates you.</li>
+        <li><strong>Revenge trading.</strong> Chasing losses with bigger size compounds the damage.</li>
+        <li><strong>No stop-loss / moving it.</strong> Widening a stop to "give it room" turns a small loss into a big one.</li>
+        <li><strong>FOMO entries.</strong> Buying after a vertical pump usually means buying the top.</li>
+        <li><strong>Ignoring funding &amp; sentiment.</strong> Crowded trades reverse violently.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="dash-disclaimer">Educational content only. Crypto futures trading can result in the loss of your entire investment. Not financial advice — always do your own research.</div>
+</section>
+
+<!-- ─── MOBILE STICKY ANALYZE ─── -->
+<button class="mobile-analyze show" id="mobileAnalyze" onclick="analyze()">&#9889; Analyze Trade</button>
+
+<!-- ─── MOBILE BOTTOM NAV ─── -->
+<nav class="bottom-nav" id="bottomNav">
+  <button class="bn-item active" data-tab="calc" onclick="switchTab('calc')">
+    <span class="bn-ico">&#128202;</span><span class="bn-lbl">Dashboard</span>
+  </button>
+  <button class="bn-item" data-tab="dash" onclick="switchTab('dash')">
+    <span class="bn-ico">&#128188;</span><span class="bn-lbl">Portfolio</span>
+  </button>
+  <button class="bn-item" data-tab="hub" onclick="switchTab('hub')">
+    <span class="bn-ico">&#129504;</span><span class="bn-lbl">Hub</span>
+  </button>
+  <button class="bn-item" data-tab="edu" onclick="switchTab('edu')">
+    <span class="bn-ico">&#127891;</span><span class="bn-lbl">Learn</span>
+  </button>
+</nav>
+
+<!-- ─── FLOATING AI MARKET COPILOT (global, Siri-style + voice) ─── -->
+<div class="copilot" id="copilot">
+  <button class="copilot-fab" id="copilotFab" onclick="copilotToggle()" aria-label="Open Zorion AI">
+    <svg class="cf-arcs" viewBox="0 0 96 96" aria-hidden="true">
+      <defs>
+        <linearGradient id="ag1" gradientUnits="userSpaceOnUse" x1="10" y1="10" x2="86" y2="86">
+          <stop offset="0%"   stop-color="#00D4FF" stop-opacity="0"/>
+          <stop offset="30%"  stop-color="#00D4FF" stop-opacity="0.95"/>
+          <stop offset="65%"  stop-color="#4F8CFF" stop-opacity="0.8"/>
+          <stop offset="100%" stop-color="#8B5CF6" stop-opacity="0"/>
+        </linearGradient>
+        <linearGradient id="ag2" gradientUnits="userSpaceOnUse" x1="86" y1="10" x2="10" y2="86">
+          <stop offset="0%"   stop-color="#8B5CF6" stop-opacity="0"/>
+          <stop offset="30%"  stop-color="#8B5CF6" stop-opacity="0.9"/>
+          <stop offset="65%"  stop-color="#C084FC" stop-opacity="0.75"/>
+          <stop offset="100%" stop-color="#4F8CFF" stop-opacity="0"/>
+        </linearGradient>
+        <filter id="aglow" x="-60%" y="-60%" width="220%" height="220%">
+          <feGaussianBlur stdDeviation="2.5" result="b"/>
+          <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+        </filter>
+      </defs>
+      <!-- <animateTransform> must be a sibling inside a <g>, not a child of <circle> -->
+      <g>
+        <circle cx="48" cy="48" r="36" fill="none" stroke="url(#ag1)" stroke-width="2.5" stroke-linecap="round" filter="url(#aglow)" stroke-dasharray="170 56"/>
+        <animateTransform attributeName="transform" type="rotate" from="0 48 48" to="360 48 48" dur="3.6s" repeatCount="indefinite"/>
+      </g>
+      <g>
+        <circle cx="48" cy="48" r="43" fill="none" stroke="url(#ag2)" stroke-width="1.8" stroke-linecap="round" filter="url(#aglow)" stroke-dasharray="108 162" stroke-dashoffset="54"/>
+        <animateTransform attributeName="transform" type="rotate" from="360 48 48" to="0 48 48" dur="5.8s" repeatCount="indefinite"/>
+      </g>
+    </svg>
+    <span class="copilot-orb">
+      <span class="zc-sphere">
+        <span class="zc-core"></span>
+        <span class="zc-flow"></span>
+        <span class="zc-scan"></span>
+        <span class="zc-particles"><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="zc-gloss"></span>
+      </span>
+    </span>
+  </button>
+  <div class="copilot-panel" id="copilotPanel" role="dialog" aria-label="Zorion AI">
+    <div class="copilot-head">
+      <div class="copilot-title">
+        <span class="copilot-orb sm"></span>
+        <span class="copilot-title-txt">Zorion<span class="copilot-sub" id="copilotStatus">AI Market Intelligence</span></span>
+      </div>
+      <div class="copilot-head-actions">
+        <button class="copilot-icon-btn" id="copilotTtsBtn" onclick="copilotToggleTts()" title="Toggle spoken replies" aria-label="Toggle spoken replies">&#128266;</button>
+        <button class="copilot-icon-btn" onclick="copilotToggle()" title="Minimize" aria-label="Minimize">&#8211;</button>
+      </div>
+    </div>
+    <div class="copilot-quick" id="copilotQuick">
+      <button onclick="copilotQuick('Analyze BTC')">Analyze BTC</button>
+      <button onclick="copilotQuick('Analyze ETH')">Analyze ETH</button>
+      <button onclick="copilotQuick('Portfolio Review')">Portfolio Review</button>
+      <button onclick="copilotQuick('Market Summary')">Market Summary</button>
+      <button onclick="copilotQuick('Explain Signal')">Explain Signal</button>
+      <button onclick="copilotQuick('Funding Analysis')">Funding Analysis</button>
+    </div>
+    <div class="copilot-messages" id="copilotMessages">
+      <div class="copilot-msg assistant"><div class="copilot-bubble">Hey, I&rsquo;m Zorion &mdash; your AI market intelligence. I track live prices, indicators, funding, sentiment and your portfolio in real time. Ask about any coin, tap a shortcut, or hit the mic to talk.</div></div>
+    </div>
+
+    <!-- Voice mode overlay -->
+    <div class="copilot-voice" id="copilotVoice">
+      <div class="cv-orb" id="cvOrb">
+        <span class="zc-sphere">
+          <span class="zc-core"></span>
+          <span class="zc-flow"></span>
+          <span class="zc-scan"></span>
+          <span class="zc-particles"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="zc-gloss"></span>
+        </span>
+      </div>
+      <div class="cv-wave" id="cvWave"><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="cv-status" id="cvStatus">Listening&hellip;</div>
+      <div class="cv-transcript" id="cvTranscript"></div>
+      <button class="cv-stop" onclick="copilotStopVoice()">Stop</button>
+    </div>
+
+    <div class="copilot-input-row">
+      <button class="copilot-mic" id="copilotMic" onclick="copilotStartVoice()" title="Voice chat" aria-label="Voice chat">&#127908;</button>
+      <input type="text" id="copilotInput" class="copilot-input" placeholder="Ask about any coin, your portfolio, funding…" onkeydown="if(event.key==='Enter')copilotSend()" />
+      <button class="copilot-send" onclick="copilotSend()" aria-label="Send">&#10148;</button>
+    </div>
+  </div>
+</div>
 
 <footer class="footer">
   Powered by
@@ -371,6 +774,6 @@
   <a href="#" onclick="document.getElementById('disclaimerBanner').style.display='flex';return false;">Disclaimer</a>
 </footer>
 
-<script src="app.js"></script>
+<script defer src="app.js"></script>
 </body>
 </html>
