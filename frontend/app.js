@@ -48,9 +48,25 @@ let _auth = null;
 const CRYPTOCOMPARE_NEWS = 'https://min-api.cryptocompare.com/data/v2/news/';
 const SENT_TTL           = 5 * 60_000;
 
+const HORIZON_CFG = {
+  '5m':  { label: '5 min',    cgDays: 1,  steps: 1,  stepMs: 5*60*1000,       histPoints: 24,  horizDays: 5/1440,   warning: true  },
+  '10m': { label: '10 min',   cgDays: 1,  steps: 2,  stepMs: 5*60*1000,       histPoints: 24,  horizDays: 10/1440,  warning: true  },
+  '30m': { label: '30 min',   cgDays: 1,  steps: 6,  stepMs: 5*60*1000,       histPoints: 72,  horizDays: 30/1440,  warning: true  },
+  '1h':  { label: '1 hour',   cgDays: 1,  steps: 12, stepMs: 5*60*1000,       histPoints: 144, horizDays: 1/24,     warning: true  },
+  '24h': { label: '24 hours', cgDays: 7,  steps: 24, stepMs: 60*60*1000,      histPoints: 72,  horizDays: 1,        warning: false },
+  '48h': { label: '48 hours', cgDays: 7,  steps: 48, stepMs: 60*60*1000,      histPoints: 168, horizDays: 2,        warning: false },
+  '7d':  { label: '7 days',   cgDays: 30, steps: 7,  stepMs: 24*60*60*1000,   histPoints: 30,  horizDays: 7,        warning: false },
+};
+
+function getHorizonKey() {
+  const active = document.querySelector('.hz-btn.active');
+  return (active && active.dataset.hz) ? active.dataset.hz : '7d';
+}
+
 const state = {
-  coin: 'bitcoin', days: 30, direction: 'Long',
+  coin: 'bitcoin', days: 30, direction: 'Long', horizonKey: '7d',
   prices: null, dates: null, chart: null, cache: {},
+  intradayChart: null, intradayPrices: null, intradayDates: null,
   sentiment: null, lastUpdated: null, _autoRan: false,
   user: null, alertSettings: {},
 };
@@ -76,6 +92,15 @@ async function fetchHistory(coinId, days) {
     dates:   raw.prices.map(p => new Date(p[0])),
     prices:  raw.prices.map(p => p[1]),
     volumes: raw.total_volumes.map(v => v[1]),
+  };
+}
+
+async function fetchForecastData(coinId, cgDays) {
+  const url = `${BASE}/coins/${coinId}/market_chart?vs_currency=usd&days=${cgDays}`;
+  const raw = await apiFetch(url, `fcst-${coinId}-${cgDays}`, 60_000);
+  return {
+    dates:  raw.prices.map(p => new Date(p[0])),
+    prices: raw.prices.map(p => p[1]),
   };
 }
 
@@ -473,19 +498,27 @@ function calcFutures(entry, leverage, size, dir, tp, sl) {
 // CHART
 // ═══════════════════════════════════════════════════════════════════
 
-function buildChart(dates, prices, bb, forecast, days, horizon) {
+function fmtChartDate(d, stepMs) {
+  if (stepMs <= 5*60*1000) return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if (stepMs <= 60*60*1000) return d.toLocaleDateString('en-US', { weekday: 'short' }) + ' ' +
+    d.toLocaleTimeString('en-US', { hour: 'numeric' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function buildChart(dates, prices, bb, forecast, days, horizon, stepMs = 24*60*60*1000) {
   if (state.chart) { state.chart.destroy(); state.chart = null; }
   const n = Math.min(dates.length, days);
   const dDates = dates.slice(-n);
   const dPrices = prices.slice(-n);
   const last = dates[dates.length - 1];
-  const fDates = Array.from({ length: horizon }, (_, i) => {
-    const d = new Date(last); d.setDate(d.getDate() + i + 1); return d;
-  });
+  const fDates = Array.from({ length: horizon }, (_, i) => new Date(last.getTime() + stepMs * (i + 1)));
   const allDates = [...dDates, ...fDates];
-  const labels = allDates.map(d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-  // Full, human-readable dates for the tooltip title (e.g. "Mon, Jun 5 2026")
-  const fullLabels = allDates.map(d => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }));
+  const labels = allDates.map(d => fmtChartDate(d, stepMs));
+  const fullLabels = allDates.map(d => d.toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric', year: 'numeric',
+    hour: stepMs < 24*60*60*1000 ? 'numeric' : undefined,
+    minute: stepMs <= 5*60*1000 ? '2-digit' : undefined,
+  }));
   const pad  = arr => [...arr.slice(-n), ...new Array(horizon).fill(null)];
   const fpad = arr => [...new Array(n).fill(null), ...arr];
   const datasets = [
@@ -528,6 +561,97 @@ function buildChart(dates, prices, bb, forecast, days, horizon) {
       },
     },
   });
+}
+
+function buildIntradayChart(dates, prices, forecast, hzCfg) {
+  if (state.intradayChart) { state.intradayChart.destroy(); state.intradayChart = null; }
+  const n = Math.min(dates.length, hzCfg.histPoints);
+  const dDates  = dates.slice(-n);
+  const dPrices = prices.slice(-n);
+  const last = dDates[dDates.length - 1];
+  const fDates = Array.from({ length: hzCfg.steps }, (_, i) => new Date(last.getTime() + hzCfg.stepMs * (i + 1)));
+  const allDates = [...dDates, ...fDates];
+  const labels = allDates.map(d => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
+  const pad  = arr => [...arr.slice(-n), ...new Array(hzCfg.steps).fill(null)];
+  const fpad = arr => [...new Array(n).fill(null), ...arr];
+  const canvasEl = document.getElementById('intradayChart');
+  if (!canvasEl) return;
+  state.intradayChart = new Chart(canvasEl.getContext('2d'), {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: 'Price', data: pad(dPrices), borderColor: '#00D4FF', backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.3 },
+      { label: 'CI High', data: fpad(forecast.high), borderColor: 'rgba(255,184,0,0.15)', backgroundColor: 'rgba(255,184,0,0.07)', fill: '+1', borderWidth: 1, pointRadius: 0, tension: 0.2 },
+      { label: 'CI Low',  data: fpad(forecast.low),  borderColor: 'rgba(255,184,0,0.15)', backgroundColor: 'transparent', borderWidth: 1, pointRadius: 0, tension: 0.2 },
+      { label: 'Forecast', data: fpad(forecast.median), borderColor: '#FFB800', backgroundColor: 'transparent', borderWidth: 2, borderDash: [5,3], pointRadius: 3, pointHoverRadius: 5, pointBackgroundColor: '#FFB800', tension: 0.2 },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: { legend: { display: false },
+        tooltip: { backgroundColor: '#0F1828', borderColor: '#1A2540', borderWidth: 1, titleColor: '#00D4FF', bodyColor: '#CBD5E1',
+          callbacks: { label: c => c.parsed.y == null ? null : ` ${c.dataset.label}: $${fmt(c.parsed.y)}` } } },
+      scales: {
+        x: { grid: { color: 'rgba(26,37,64,0.7)' }, ticks: { color: '#4B6280', maxTicksLimit: 6, font: { size: 10 } } },
+        y: { position: 'right', grid: { color: 'rgba(26,37,64,0.7)' }, ticks: { color: '#4B6280', font: { size: 10 }, callback: v => v >= 1000 ? `$${(v/1000).toFixed(1)}k` : `$${v.toFixed(2)}` } },
+      },
+    },
+  });
+}
+
+async function updateForecast(coinId) {
+  const hz = getHorizonKey();
+  const hzCfg = HORIZON_CFG[hz];
+  state.horizonKey = hz;
+  const warn = document.getElementById('hzWarning');
+  if (warn) warn.style.display = hzCfg.warning ? '' : 'none';
+  const intradayCard = document.getElementById('intradayCard');
+  const labelEl = document.getElementById('intradayLabel');
+  if (hzCfg.warning) {
+    if (intradayCard) { intradayCard.style.display = ''; if (labelEl) labelEl.textContent = hzCfg.label; }
+    try {
+      const { dates, prices } = await fetchForecastData(coinId, hzCfg.cgDays);
+      state.intradayPrices = prices; state.intradayDates = dates;
+      const fcst = holtForecast(prices, hzCfg.steps);
+      buildIntradayChart(dates, prices, fcst, hzCfg);
+      const pred = fcst.median[fcst.median.length - 1];
+      const curr = prices[prices.length - 1];
+      const chg  = (pred - curr) / curr * 100;
+      const chgCls = chg >= 0 ? 'green' : 'red';
+      const resEl = document.getElementById('intradayResult');
+      if (resEl) resEl.innerHTML = `<div class="result-row">
+        <div><div class="res-label">Forecast price in ${hzCfg.label}</div>
+          <div class="res-sub">Based on last ${hzCfg.histPoints} × 5-min candles via Holt smoothing</div></div>
+        <div class="res-val ${chgCls}">${fmtUSD(pred)} <span style="font-size:11px">${fmtPct(chg)}</span></div>
+      </div>
+      <div class="result-row">
+        <div><div class="res-label">Confidence band (±1σ)</div>
+          <div class="res-sub">High ${fmtUSD(fcst.high[fcst.high.length-1])} · Low ${fmtUSD(fcst.low[fcst.low.length-1])}</div></div>
+        <div class="res-val" style="color:var(--text-lo)">Wide</div>
+      </div>`;
+    } catch (e) {
+      const resEl = document.getElementById('intradayResult');
+      if (resEl) resEl.innerHTML = '<p style="color:var(--text-lo);font-size:13px">Could not load intraday data. Try again in a moment.</p>';
+    }
+  } else {
+    if (intradayCard) intradayCard.style.display = 'none';
+    if (!state.prices || !state.dates) return;
+    if (hz === '7d') {
+      const fcst = holtForecast(state.prices, hzCfg.steps);
+      const bb   = calcBollinger(state.prices);
+      buildChart(state.dates, state.prices, bb, fcst, state.days, hzCfg.steps, hzCfg.stepMs);
+    } else {
+      try {
+        const { dates, prices } = await fetchForecastData(coinId, hzCfg.cgDays);
+        const fcst = holtForecast(prices, hzCfg.steps);
+        const bb = prices.length >= 20 ? calcBollinger(prices) : { upper: prices, mid: prices, lower: prices };
+        buildChart(dates, prices, bb, fcst, hzCfg.histPoints, hzCfg.steps, hzCfg.stepMs);
+      } catch (e) {
+        const fcst = holtForecast(state.prices, hzCfg.steps);
+        const bb   = calcBollinger(state.prices);
+        buildChart(state.dates, state.prices, bb, fcst, state.days, hzCfg.steps, hzCfg.stepMs);
+      }
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -896,9 +1020,8 @@ async function loadCoin(coinId, days) {
       chg7d >= 0 ? badge('Price trended UP this week ↑', 'green')
       : badge('Price trended DOWN this week ↓', 'red');
 
-    const horizon  = parseInt(document.getElementById('horizon').value) || 7;
-    const forecast = holtForecast(prices, horizon);
-    buildChart(dates, prices, bb, forecast, days, horizon);
+    const initFcst = holtForecast(prices, 7);
+    buildChart(dates, prices, bb, initFcst, days, 7);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
 
     // Freshness indicator
@@ -910,6 +1033,8 @@ async function loadCoin(coinId, days) {
     if (entryEl && !entryEl.dataset.userSet) entryEl.value = curr.toFixed(2);
 
     loadSentiment(coinId).catch(e => console.warn('Sentiment:', e.message));
+
+    updateForecast(coinId).catch(e => console.warn('Forecast update:', e.message));
 
     // Auto-run the full analysis once on first successful load
     if (!state._autoRan) { state._autoRan = true; analyze(); }
@@ -939,9 +1064,10 @@ async function analyze() {
   const entry   = parseFloat(document.getElementById('entryPrice').value)  || curr;
   const lev     = parseFloat(document.getElementById('leverage').value)    || 10;
   const size    = parseFloat(document.getElementById('posSize').value)     || 1000;
-  const horizon = parseInt(document.getElementById('horizon').value)       || 7;
+  const hz      = getHorizonKey();
+  const hzCfg   = HORIZON_CFG[hz];
   const dir     = state.direction;
-  const fcst    = holtForecast(prices, horizon);
+  const fcst    = holtForecast(prices, hzCfg.warning ? 7 : hzCfg.steps);
   const tp      = parseFloat(document.getElementById('takeProfit').value)  || fcst.median[fcst.median.length - 1];
   const sl      = parseFloat(document.getElementById('stopLoss').value)    || 0;
   const m       = calcFutures(entry, lev, size, dir, tp, sl);
@@ -966,8 +1092,9 @@ async function analyze() {
   else if (curr > bbU){ signals.push({ t:'Bollinger: Price hit the top of its normal range — reversal risk is high', c:'red' }); score -= 1; }
   else                  signals.push({ t:'Bollinger: Price is comfortably within its normal trading range', c:'neutral' });
   const chgF = (fcst.median[fcst.median.length-1] - curr) / curr * 100;
-  if (chgF > 2)       { signals.push({ t:`Forecast: Model predicts price rises +${chgF.toFixed(1)}% over ${horizon} days`, c:'green' }); score += 1; }
-  else if (chgF < -2) { signals.push({ t:`Forecast: Model predicts price falls ${chgF.toFixed(1)}% over ${horizon} days`, c:'red' }); score -= 1; }
+  const fcstLbl = hzCfg.warning ? '7 days (daily model)' : hzCfg.label;
+  if (chgF > 2)       { signals.push({ t:`Forecast: Model predicts price rises +${chgF.toFixed(1)}% over ${fcstLbl}`, c:'green' }); score += 1; }
+  else if (chgF < -2) { signals.push({ t:`Forecast: Model predicts price falls ${chgF.toFixed(1)}% over ${fcstLbl}`, c:'red' }); score -= 1; }
   else                  signals.push({ t:`Forecast: Price expected to stay roughly flat (${chgF.toFixed(1)}% change)`, c:'neutral' });
   if (m.liqDist < 5)  { signals.push({ t:`DANGER: Your forced-close price is only ${m.liqDist.toFixed(1)}% away — very high risk!`, c:'red' }); score -= 1; }
   else if (m.liqDist < 10) signals.push({ t:`Caution: Your forced-close price is ${m.liqDist.toFixed(1)}% away — moderate risk`, c:'yellow' });
@@ -997,7 +1124,7 @@ async function analyze() {
     else                          signals.push({ t:`News (FinBERT AI): Mixed headlines — no strong directional signal`, c:'neutral' });
   }
 
-  renderResults(m, curr, fcst, horizon, chgF);
+  renderResults(m, curr, fcst, hzCfg, chgF);
   renderSignal(score, signals, dir);
   btn.disabled = false; btn.textContent = 'Analyze Trade';
 }
@@ -1013,16 +1140,19 @@ function row(label, value, cls = '', sub = '', hl = '') {
   </div>`;
 }
 
-function renderResults(m, curr, fcst, horizon, chgF) {
-  const pred    = fcst.median[fcst.median.length - 1];
-  const predCls = chgF >= 0 ? 'green' : 'red';
-  const predDesc = chgF >= 0
-    ? `Model expects price to rise ${fmtPct(chgF)} over the next ${horizon} days`
-    : `Model expects price to fall ${Math.abs(chgF).toFixed(2)}% over the next ${horizon} days`;
+function renderResults(m, curr, fcst, hzCfg, chgF) {
+  const pred     = fcst.median[fcst.median.length - 1];
+  const predCls  = chgF >= 0 ? 'green' : 'red';
+  const fcstLbl  = hzCfg.warning ? '7 days (daily model)' : hzCfg.label;
+  const predDesc = hzCfg.warning
+    ? `Daily model used for trade signals — see Short-term Forecast card for ${hzCfg.label} view`
+    : (chgF >= 0
+        ? `Model expects price to rise ${fmtPct(chgF)} over the next ${hzCfg.label}`
+        : `Model expects price to fall ${Math.abs(chgF).toFixed(2)}% over the next ${hzCfg.label}`);
   document.getElementById('resultsCard').style.display = 'block';
   document.getElementById('resultsBody').innerHTML = `<div class="results-grid">
     ${row('Current Market Price', fmtUSD(curr), 'accent', 'Live price of the coin right now')}
-    ${row(`Price Forecast (${horizon} days)`, fmtUSD(pred) + ` <span style="font-size:11px">${fmtPct(chgF)}</span>`, predCls, predDesc)}
+    ${row(`Price Forecast (${fcstLbl})`, fmtUSD(pred) + ` <span style="font-size:11px">${fmtPct(chgF)}</span>`, predCls, predDesc)}
     ${row('Your Entry Price', fmtUSD(m.entry), '', 'The price at which you open this trade')}
     ${row('Your Capital at Risk', fmtUSD(m.margin), '', `Real money you put in — your $${fmt(m.size)} trade size ÷ ${m.leverage}× leverage`)}
     ${row('Forced Close Price', fmtUSD(m.liq), m.liqDist < 10 ? 'red' : '', `${m.liqDist.toFixed(2)}% from entry — you lose all your capital if price reaches here`, m.liqDist < 10 ? 'hl-red' : '')}
@@ -1121,6 +1251,15 @@ function init() {
       btn.classList.add('active');
       state.days = parseInt(btn.dataset.days);
       loadCoin(state.coin, state.days);
+    });
+  });
+
+  document.querySelectorAll('.hz-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.hz-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.horizonKey = btn.dataset.hz;
+      updateForecast(state.coin).catch(e => console.warn('Forecast:', e.message));
     });
   });
 

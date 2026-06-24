@@ -275,9 +275,19 @@
           <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
         </div>
         <div class="form-group">
-          <label>Predict How Many Days Ahead &mdash; <span id="horizDisplay" class="accent">7 days</span></label>
-          <input type="range" id="horizon" class="range-slider" min="1" max="14" value="7"
-                 oninput="document.getElementById('horizDisplay').textContent=this.value+' days'" />
+          <label>Forecast Horizon</label>
+          <div class="hz-btn-row" id="horizonBtns">
+            <button class="hz-btn" data-hz="5m">5 min</button>
+            <button class="hz-btn" data-hz="10m">10 min</button>
+            <button class="hz-btn" data-hz="30m">30 min</button>
+            <button class="hz-btn" data-hz="1h">1 hr</button>
+            <button class="hz-btn" data-hz="24h">24 hr</button>
+            <button class="hz-btn" data-hz="48h">48 hr</button>
+            <button class="hz-btn active" data-hz="7d">7 days</button>
+          </div>
+          <div id="hzWarning" class="hz-warning" style="display:none">
+            &#9888; Sub-hour forecasts are noise-dominated &mdash; uncertainty bands are very wide. Treat as directional only, not a reliable price target.
+          </div>
         </div>
       </div>
 
@@ -295,6 +305,14 @@
         <button class="wiz-next" id="wizNext" onclick="wizGo(1)">Next &rarr;</button>
         <button id="analyzeBtn" class="btn-analyze" onclick="analyze()" style="display:none">Analyze Trade</button>
       </div>
+    </div>
+
+    <!-- Intraday forecast card (sub-hour horizons only) -->
+    <div class="card" id="intradayCard" style="display:none">
+      <h3 class="card-heading">Short-term Forecast &mdash; <span id="intradayLabel"></span></h3>
+      <p class="hz-warning" style="margin-bottom:12px">&#9888; Short-term crypto prices are largely noise-driven. This model extrapolates recent momentum &mdash; treat it as a directional lean, not a price target.</p>
+      <div style="position:relative;height:160px"><canvas id="intradayChart"></canvas></div>
+      <div id="intradayResult" style="margin-top:12px"></div>
     </div>
 
     <!-- Results card -->
