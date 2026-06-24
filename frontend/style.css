@@ -285,6 +285,13 @@ input, select, button { font-family: inherit; }
   letter-spacing: .06em;
   margin-bottom: 6px;
 }
+.hz-row-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--text-lo);
+  opacity: .7;
+}
 
 /* Forecast horizon buttons */
 .hz-btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 0; }
@@ -309,6 +316,34 @@ input, select, button { font-family: inherit; }
   border-radius: 6px;
   border: 1px solid rgba(255,184,0,0.18);
 }
+
+/* Forecast readout beneath the chart (all timeframes) */
+.forecast-summary {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(255,184,0,0.05), rgba(255,184,0,0.02));
+  border: 1px solid rgba(255,184,0,0.16);
+  border-radius: 10px;
+}
+.forecast-summary:empty { display: none; }
+.fc-sum-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.fc-sum-left { display: flex; align-items: center; gap: 8px; }
+.fc-sum-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.fc-sum-dot.up   { background: var(--green, #00E887); box-shadow: 0 0 8px rgba(0,232,135,0.6); }
+.fc-sum-dot.down { background: var(--red, #FF3D3D);   box-shadow: 0 0 8px rgba(255,61,61,0.6); }
+.fc-sum-label {
+  font-size: 12px; font-weight: 600; color: var(--text-lo);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.fc-sum-val { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.fc-sum-val.up   { color: var(--green, #00E887); }
+.fc-sum-val.down { color: var(--red, #FF3D3D); }
+.fc-sum-chg { font-size: 13px; font-weight: 600; opacity: .85; }
+.fc-sum-band { margin-top: 6px; font-size: 12px; color: var(--text-lo); }
+.fc-sum-warn { color: var(--gold, #FFB800); font-weight: 600; }
 
 .chart-wrap { position: relative; height: 320px; }
 .chart-wrap canvas { width: 100% !important; height: 100% !important; }
