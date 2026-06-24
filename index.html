@@ -147,13 +147,8 @@
           </div>
           <span id="freshness" class="freshness"></span>
         </div>
-        <div class="tf-row">
-          <button class="tf-btn" data-days="7">7D</button>
-          <button class="tf-btn active" data-days="30">30D</button>
-          <button class="tf-btn" data-days="90">90D</button>
-        </div>
         <div class="hz-forecast-row">
-          <span class="hz-row-label">AI Forecast Horizon</span>
+          <span class="hz-row-label">Timeframe &amp; AI Forecast <span class="hz-row-hint">&mdash; recent history + projection ahead</span></span>
           <div class="hz-btn-row" id="horizonBtns">
             <button class="hz-btn" data-hz="5m">5 min</button>
             <button class="hz-btn" data-hz="10m">10 min</button>
@@ -172,6 +167,7 @@
         <canvas id="priceChart"></canvas>
         <div id="chartLoader" class="chart-loader"><div class="spin"></div><span>Fetching data&hellip;</span></div>
       </div>
+      <div id="forecastSummary" class="forecast-summary"></div>
     </div>
 
     <!-- Sentiment card -->
@@ -285,7 +281,7 @@
 
       <!-- Step 4: Stop Loss -->
       <div class="wiz-step" data-step="4">
-        <div class="wiz-step-title">Step 4 &middot; Stop loss &amp; forecast window</div>
+        <div class="wiz-step-title">Step 4 &middot; Stop loss</div>
         <div class="form-group">
           <label for="stopLoss">Stop Loss Price (USD) <span class="hint">&mdash; price to auto-close to limit your loss (0 = skip)</span></label>
           <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
@@ -306,14 +302,6 @@
         <button class="wiz-next" id="wizNext" onclick="wizGo(1)">Next &rarr;</button>
         <button id="analyzeBtn" class="btn-analyze" onclick="analyze()" style="display:none">Analyze Trade</button>
       </div>
-    </div>
-
-    <!-- Intraday forecast card (sub-hour horizons only) -->
-    <div class="card" id="intradayCard" style="display:none">
-      <h3 class="card-heading">Short-term Forecast &mdash; <span id="intradayLabel"></span></h3>
-      <p class="hz-warning" style="margin-bottom:12px">&#9888; Short-term crypto prices are largely noise-driven. This model extrapolates recent momentum &mdash; treat it as a directional lean, not a price target.</p>
-      <div style="position:relative;height:160px"><canvas id="intradayChart"></canvas></div>
-      <div id="intradayResult" style="margin-top:12px"></div>
     </div>
 
     <!-- Results card -->

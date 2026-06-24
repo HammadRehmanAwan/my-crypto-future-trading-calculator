@@ -252,23 +252,6 @@ input, select, button { font-family: inherit; }
 .freshness.stale .fresh-dot { background: var(--gold); box-shadow: 0 0 6px var(--gold); animation: none; }
 @keyframes fresh-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-.tf-row { display: flex; gap: 5px; }
-.tf-btn {
-  padding: 5px 13px;
-  border: 1px solid var(--border2);
-  border-radius: 20px;
-  background: transparent;
-  color: var(--text-lo);
-  font-size: 12px; font-weight: 500;
-  cursor: pointer;
-  transition: all .2s;
-}
-.tf-btn:hover, .tf-btn.active {
-  background: var(--accent-d);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 /* Forecast horizon row inside chart card */
 .hz-forecast-row {
   flex-basis: 100%;
@@ -284,6 +267,12 @@ input, select, button { font-family: inherit; }
   text-transform: uppercase;
   letter-spacing: .06em;
   margin-bottom: 6px;
+}
+.hz-row-hint {
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--text-lo);
 }
 
 /* Forecast horizon buttons */
@@ -309,6 +298,34 @@ input, select, button { font-family: inherit; }
   border-radius: 6px;
   border: 1px solid rgba(255,184,0,0.18);
 }
+
+/* Forecast readout beneath the chart (all timeframes) */
+.forecast-summary {
+  margin-top: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(180deg, rgba(255,184,0,0.05), rgba(255,184,0,0.02));
+  border: 1px solid rgba(255,184,0,0.16);
+  border-radius: 10px;
+}
+.forecast-summary:empty { display: none; }
+.fc-sum-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.fc-sum-left { display: flex; align-items: center; gap: 8px; }
+.fc-sum-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.fc-sum-dot.up   { background: var(--green, #00E887); box-shadow: 0 0 8px rgba(0,232,135,0.6); }
+.fc-sum-dot.down { background: var(--red, #FF3D3D);   box-shadow: 0 0 8px rgba(255,61,61,0.6); }
+.fc-sum-label {
+  font-size: 12px; font-weight: 600; color: var(--text-lo);
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.fc-sum-val { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; }
+.fc-sum-val.up   { color: var(--green, #00E887); }
+.fc-sum-val.down { color: var(--red, #FF3D3D); }
+.fc-sum-chg { font-size: 13px; font-weight: 600; opacity: .85; }
+.fc-sum-band { margin-top: 6px; font-size: 12px; color: var(--text-lo); }
+.fc-sum-warn { color: var(--gold, #FFB800); font-weight: 600; }
 
 .chart-wrap { position: relative; height: 320px; }
 .chart-wrap canvas { width: 100% !important; height: 100% !important; }
@@ -2336,7 +2353,7 @@ input, select, button { font-family: inherit; }
     scroll-snap-align: center; flex: 0 0 86%; min-width: 86%;
   }
   /* Larger tap targets */
-  .tf-btn, .thresh-btn, .risk-btn { min-height: 38px; }
+  .hz-btn, .thresh-btn, .risk-btn { min-height: 38px; }
   .dir-btn { padding: 12px 0; }
   .page-tab { padding: 12px 16px; font-size: 12px; }
   /* Responsive chart heights */

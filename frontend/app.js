@@ -48,20 +48,22 @@ let _auth = null;
 const CRYPTOCOMPARE_NEWS = 'https://min-api.cryptocompare.com/data/v2/news/';
 const SENT_TTL           = 5 * 60_000;
 
-// Forecast horizon configuration.
+// Unified timeframe configuration. Each entry drives BOTH the chart's
+// historical window (granularity + how many points) and the forward AI
+// forecast, all drawn together on the main chart (Pluto-style single control).
 // cgDays: CoinGecko market_chart days param (controls auto-granularity).
 // steps: forecast steps ahead using that granularity.
-// stepMs: milliseconds per step (for generating future date labels).
-// histPoints: how many recent data points to show in the intraday mini-chart.
+// stepMs: milliseconds per step (history candle size + future date labels).
+// histPoints: how many recent candles of history to show on the chart.
 // horizDays: horizon in days (for funding cost in calcFutures).
-// warning: true = show noise-dominated warning label.
+// warning: true = show noise-dominated warning label (sub-hour).
 const HORIZON_CFG = {
-  '5m':  { label: '5 min',    cgDays: 1,  steps: 1,  stepMs: 5*60*1000,       histPoints: 24,  horizDays: 5/1440,   warning: true  },
-  '10m': { label: '10 min',   cgDays: 1,  steps: 2,  stepMs: 5*60*1000,       histPoints: 24,  horizDays: 10/1440,  warning: true  },
+  '5m':  { label: '5 min',    cgDays: 1,  steps: 1,  stepMs: 5*60*1000,       histPoints: 48,  horizDays: 5/1440,   warning: true  },
+  '10m': { label: '10 min',   cgDays: 1,  steps: 2,  stepMs: 5*60*1000,       histPoints: 48,  horizDays: 10/1440,  warning: true  },
   '30m': { label: '30 min',   cgDays: 1,  steps: 6,  stepMs: 5*60*1000,       histPoints: 72,  horizDays: 30/1440,  warning: true  },
   '1h':  { label: '1 hour',   cgDays: 1,  steps: 12, stepMs: 5*60*1000,       histPoints: 144, horizDays: 1/24,     warning: true  },
   '24h': { label: '24 hours', cgDays: 7,  steps: 24, stepMs: 60*60*1000,      histPoints: 72,  horizDays: 1,        warning: false },
-  '48h': { label: '48 hours', cgDays: 7,  steps: 48, stepMs: 60*60*1000,      histPoints: 168, horizDays: 2,        warning: false },
+  '48h': { label: '48 hours', cgDays: 14, steps: 48, stepMs: 60*60*1000,      histPoints: 168, horizDays: 2,        warning: false },
   '7d':  { label: '7 days',   cgDays: 30, steps: 7,  stepMs: 24*60*60*1000,   histPoints: 30,  horizDays: 7,        warning: false },
 };
 
@@ -73,7 +75,6 @@ function getHorizonKey() {
 const state = {
   coin: 'bitcoin', days: 30, direction: 'Long', horizonKey: '7d',
   prices: null, dates: null, chart: null, cache: {},
-  intradayChart: null, intradayPrices: null, intradayDates: null,
   sentiment: null, lastUpdated: null, _autoRan: false,
   user: null, alertSettings: {},
 };
@@ -774,110 +775,79 @@ function buildChart(dates, prices, bb, forecast, days, horizon, stepMs = 24*60*6
   });
 }
 
-// Renders the intraday mini-chart (sub-hour horizons) with history + forecast.
-function buildIntradayChart(dates, prices, forecast, hzCfg) {
-  if (state.intradayChart) { state.intradayChart.destroy(); state.intradayChart = null; }
-  const n = Math.min(dates.length, hzCfg.histPoints);
-  const dDates  = dates.slice(-n);
-  const dPrices = prices.slice(-n);
-  const last = dDates[dDates.length - 1];
-  const fDates = Array.from({ length: hzCfg.steps }, (_, i) => new Date(last.getTime() + hzCfg.stepMs * (i + 1)));
-  const allDates = [...dDates, ...fDates];
-  const labels = allDates.map(d => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }));
-  const pad  = arr => [...arr.slice(-n), ...new Array(hzCfg.steps).fill(null)];
-  const fpad = arr => [...new Array(n).fill(null), ...arr];
-  const canvasEl = document.getElementById('intradayChart');
-  if (!canvasEl) return;
-  state.intradayChart = new Chart(canvasEl.getContext('2d'), {
-    type: 'line',
-    data: { labels, datasets: [
-      { label: 'Price', data: pad(dPrices), borderColor: '#00D4FF', backgroundColor: 'transparent', borderWidth: 1.5, pointRadius: 0, tension: 0.3 },
-      { label: 'CI High', data: fpad(forecast.high), borderColor: 'rgba(255,184,0,0.15)', backgroundColor: 'rgba(255,184,0,0.07)', fill: '+1', borderWidth: 1, pointRadius: 0, tension: 0.2 },
-      { label: 'CI Low',  data: fpad(forecast.low),  borderColor: 'rgba(255,184,0,0.15)', backgroundColor: 'transparent', borderWidth: 1, pointRadius: 0, tension: 0.2 },
-      { label: 'Forecast', data: fpad(forecast.median), borderColor: '#FFB800', backgroundColor: 'transparent', borderWidth: 2, borderDash: [5,3], pointRadius: 3, pointHoverRadius: 5, pointBackgroundColor: '#FFB800', tension: 0.2 },
-    ]},
-    options: {
-      responsive: true, maintainAspectRatio: false,
-      animation: { duration: 300 },
-      plugins: { legend: { display: false },
-        tooltip: { backgroundColor: '#0F1828', borderColor: '#1A2540', borderWidth: 1, titleColor: '#00D4FF', bodyColor: '#CBD5E1',
-          callbacks: { label: c => c.parsed.y == null ? null : ` ${c.dataset.label}: $${fmt(c.parsed.y)}` } } },
-      scales: {
-        x: { grid: { color: 'rgba(26,37,64,0.7)' }, ticks: { color: '#4B6280', maxTicksLimit: 6, font: { size: 10 } } },
-        y: { position: 'right', grid: { color: 'rgba(26,37,64,0.7)' }, ticks: { color: '#4B6280', font: { size: 10 }, callback: v => v >= 1000 ? `$${(v/1000).toFixed(1)}k` : `$${v.toFixed(2)}` } },
-      },
-    },
-  });
+// Renders the compact forecast readout shown beneath the main chart for
+// every timeframe (price target, % change, ±1σ confidence band).
+function renderForecastSummary(prices, fcst, hzCfg) {
+  const el = document.getElementById('forecastSummary');
+  if (!el) return;
+  const pred = fcst.median[fcst.median.length - 1];
+  const curr = prices[prices.length - 1];
+  if (pred == null || curr == null) { el.innerHTML = ''; return; }
+  const chg  = (pred - curr) / curr * 100;
+  const cls  = chg >= 0 ? 'up' : 'down';
+  const arrow = chg >= 0 ? '▲' : '▼';
+  const hi   = fcst.high[fcst.high.length - 1];
+  const lo   = fcst.low[fcst.low.length - 1];
+  el.innerHTML = `
+    <div class="fc-sum-row">
+      <div class="fc-sum-left">
+        <span class="fc-sum-dot ${cls}"></span>
+        <span class="fc-sum-label">AI forecast &middot; next ${hzCfg.label}</span>
+      </div>
+      <div class="fc-sum-val ${cls}">${arrow} ${fmtUSD(pred)} <span class="fc-sum-chg">${fmtPct(chg)}</span></div>
+    </div>
+    <div class="fc-sum-band">Confidence band (&plusmn;1&sigma;): ${fmtUSD(lo)} &ndash; ${fmtUSD(hi)}${hzCfg.warning ? ' &middot; <span class="fc-sum-warn">wide, noise-dominated</span>' : ''}</div>`;
 }
 
-// Called whenever the horizon selection changes or a coin loads.
-// Fetches appropriate-granularity data and updates the forecast overlay
-// (intraday card for sub-hour; main chart overlay for 24h/48h/7d).
+// Called whenever the timeframe selection changes or a coin loads.
+// A single unified control: each timeframe sets the chart's history
+// granularity AND the forward AI forecast, both drawn on the main chart.
 async function updateForecast(coinId) {
   const hz = getHorizonKey();
   const hzCfg = HORIZON_CFG[hz];
   state.horizonKey = hz;
 
-  // Show/hide warning
+  // Sub-hour timeframes get the "noise-dominated" caution.
   const warn = document.getElementById('hzWarning');
   if (warn) warn.style.display = hzCfg.warning ? '' : 'none';
 
-  const intradayCard = document.getElementById('intradayCard');
-  const labelEl = document.getElementById('intradayLabel');
+  // Clear any prior readout up front so a stale horizon's numbers never
+  // linger while the new data is fetching (the :empty CSS rule hides it).
+  const sumEl = document.getElementById('forecastSummary');
+  if (sumEl) sumEl.innerHTML = '';
 
-  if (hzCfg.warning) {
-    // Sub-hour: fetch 5-min data and show intraday card
-    if (intradayCard) { intradayCard.style.display = ''; if (labelEl) labelEl.textContent = hzCfg.label; }
-    try {
-      const { dates, prices } = await fetchForecastData(coinId, hzCfg.cgDays);
-      state.intradayPrices = prices; state.intradayDates = dates;
-      const fcst = holtForecast(prices, hzCfg.steps);
-      buildIntradayChart(dates, prices, fcst, hzCfg);
-      const pred = fcst.median[fcst.median.length - 1];
-      const curr = prices[prices.length - 1];
-      const chg  = (pred - curr) / curr * 100;
-      const chgCls = chg >= 0 ? 'green' : 'red';
-      const resEl = document.getElementById('intradayResult');
-      if (resEl) resEl.innerHTML = `<div class="result-row">
-        <div><div class="res-label">Forecast price in ${hzCfg.label}</div>
-          <div class="res-sub">Based on last ${hzCfg.histPoints} × 5-min candles via Holt smoothing</div></div>
-        <div class="res-val ${chgCls}">${fmtUSD(pred)} <span style="font-size:11px">${fmtPct(chg)}</span></div>
-      </div>
-      <div class="result-row">
-        <div><div class="res-label">Confidence band (±1σ)</div>
-          <div class="res-sub">High ${fmtUSD(fcst.high[fcst.high.length-1])} · Low ${fmtUSD(fcst.low[fcst.low.length-1])}</div></div>
-        <div class="res-val" style="color:var(--text-lo)">Wide</div>
-      </div>`;
-    } catch (e) {
-      const resEl = document.getElementById('intradayResult');
-      if (resEl) resEl.innerHTML = '<p style="color:var(--text-lo);font-size:13px">Could not load intraday data. Try again in a moment.</p>';
-    }
-  } else {
-    // 24h / 48h / 7d: hide intraday card; rebuild main chart with correct granularity
-    if (intradayCard) intradayCard.style.display = 'none';
+  // Resolve history at the right granularity for this timeframe.
+  // 7d reuses the daily data already loaded; everything else fetches
+  // intraday (5-min) or hourly series. render* track the params actually
+  // used to draw, so a daily fallback also switches to daily labels/spacing.
+  let dates, prices;
+  let renderStepMs = hzCfg.stepMs, renderHistPoints = hzCfg.histPoints;
+  if (hz === '7d') {
     if (!state.prices || !state.dates) return;
-
-    if (hz === '7d') {
-      // Use already-loaded daily prices
-      const fcst = holtForecast(state.prices, hzCfg.steps);
-      const bb   = calcBollinger(state.prices);
-      buildChart(state.dates, state.prices, bb, fcst, state.days, hzCfg.steps, hzCfg.stepMs);
-    } else {
-      // 24h / 48h: fetch hourly data, run Holt on that
-      try {
-        const { dates, prices } = await fetchForecastData(coinId, hzCfg.cgDays);
-        const fcst = holtForecast(prices, hzCfg.steps);
-        // Build a dummy BB (20-period) on hourly data so the chart still has bands
-        const bb = prices.length >= 20 ? calcBollinger(prices) : { upper: prices, mid: prices, lower: prices };
-        buildChart(dates, prices, bb, fcst, hzCfg.histPoints, hzCfg.steps, hzCfg.stepMs);
-      } catch (e) {
-        // Fallback: use daily Holt as an approximation
-        const fcst = holtForecast(state.prices, hzCfg.steps);
-        const bb   = calcBollinger(state.prices);
-        buildChart(state.dates, state.prices, bb, fcst, state.days, hzCfg.steps, hzCfg.stepMs);
-      }
+    dates = state.dates; prices = state.prices;
+  } else {
+    try {
+      ({ dates, prices } = await fetchForecastData(coinId, hzCfg.cgDays));
+    } catch (e) {
+      dates = null; prices = null;
+    }
+    // Empty 200 (illiquid coin / partial outage) or a thrown fetch both land
+    // here: fall back to the loaded daily series AND daily render params so
+    // the chart degrades coherently instead of crashing or garbling labels.
+    if (!prices || !prices.length || !dates || !dates.length) {
+      if (!state.prices || !state.dates) return;
+      dates = state.dates; prices = state.prices;
+      renderStepMs = 24 * 60 * 60 * 1000;
+      renderHistPoints = state.days;
     }
   }
+
+  const fcst = holtForecast(prices, hzCfg.steps);
+  const bb = prices.length >= 20
+    ? calcBollinger(prices)
+    : { upper: prices, mid: prices, lower: prices };
+  buildChart(dates, prices, bb, fcst, renderHistPoints, hzCfg.steps, renderStepMs);
+  renderForecastSummary(prices, fcst, hzCfg);
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -1273,10 +1243,10 @@ async function loadCoin(coinId, days) {
 
     renderCalcAdvTech(prices, volumes);
 
-    // Initial chart: always show 7-day daily forecast; updateForecast() will
-    // redraw for the selected horizon after the initial render.
-    const initFcst = holtForecast(prices, 7);
-    buildChart(dates, prices, bb, initFcst, days, 7);
+    // Initial chart: history only (no forecast) for a clean first paint.
+    // updateForecast() immediately redraws with the selected timeframe's
+    // granularity + forward forecast, so we avoid flashing a stale cone.
+    buildChart(dates, prices, bb, { median: [], high: [], low: [] }, days, 0);
     runDeepVolatilityCheck(coinId, prices, rsiArr, bb);
 
     // Freshness indicator
@@ -1389,7 +1359,7 @@ async function analyze() {
   const hzCfg   = HORIZON_CFG[hz];
   const dir     = state.direction;
   // For the trade analysis, always use 7-day daily Holt so RSI/BB/signals are meaningful.
-  // Sub-hour forecasts are shown separately in the intraday card.
+  // Sub-hour timeframes still show their short-term projection on the main chart.
   const fcst    = holtForecast(prices, hzCfg.warning ? 7 : hzCfg.steps);
   const horizDays = hzCfg.horizDays;
   const tp      = parseFloat(document.getElementById('takeProfit').value)  || fcst.median[fcst.median.length - 1];
@@ -1613,16 +1583,8 @@ function init() {
     });
     hubSel.addEventListener('change', e => { hubState.coinId = e.target.value; });
   }
-  document.querySelectorAll('.tf-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tf-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      state.days = parseInt(btn.dataset.days);
-      loadCoin(state.coin, state.days);
-    });
-  });
-
-  // Forecast horizon buttons
+  // Unified timeframe buttons: each sets the chart's history granularity
+  // AND the forward AI forecast (drawn together on the main chart).
   document.querySelectorAll('.hz-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       document.querySelectorAll('.hz-btn').forEach(b => b.classList.remove('active'));
