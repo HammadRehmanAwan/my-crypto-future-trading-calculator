@@ -252,23 +252,6 @@ input, select, button { font-family: inherit; }
 .freshness.stale .fresh-dot { background: var(--gold); box-shadow: 0 0 6px var(--gold); animation: none; }
 @keyframes fresh-pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
 
-.tf-row { display: flex; gap: 5px; }
-.tf-btn {
-  padding: 5px 13px;
-  border: 1px solid var(--border2);
-  border-radius: 20px;
-  background: transparent;
-  color: var(--text-lo);
-  font-size: 12px; font-weight: 500;
-  cursor: pointer;
-  transition: all .2s;
-}
-.tf-btn:hover, .tf-btn.active {
-  background: var(--accent-d);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 /* Forecast horizon row inside chart card */
 .hz-forecast-row {
   flex-basis: 100%;
@@ -290,7 +273,6 @@ input, select, button { font-family: inherit; }
   letter-spacing: 0;
   font-weight: 400;
   color: var(--text-lo);
-  opacity: .7;
 }
 
 /* Forecast horizon buttons */
@@ -2371,7 +2353,7 @@ input, select, button { font-family: inherit; }
     scroll-snap-align: center; flex: 0 0 86%; min-width: 86%;
   }
   /* Larger tap targets */
-  .tf-btn, .thresh-btn, .risk-btn { min-height: 38px; }
+  .hz-btn, .thresh-btn, .risk-btn { min-height: 38px; }
   .dir-btn { padding: 12px 0; }
   .page-tab { padding: 12px 16px; font-size: 12px; }
   /* Responsive chart heights */

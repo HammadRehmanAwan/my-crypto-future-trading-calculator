@@ -811,28 +811,42 @@ async function updateForecast(coinId) {
   const warn = document.getElementById('hzWarning');
   if (warn) warn.style.display = hzCfg.warning ? '' : 'none';
 
+  // Clear any prior readout up front so a stale horizon's numbers never
+  // linger while the new data is fetching (the :empty CSS rule hides it).
+  const sumEl = document.getElementById('forecastSummary');
+  if (sumEl) sumEl.innerHTML = '';
+
   // Resolve history at the right granularity for this timeframe.
   // 7d reuses the daily data already loaded; everything else fetches
-  // intraday (5-min) or hourly series.
+  // intraday (5-min) or hourly series. render* track the params actually
+  // used to draw, so a daily fallback also switches to daily labels/spacing.
   let dates, prices;
-  try {
-    if (hz === '7d') {
-      if (!state.prices || !state.dates) return;
-      dates = state.dates; prices = state.prices;
-    } else {
-      ({ dates, prices } = await fetchForecastData(coinId, hzCfg.cgDays));
-    }
-  } catch (e) {
-    // Network fallback: approximate with the loaded daily series.
+  let renderStepMs = hzCfg.stepMs, renderHistPoints = hzCfg.histPoints;
+  if (hz === '7d') {
     if (!state.prices || !state.dates) return;
     dates = state.dates; prices = state.prices;
+  } else {
+    try {
+      ({ dates, prices } = await fetchForecastData(coinId, hzCfg.cgDays));
+    } catch (e) {
+      dates = null; prices = null;
+    }
+    // Empty 200 (illiquid coin / partial outage) or a thrown fetch both land
+    // here: fall back to the loaded daily series AND daily render params so
+    // the chart degrades coherently instead of crashing or garbling labels.
+    if (!prices || !prices.length || !dates || !dates.length) {
+      if (!state.prices || !state.dates) return;
+      dates = state.dates; prices = state.prices;
+      renderStepMs = 24 * 60 * 60 * 1000;
+      renderHistPoints = state.days;
+    }
   }
 
   const fcst = holtForecast(prices, hzCfg.steps);
   const bb = prices.length >= 20
     ? calcBollinger(prices)
     : { upper: prices, mid: prices, lower: prices };
-  buildChart(dates, prices, bb, fcst, hzCfg.histPoints, hzCfg.steps, hzCfg.stepMs);
+  buildChart(dates, prices, bb, fcst, renderHistPoints, hzCfg.steps, renderStepMs);
   renderForecastSummary(prices, fcst, hzCfg);
 }
 
