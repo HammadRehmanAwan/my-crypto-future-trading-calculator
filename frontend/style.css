@@ -269,8 +269,24 @@ input, select, button { font-family: inherit; }
   color: var(--accent);
 }
 
+/* Forecast horizon row inside chart card */
+.hz-forecast-row {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.hz-row-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-lo);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  margin-bottom: 6px;
+}
+
 /* Forecast horizon buttons */
-.hz-btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.hz-btn-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 0; }
 .hz-btn {
   padding: 5px 12px;
   border: 1px solid var(--border2);

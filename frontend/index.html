@@ -12,7 +12,6 @@
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/" />
   <meta property="og:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/og-preview.png" />
-  <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/og-preview.png" />
   <meta name="twitter:card" content="summary_large_image" />
   <meta name="twitter:title" content="FutureX — AI Crypto Futures Calculator" />
@@ -153,6 +152,21 @@
           <button class="tf-btn active" data-days="30">30D</button>
           <button class="tf-btn" data-days="90">90D</button>
         </div>
+        <div class="hz-forecast-row">
+          <span class="hz-row-label">AI Forecast Horizon</span>
+          <div class="hz-btn-row" id="horizonBtns">
+            <button class="hz-btn" data-hz="5m">5 min</button>
+            <button class="hz-btn" data-hz="10m">10 min</button>
+            <button class="hz-btn" data-hz="30m">30 min</button>
+            <button class="hz-btn" data-hz="1h">1 hr</button>
+            <button class="hz-btn" data-hz="24h">24 hr</button>
+            <button class="hz-btn" data-hz="48h">48 hr</button>
+            <button class="hz-btn active" data-hz="7d">7 days</button>
+          </div>
+          <div id="hzWarning" class="hz-warning" style="display:none">
+            &#9888; Sub-hour forecasts are noise-dominated — uncertainty bands are very wide. Treat as directional only, not a reliable price target.
+          </div>
+        </div>
       </div>
       <div class="chart-wrap">
         <canvas id="priceChart"></canvas>
@@ -275,21 +289,6 @@
         <div class="form-group">
           <label for="stopLoss">Stop Loss Price (USD) <span class="hint">&mdash; price to auto-close to limit your loss (0 = skip)</span></label>
           <input type="number" id="stopLoss" value="0" min="0" step="0.01" />
-        </div>
-        <div class="form-group">
-          <label>Forecast Horizon</label>
-          <div class="hz-btn-row" id="horizonBtns">
-            <button class="hz-btn" data-hz="5m">5 min</button>
-            <button class="hz-btn" data-hz="10m">10 min</button>
-            <button class="hz-btn" data-hz="30m">30 min</button>
-            <button class="hz-btn" data-hz="1h">1 hr</button>
-            <button class="hz-btn" data-hz="24h">24 hr</button>
-            <button class="hz-btn" data-hz="48h">48 hr</button>
-            <button class="hz-btn active" data-hz="7d">7 days</button>
-          </div>
-          <div id="hzWarning" class="hz-warning" style="display:none">
-            &#9888; Sub-hour forecasts are noise-dominated &mdash; uncertainty bands are very wide. Treat as directional only, not a reliable price target.
-          </div>
         </div>
       </div>
 
