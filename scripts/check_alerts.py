@@ -160,8 +160,9 @@ def init_firestore():
 
     raw = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
     if not raw:
-        print("FIREBASE_SERVICE_ACCOUNT not set — aborting.", file=sys.stderr)
-        sys.exit(1)
+        print("FIREBASE_SERVICE_ACCOUNT secret not configured — skipping alert run.")
+        print("To enable alerts: add all required secrets in GitHub → Settings → Secrets and variables → Actions.")
+        sys.exit(0)
     cred = credentials.Certificate(json.loads(raw))
     firebase_admin.initialize_app(cred)
     return firestore.client()
