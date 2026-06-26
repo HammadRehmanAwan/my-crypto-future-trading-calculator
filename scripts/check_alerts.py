@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 
 import requests
 
-# ── Config ───────────────────────────────────────────────────────────
+# ── Config ────────────────────────────────────────────────────────────────────
 
 COIN_NAMES = {
     "bitcoin": "Bitcoin (BTC)", "ethereum": "Ethereum (ETH)",
@@ -54,7 +54,7 @@ CG_BASE = "https://api.coingecko.com/api/v3"
 EMAILJS_URL = "https://api.emailjs.com/api/v1.0/email/send"
 
 
-# ── Indicators (parity with app.js calcRSI / calcBollinger) ──────────
+# ── Indicators (parity with app.js calcRSI / calcBollinger) ──────────────────
 
 def calc_rsi(prices, period=14):
     if len(prices) <= period:
@@ -85,7 +85,7 @@ def calc_bb_width(prices, period=20, mult=2):
     return (upper - lower) / m * 100 if m else None
 
 
-# ── CoinGecko ────────────────────────────────────────────────────────
+# ── CoinGecko ─────────────────────────────────────────────────────────────
 
 def cg_headers():
     key = os.environ.get("CG_DEMO_API_KEY", "")
@@ -106,7 +106,7 @@ def fetch_prices(coin_id, days=30):
     return [p[1] for p in r.json().get("prices", [])]
 
 
-# ── EmailJS (server-side send with private access token) ─────────────
+# ── EmailJS (server-side send with private access token) ─────────────────
 
 def send_email(to_email, coin_name, price, reasons):
     payload = {
@@ -127,7 +127,7 @@ def send_email(to_email, coin_name, price, reasons):
         raise RuntimeError(f"EmailJS {r.status_code}: {r.text[:200]}")
 
 
-# ── Volatility evaluation ────────────────────────────────────────────
+# ── Volatility evaluation ──────────────────────────────────────────────────────
 
 def evaluate(coin_id, prices, cfg):
     """Return a list of human-readable reasons, or [] if nothing triggers."""
@@ -152,7 +152,7 @@ def evaluate(coin_id, prices, cfg):
     return reasons, curr
 
 
-# ── Firestore ────────────────────────────────────────────────────────
+# ── Firestore ────────────────────────────────────────────────────────────────────
 
 def init_firestore():
     import firebase_admin
@@ -160,8 +160,9 @@ def init_firestore():
 
     raw = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
     if not raw:
-        print("FIREBASE_SERVICE_ACCOUNT not set — aborting.", file=sys.stderr)
-        sys.exit(1)
+        print("FIREBASE_SERVICE_ACCOUNT secret not configured — skipping alert run.")
+        print("To enable alerts: add all required secrets in GitHub → Settings → Secrets and variables → Actions.")
+        sys.exit(0)
     cred = credentials.Certificate(json.loads(raw))
     firebase_admin.initialize_app(cred)
     return firestore.client()
