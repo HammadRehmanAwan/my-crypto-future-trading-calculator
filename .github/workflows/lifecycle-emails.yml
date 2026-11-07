@@ -1,0 +1,35 @@
+name: Lifecycle emails
+
+# Daily onboarding / tips / trial-ending emails (scripts/lifecycle_emails.py).
+# Skips cleanly until FIREBASE_SERVICE_ACCOUNT, RESEND_API_KEY, EMAIL_FROM and
+# EMAIL_LINK_SECRET are configured (SETUP.md §6).
+on:
+  schedule:
+    - cron: "41 14 * * *"   # daily, 14:41 UTC
+  workflow_dispatch: {}
+
+concurrency:
+  group: lifecycle-emails
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
+      - run: pip install -r scripts/requirements.txt
+      - name: Send due lifecycle emails
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          EMAIL_LINK_SECRET: ${{ secrets.EMAIL_LINK_SECRET }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+        run: python scripts/lifecycle_emails.py

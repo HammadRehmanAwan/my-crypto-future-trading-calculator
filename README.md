@@ -1,65 +1,49 @@
----
-title: FutureX — AI Crypto Futures
-emoji: 📈
-colorFrom: blue
-colorTo: indigo
-sdk: static
-pinned: false
-license: apache-2.0
----
-
 # FutureX — AI Crypto Futures Calculator
 
-An AI-powered cryptocurrency futures trading calculator using real-time market data and statistical forecasting.
+Know your liquidation price, real profit after fees and funding, and what the
+market data says before you open a leveraged crypto trade.
 
-## ✅ Fully Free — No API Keys Required
+**Live:** https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/ · **App:** `/app.html`
 
-| Component | Source | Cost |
+> **Launching / configuring?** See **[SETUP.md](SETUP.md)** for every account, key and switch, in order.
+
+## Plans
+
+| Free | Pro ($15/mo) | Trader ($39/mo) |
 |---|---|---|
-| Price Data | CoinGecko public API | Free |
-| AI Forecast | Holt's double-exponential smoothing | Free |
-| Hosting | Hugging Face Spaces (Static) | Free |
+| Futures calculator (liquidation, fees, funding, net PnL), live chart, 7-day forecast, indicators, alerts for 1 coin | Every timeframe 5 min → 7 days, ML ensemble, Analysis Hub, portfolio dashboard, AI copilot, alerts for 5 coins + Telegram | Live liquidation stream, order-flow & whale cards, alerts for 15 coins |
 
-## Features
+Plans are defined once in `plans.py`. The paywall is controlled by `PAYWALL_ENABLED` and is off by default.
 
-- **Live Price Chart** — Real-time candlestick data with Bollinger Bands and forecast overlay for 15 major coins
-- **AI Forecast** — Holt's double-exponential smoothing with confidence intervals
-- **Technical Analysis** — RSI(14), MACD(12/26/9), Bollinger Bands(20, 2σ) with plain-English explanations
-- **Futures Calculator** — Liquidation price, margin, PnL (gross + net after fees & funding), ROE, risk/reward ratio
-- **Trade Signals** — Composite score combining forecast + 3 indicators, beginner-friendly summary
-- **AI Portfolio Dashboard** — Enter your capital, pick a risk profile, get ranked trade opportunities
-- **Volatility Email Alerts** — Auto-email when a watched coin moves sharply (server-side via GitHub Actions cron)
+## Architecture
 
-## Supported Coins
+| Part | Where | What |
+|---|---|---|
+| Static site | `frontend/` → GitHub Pages | Landing, pricing, legal, guides (generated from `site_src/`), and the app (`app.html` + `app.js`) |
+| Browser modules | `frontend/js/` | `core.js` math (unit-tested) · `billing.js` plans & paywall · `live.js` OKX WebSocket · `onboarding.js` · `fx.js` Sentry/PostHog |
+| API | `backend.py` + `billing.py` → Render | CoinGecko/OKX proxies, news, sentiment, chat, ensemble forecast, accounts & Lemon Squeezy billing |
+| Model server | `app.py` → Hugging Face Docker Space | Real Amazon Chronos-Bolt-Small + XGBoost (`/api/ml-forecast`, `/api/model-status`) |
+| Workers | `scripts/` → GitHub Actions | Volatility alerts (email + Telegram, every 15 min), lifecycle emails (daily), forecast backtest (weekly) |
+| Data | Firebase Auth + Firestore | Accounts, alert settings, subscriptions (server-written only, see `firestore.rules`) |
 
-BTC, ETH, BNB, SOL, XRP, ADA, AVAX, DOGE, DOT, MATIC, LINK, UNI, LTC, ATOM, FIL
+## Forecast honesty
 
-## How to Use
+- The chart forecast is **Holt double-exponential smoothing** (statistical), computed in your browser.
+- The Hub ensemble adds **Chronos-Bolt** and **XGBoost** when the model server is up; `/model-status` reports what's actually running.
+- Accuracy is **backtested weekly** and published at `/accuracy.html`, against a naive no-change baseline.
 
-1. Select a coin from the chart dropdown or ticker
-2. Set direction (Long/Short), leverage, and position size
-3. Optionally set Take Profit / Stop Loss (or leave 0 to use the AI forecast target)
-4. Click **Analyze Trade** to see all metrics, signals, and the price forecast
-
-## Tech Stack
-
-| Layer | Tool |
-|---|---|
-| AI Forecast | Holt double-exponential smoothing (client-side) |
-| Ensemble Models | Chronos-Bolt · XGBoost · ETS · Holt-Winters · Linear Trend |
-| Backend | FastAPI on Render (free tier) |
-| AI Chat | HuggingFace InferenceClient (Zorion — Llama/Qwen/Mistral/Phi cascade) |
-| Price Data | CoinGecko free public API |
-| Futures Data | OKX public API |
-| Alerts | GitHub Actions cron + EmailJS |
-| Auth | Firebase Google Sign-in |
-
-## Local Development
+## Development
 
 ```bash
-pip install -r requirements.txt
-python backend.py
+npm install                 # TypeScript, Playwright, Chart.js (for tests)
+npm run check               # type-check + JS unit tests + browser smoke test
+pip install -r requirements-backend.txt -r scripts/requirements.txt pytest
+python -m pytest tests      # billing, alerts, lifecycle, backtest, site checks
+python scripts/build_site.py   # regenerate marketing pages after editing site_src/
+uvicorn backend:app --reload   # run the API locally
 ```
 
+Edit marketing pages in `site_src/`, never the generated copies in `frontend/`. CI fails if they're out of date.
+
 ---
-⚠️ *For educational purposes only. Not financial advice. Crypto trading carries significant risk.*
+⚠️ *Educational and analytical tool. Not financial advice. Leveraged crypto trading carries a high risk of loss.*

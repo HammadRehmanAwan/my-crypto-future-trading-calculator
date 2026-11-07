@@ -1,0 +1,22 @@
+name: Uptime & keep-warm
+
+# Pings the backend and model server every 10 minutes. This keeps Render's
+# free instance from sleeping (cold starts take ~50 s) and turns the run red
+# when something is down, so GitHub emails you. A paid Render instance or an
+# external monitor (e.g. UptimeRobot) is more reliable; this is the free floor.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Backend /health
+        run: curl -fsS -m 90 --retry 2 --retry-delay 10 "${BACKEND_URL:-https://my-crypto-future-trading-calculator.onrender.com}/health"
+        env:
+          BACKEND_URL: ${{ vars.BACKEND_URL }}
+      - name: Model server /api/model-status
+        run: curl -fsS -m 90 --retry 2 --retry-delay 10 https://hammadrehman-crypto-futures-calculator.hf.space/api/model-status

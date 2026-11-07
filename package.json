@@ -9,7 +9,8 @@
     "check": "npm run typecheck && npm test && npm run smoke"
   },
   "devDependencies": {
-    "chart.js": "^4.4.0",
+    "chart.js": "4.4.0",
+    "playwright": "1.63.0",
     "typescript": "5.6.3"
   }
 }

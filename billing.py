@@ -420,6 +420,7 @@ def email_link_sig(uid: str) -> str:
 
 
 @router.get("/email/unsubscribe", response_class=HTMLResponse)
+@router.post("/email/unsubscribe", response_class=HTMLResponse)  # RFC 8058 one-click
 async def email_unsubscribe(u: str = "", s: str = ""):
     if not os.environ.get("EMAIL_LINK_SECRET") or not u or not hmac.compare_digest(email_link_sig(u), s):
         return HTMLResponse("<p>This unsubscribe link is invalid or expired.</p>", status_code=400)

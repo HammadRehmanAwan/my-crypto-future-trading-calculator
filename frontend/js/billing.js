@@ -20,7 +20,7 @@
   window.FX = FX;
 
   /** @typedef {{id: string, name: string, monthly: number, yearly: number, features: string[]}} Plan */
-  /** @type {{paywall: boolean, checkout: boolean, plans: Plan[]}} */
+  /** @type {{paywall: boolean, checkout: boolean, plans: Plan[], alert_coin_limit?: Record<string, number>}} */
   let billingCfg = { paywall: false, checkout: false, plans: [] };
   /** @type {FxPlanInfo & {signed_in?: boolean, has_portal?: boolean, interval?: string|null}} */
   FX.plan = { plan: 'free', status: 'none', paywall: false };
@@ -291,8 +291,25 @@
       ['tabDash', 'tabHub'].forEach(id => document.getElementById(id)?.classList.toggle('fx-locked', lock));
       document.querySelectorAll('.bn-item[data-tab="dash"], .bn-item[data-tab="hub"]').forEach(b => b.classList.toggle('fx-locked', lock));
     };
-    document.addEventListener('fx:plan', mark);
+    // Alert-coin limit note (the worker enforces it server-side).
+    const alertNote = () => {
+      const card = document.querySelector('.alert-card');
+      if (!card) return;
+      card.querySelector('.fx-alert-limit')?.remove();
+      const limits = billingCfg.alert_coin_limit;
+      if (!billingCfg.paywall || !limits) return;
+      const n = limits[FX.plan.plan] ?? 1;
+      if (n >= 15) return;
+      const p = document.createElement('p');
+      p.className = 'fx-alert-limit';
+      p.style.cssText = 'font-size:13px;color:var(--text-lo);margin:10px 0 0';
+      p.innerHTML = `Your plan monitors your first <b>${n}</b> watched coin${n > 1 ? 's' : ''}. <a href="#" class="fx-alert-up">Upgrade for more</a>`;
+      p.querySelector('a')?.addEventListener('click', e => { e.preventDefault(); FX.showPaywall('More alert coins', 'pro'); });
+      card.appendChild(p);
+    };
+    document.addEventListener('fx:plan', () => { mark(); alertNote(); });
     mark();
+    alertNote();
   }
 
   // Backend said "upgrade required" (app.js dispatches this from backendFetch).

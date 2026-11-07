@@ -22,7 +22,13 @@ class Doc:
         return Snap(self, self.db.store.get(self.path))
 
     def set(self, d, merge=False):
-        self.db.store[self.path] = {**(self.db.store.get(self.path) or {}), **d} if merge else dict(d)
+        if not merge:
+            self.db.store[self.path] = dict(d)
+            return
+        cur = dict(self.db.store.get(self.path) or {})
+        for k, v in d.items():  # Firestore merges nested maps
+            cur[k] = {**cur[k], **v} if isinstance(v, dict) and isinstance(cur.get(k), dict) else v
+        self.db.store[self.path] = cur
 
     def delete(self):
         self.db.store.pop(self.path, None)
