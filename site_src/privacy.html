@@ -1,0 +1,58 @@
+<!--{"title": "Privacy Notice", "description": "What personal data FutureX collects, why, who processes it, and how to access or delete it.", "nav": "", "priority": "0.3"}-->
+<div class="wrap"><article class="doc">
+<h1>Privacy Notice</h1>
+<p class="meta">Last updated: 7 November 2026</p>
+
+<p>This notice explains what personal data FutureX handles and your rights under the UK GDPR, EU GDPR and similar laws. The data controller is <strong>[OPERATOR NAME]</strong>, <strong>[REGISTERED ADDRESS]</strong>, contact <a href="mailto:[CONTACT EMAIL]">[CONTACT EMAIL]</a>.</p>
+
+<h2>What we collect, and why</h2>
+<div class="table-wrap"><table>
+<thead><tr><th>Data</th><th>Purpose</th><th>Legal basis</th></tr></thead>
+<tbody>
+<tr><td>Google account basics (name, email, user ID) when you sign in</td><td>Account, syncing settings, subscriptions</td><td>Contract</td></tr>
+<tr><td>Alert email, watched coins, sensitivity</td><td>Sending the volatility alerts you asked for</td><td>Consent (checkbox)</td></tr>
+<tr><td>Telegram chat ID (only if you connect Telegram)</td><td>Sending alerts to Telegram</td><td>Consent</td></tr>
+<tr><td>Subscription status, plan, renewal dates, order IDs</td><td>Providing paid features, billing support</td><td>Contract</td></tr>
+<tr><td>Marketing-email preference (off unless you opt in)</td><td>Occasional guides and product updates</td><td>Consent</td></tr>
+<tr><td>Product analytics events (pages viewed, buttons clicked), no cookies</td><td>Understanding which features help users</td><td>Legitimate interest</td></tr>
+<tr><td>Error reports (stack traces, browser type), no IP addresses</td><td>Fixing bugs</td><td>Legitimate interest</td></tr>
+</tbody></table></div>
+<p>We never receive your card details; payments are handled entirely by Lemon Squeezy. We don't sell your data or show you ads.</p>
+
+<h2>Processors we use</h2>
+<ul>
+  <li><strong>Google Firebase</strong> (authentication, Firestore database): accounts, settings, subscription status</li>
+  <li><strong>Lemon Squeezy</strong> (merchant of record): checkout, payments, invoices, tax</li>
+  <li><strong>Resend</strong> and/or <strong>EmailJS</strong>: email delivery</li>
+  <li><strong>Telegram</strong>: alert messages, only if you connect it</li>
+  <li><strong>PostHog</strong>: cookieless product analytics (disabled if your browser sends Do-Not-Track / Global Privacy Control)</li>
+  <li><strong>Sentry</strong>: error monitoring</li>
+  <li><strong>Render</strong> and <strong>Hugging Face</strong>: hosting of our API and model server; <strong>GitHub Pages</strong>: website hosting</li>
+</ul>
+<p>Some processors are in the United States; transfers rely on their standard contractual clauses or equivalent safeguards.</p>
+
+<h2>Market data requests</h2>
+<p>Your browser fetches public market data directly from CoinGecko, OKX (including a WebSocket connection for live prices), alternative.me and CryptoCompare. Those services see your IP address as with any website request; we don't log these requests.</p>
+
+<h2>Storage in your browser</h2>
+<p>We use <code>localStorage</code> (not cookies) to remember your alert settings, cached market data, whether you've seen the intro, and any referral code you arrived with. Firebase sign-in stores its session in your browser.</p>
+
+<h2>Retention</h2>
+<ul>
+  <li>Account, settings and Telegram link: until you delete them or your account.</li>
+  <li>Subscription and billing records: as long as required for tax and accounting law (typically 6–10 years), held by Lemon Squeezy and in our records.</li>
+  <li>Analytics and error data: up to 12 months.</li>
+</ul>
+
+<h2>Your rights</h2>
+<ul>
+  <li><strong>Access, correction, portability:</strong> email us and we'll send your data.</li>
+  <li><strong>Erasure:</strong> use "Delete my stored email &amp; settings" in the Volatility Alerts card, send <code>/stop</code> to our Telegram bot, or email us to delete your whole account.</li>
+  <li><strong>Withdraw consent:</strong> untick alert consent, turn off alerts, or use the unsubscribe link in any marketing email.</li>
+  <li><strong>Object to analytics:</strong> <button type="button" class="btn btn-ghost" style="min-height:36px;padding:0 12px;font-size:14px" onclick="window.FX&&FX.optOut&&FX.optOut();this.textContent='Analytics turned off in this browser';this.disabled=true">Turn off analytics in this browser</button></li>
+  <li><strong>Complain</strong> to your data-protection authority (in the UK, the ICO).</li>
+</ul>
+
+<h2>Contact</h2>
+<p>Email <a href="mailto:[CONTACT EMAIL]">[CONTACT EMAIL]</a> for any privacy question.</p>
+</article></div>

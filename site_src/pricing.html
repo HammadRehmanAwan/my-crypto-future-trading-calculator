@@ -1,0 +1,102 @@
+<!--{"title": "Pricing", "description": "FutureX pricing: a free crypto futures calculator, Pro at $15/month for every timeframe, ML forecasts and alerts, and Trader at $39/month with live liquidations. Cancel anytime.", "nav": "pricing", "priority": "0.9", "inline_js": "(function(){var btns=document.querySelectorAll('[data-int]');function set(i){btns.forEach(function(b){b.setAttribute('aria-pressed',String(b.dataset.int===i))});document.querySelectorAll('[data-price]').forEach(function(el){el.textContent=el.dataset[i]});document.querySelectorAll('[data-billed]').forEach(function(el){el.textContent=i==='yearly'?el.dataset.billed:'billed monthly'});document.querySelectorAll('[data-plan-link]').forEach(function(a){a.href='app.html#upgrade='+a.dataset.planLink+'-'+i});}btns.forEach(function(b){b.addEventListener('click',function(){set(b.dataset.int);if(window.FX&&FX.track)FX.track('pricing_interval',{interval:b.dataset.int})})});set('yearly');})();"}-->
+<section class="hero" style="padding-bottom:24px">
+  <div class="wrap">
+    <h1>Simple pricing. <em>Cancel anytime.</em></h1>
+    <p class="lead">Start free. Upgrade when you want every timeframe, the ML ensemble and alerts that follow you to Telegram.</p>
+  </div>
+</section>
+
+<section style="padding-top:0">
+  <div class="wrap">
+    <div class="interval-toggle"><div role="group" aria-label="Billing interval">
+      <button type="button" data-int="monthly" aria-pressed="false">Monthly</button>
+      <button type="button" data-int="yearly" aria-pressed="true">Yearly <span>save 20%</span></button>
+    </div></div>
+
+    <div class="plans">
+      <div class="plan" data-plan="free">
+        <h3>Free</h3>
+        <p class="for">For trying a trade idea</p>
+        <div class="price">$0<small>/mo</small></div>
+        <div class="billed">no card needed</div>
+        <ul>
+          <li>Futures calculator with fees, funding &amp; liquidation</li>
+          <li>Live price chart with 7-day statistical forecast</li>
+          <li>RSI, MACD &amp; Bollinger Bands explained in plain English</li>
+          <li>Volatility email alerts for 1 coin</li>
+        </ul>
+        <a class="btn btn-ghost" href="app.html" data-track="pricing_free">Start free</a>
+      </div>
+
+      <div class="plan featured" data-plan="pro">
+        <span class="badge">Most popular</span>
+        <h3>Pro</h3>
+        <p class="for">For active traders</p>
+        <div class="price">$<span data-price data-monthly="15" data-yearly="12">12</span><small>/mo</small></div>
+        <div class="billed" data-billed="billed $144 yearly">billed $144 yearly</div>
+        <ul>
+          <li>Everything in Free</li>
+          <li>Every timeframe: 5 min → 7 days with AI forecast</li>
+          <li>AI Portfolio Dashboard &amp; daily briefing</li>
+          <li>Full Analysis Hub: ensemble forecast, on-chain, tokenomics</li>
+          <li>AI copilot chat with live market context</li>
+          <li>Alerts for up to 5 coins by email + Telegram</li>
+        </ul>
+        <a class="btn btn-primary" data-plan-link="pro" href="app.html#upgrade=pro-yearly" data-track="pricing_pro">Get Pro</a>
+      </div>
+
+      <div class="plan" data-plan="trader">
+        <h3>Trader</h3>
+        <p class="for">For high-frequency and leveraged traders</p>
+        <div class="price">$<span data-price data-monthly="39" data-yearly="31">31</span><small>/mo</small></div>
+        <div class="billed" data-billed="billed $374 yearly">billed $374 yearly</div>
+        <ul>
+          <li>Everything in Pro</li>
+          <li>Live liquidation stream (OKX perpetuals)</li>
+          <li>Order-flow &amp; whale intelligence cards</li>
+          <li>Alerts for all 15 coins</li>
+          <li>Priority support</li>
+        </ul>
+        <a class="btn btn-ghost" data-plan-link="trader" href="app.html#upgrade=trader-yearly" data-track="pricing_trader">Get Trader</a>
+      </div>
+    </div>
+    <p style="text-align:center;color:var(--text-lo);font-size:14px;margin-top:22px">Prices in USD. Sales tax / VAT is calculated at checkout. Payments are processed by Lemon Squeezy, our merchant of record.</p>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="section-title"><h2>Compare plans</h2></div>
+    <div class="table-wrap" style="max-width:860px;margin:0 auto">
+      <table>
+        <thead><tr><th>Feature</th><th>Free</th><th>Pro</th><th>Trader</th></tr></thead>
+        <tbody>
+          <tr><td>Futures calculator (liquidation, fees, funding, net PnL)</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Live OKX price stream</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Chart timeframes</td><td>7 days</td><td>5 min → 7 days</td><td>5 min → 7 days</td></tr>
+          <tr><td>Statistical forecast with uncertainty band</td><td>✓</td><td>✓</td><td>✓</td></tr>
+          <tr><td>ML ensemble (Chronos-Bolt + XGBoost)</td><td>—</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Analysis Hub (on-chain, tokenomics, sentiment, news)</td><td>—</td><td>✓</td><td>✓</td></tr>
+          <tr><td>Portfolio dashboard &amp; scenario simulator</td><td>—</td><td>✓</td><td>✓</td></tr>
+          <tr><td>AI copilot chat</td><td>Basic answers</td><td>Live market context</td><td>Live market context</td></tr>
+          <tr><td>Volatility alerts</td><td>1 coin, email</td><td>5 coins, email + Telegram</td><td>15 coins, email + Telegram</td></tr>
+          <tr><td>Live liquidation stream</td><td>—</td><td>—</td><td>✓</td></tr>
+          <tr><td>Order-flow &amp; whale cards</td><td>—</td><td>—</td><td>✓</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap">
+    <div class="section-title"><h2>Billing questions</h2></div>
+    <div class="faq">
+      <details><summary>How do I cancel?</summary><p>Open the app, click <b>Manage billing</b> next to your name, and cancel. You keep access until the end of the period you've paid for, and you won't be charged again.</p></details>
+      <details><summary>Do you offer refunds?</summary><p>Yes, within 14 days of your first payment if FutureX isn't for you. See the <a href="refund.html">refund policy</a>.</p></details>
+      <details><summary>Who processes my payment?</summary><p>Lemon Squeezy is our merchant of record. They handle the card payment, receipts, and sales tax/VAT. FutureX never sees your card number.</p></details>
+      <details><summary>Can I switch between monthly and yearly?</summary><p>Yes. Change plans or interval anytime from Manage billing; the difference is prorated.</p></details>
+      <details><summary>Is this financial advice?</summary><p>No. FutureX is an analysis and education tool. It doesn't tell you what to trade and doesn't guarantee any outcome. Read the <a href="risk.html">risk disclosure</a> before trading with leverage.</p></details>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,51 @@
+<!--{"title": "How Liquidation Price Is Calculated (with Examples)", "description": "The crypto futures liquidation price formula for longs and shorts, worked examples from 5× to 100× leverage, maintenance margin, and how to avoid getting liquidated.", "nav": "learn", "priority": "0.7", "jsonld": {"@context": "https://schema.org", "@type": "Article", "headline": "How liquidation price is calculated in crypto futures", "datePublished": "2026-11-07", "author": {"@type": "Organization", "name": "FutureX"}}}-->
+<div class="wrap"><article class="doc">
+<h1>How liquidation price is calculated</h1>
+<p class="meta">Updated 7 November 2026 · 6 min read</p>
+
+<p>Your <strong>liquidation price</strong> is the price at which the exchange force-closes your leveraged position because your margin can no longer cover the loss. Know it before you enter, because once the market gets there, the position is gone.</p>
+
+<h2>The formula (isolated margin)</h2>
+<p>For an isolated-margin perpetual position with leverage <em>L</em> and maintenance-margin rate <em>MMR</em>:</p>
+<div class="formula">Long:  Liquidation = Entry × (1 − 1/L + MMR)<br>Short: Liquidation = Entry × (1 + 1/L − MMR)</div>
+<p><em>1/L</em> is the share of the position you put up as margin. The <em>MMR</em> (often 0.4–0.5% for BTC and ETH at small sizes) is the cushion the exchange keeps, so you're liquidated <strong>before</strong> your margin hits zero.</p>
+
+<h2>Worked examples</h2>
+<p>BTC long at <strong>$65,000</strong>, MMR 0.5%:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>Leverage</th><th class="num">Margin per $10k position</th><th class="num">Liquidation price</th><th class="num">Move to liquidation</th></tr></thead>
+<tbody>
+<tr><td>2×</td><td class="num">$5,000</td><td class="num">$32,825</td><td class="num">−49.5%</td></tr>
+<tr><td>5×</td><td class="num">$2,000</td><td class="num">$52,325</td><td class="num">−19.5%</td></tr>
+<tr><td>10×</td><td class="num">$1,000</td><td class="num">$58,825</td><td class="num">−9.5%</td></tr>
+<tr><td>20×</td><td class="num">$500</td><td class="num">$62,075</td><td class="num">−4.5%</td></tr>
+<tr><td>50×</td><td class="num">$200</td><td class="num">$64,025</td><td class="num">−1.5%</td></tr>
+<tr><td>100×</td><td class="num">$100</td><td class="num">$64,675</td><td class="num">−0.5%</td></tr>
+</tbody></table></div>
+<p>Notice the textbook shortcut "100× means a 1% move liquidates you" is wrong in practice. With a 0.5% maintenance margin it's <strong>half that</strong>. Bitcoin moves 0.5% in minutes on an ordinary day.</p>
+
+<h2>Why the real liquidation can be worse</h2>
+<ul>
+  <li><strong>Tiered margin:</strong> bigger positions get a higher MMR, so they're liquidated sooner.</li>
+  <li><strong>Fees:</strong> some exchanges reserve the closing fee from your margin, nudging liquidation closer.</li>
+  <li><strong>Mark price:</strong> liquidation triggers on the exchange's mark price (an index of several exchanges), not the last trade, which can differ during spikes.</li>
+  <li><strong>Funding:</strong> on isolated margin, funding paid comes out of your position margin over time.</li>
+  <li><strong>Cross margin:</strong> with cross margin, your whole account balance backs the position. Liquidation is further away, but you can lose everything in the account.</li>
+</ul>
+
+<h2>How to stay away from it</h2>
+<ol>
+  <li><strong>Pick leverage from your stop-loss, not the other way round.</strong> If your stop is 4% away, leverage above ~20× puts liquidation before your stop.</li>
+  <li><strong>Size by risk:</strong> decide the dollar amount you're willing to lose, then size the position so your stop-loss loses exactly that.</li>
+  <li><strong>Always use a stop-loss on the exchange.</strong> Alerts can be late; stops execute without you.</li>
+  <li><strong>Check volatility first:</strong> if the coin's normal daily range (ATR) is larger than your distance to liquidation, the trade is a coin flip on noise.</li>
+</ol>
+
+<div class="callout info">The <a href="../app.html">FutureX calculator</a> computes liquidation, margin and net profit after fees and funding as you type, for longs and shorts up to 125×.</div>
+
+<h2>Related</h2>
+<div class="related">
+  <a href="funding-rates.html">Funding rates explained<span>The hidden cost of holding leverage.</span></a>
+  <a href="leverage-and-margin.html">Leverage &amp; margin<span>Position sizing that survives volatility.</span></a>
+</div>
+</article></div>

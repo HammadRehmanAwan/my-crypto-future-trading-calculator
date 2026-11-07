@@ -21,7 +21,9 @@ const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/cs
   '.png': 'image/png', '.json': 'application/json', '.xml': 'application/xml', '.txt': 'text/plain' };
 const server = http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x');
-  let p = path.join(ROOT, decodeURIComponent(u.pathname));
+  // GitHub Pages project sites live under /<repo>/ — 404.html uses that base.
+  const pathname = u.pathname.replace(/^\/my-crypto-future-trading-calculator\//, '/');
+  let p = path.join(ROOT, decodeURIComponent(pathname));
   if (p.endsWith('/')) p += 'index.html';
   if (!p.startsWith(ROOT) || !fs.existsSync(p)) { res.writeHead(404); res.end('404'); return; }
   res.writeHead(200, { 'Content-Type': TYPES[path.extname(p)] || 'application/octet-stream' });
@@ -53,7 +55,8 @@ async function check(pagePath, { mobile = false, actions, init } = {}) {
   const errors = [];
   page.on('pageerror', e => errors.push(`pageerror: ${e.message}`));
   page.on('console', m => { if (m.type() === 'error' && !/Failed to load resource|net::ERR/.test(m.text())) errors.push(`console: ${m.text()}`); });
-  page.on('response', r => { if (r.url().startsWith(BASE) && r.status() === 404) errors.push(`404: ${r.url().slice(BASE.length)}`); });
+  // data/accuracy.json only exists after the first weekly backtest; pages must cope without it.
+  page.on('response', r => { if (r.url().startsWith(BASE) && r.status() === 404 && !r.url().includes('/data/accuracy.json')) errors.push(`404: ${r.url().slice(BASE.length)}`); });
 
   await page.route('**/*', route => {
     const url = route.request().url();

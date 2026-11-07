@@ -1,0 +1,41 @@
+<!--{"title": "Leverage and Margin in Crypto Futures: A Practical Guide", "description": "What leverage and margin really mean in crypto futures, isolated vs cross margin, and a simple position-sizing method that keeps one bad trade from blowing up your account.", "nav": "learn", "priority": "0.7", "jsonld": {"@context": "https://schema.org", "@type": "Article", "headline": "Leverage and margin in crypto futures", "datePublished": "2026-11-07", "author": {"@type": "Organization", "name": "FutureX"}}}-->
+<div class="wrap"><article class="doc">
+<h1>Leverage &amp; margin, without the hype</h1>
+<p class="meta">Updated 7 November 2026 · 6 min read</p>
+
+<p><strong>Leverage</strong> lets you control a position larger than the money you put up. That deposit is your <strong>margin</strong>. With 10× leverage, $1,000 of margin controls a $10,000 position. Every 1% move in price is a 10% move in your margin, in either direction.</p>
+
+<h2>Leverage doesn't change your profit, it changes your risk</h2>
+<p>A $10,000 BTC position makes or loses the same dollars whether you opened it with 2× ($5,000 margin) or 20× ($500 margin). What changes is <strong>how far price can move before you're liquidated</strong>: about 49.5% at 2×, about 4.5% at 20×. High leverage doesn't make a trade more profitable; it makes it more fragile.</p>
+
+<h2>Isolated vs cross margin</h2>
+<div class="table-wrap"><table>
+<thead><tr><th></th><th>Isolated</th><th>Cross</th></tr></thead>
+<tbody>
+<tr><td>What backs the position</td><td>Only the margin you assign</td><td>Your whole futures balance</td></tr>
+<tr><td>Max loss</td><td>That margin</td><td>The entire account</td></tr>
+<tr><td>Liquidation distance</td><td>Fixed by leverage</td><td>Further away (more collateral)</td></tr>
+<tr><td>Best for</td><td>Defined-risk trades</td><td>Hedged / multi-position books</td></tr>
+</tbody></table></div>
+
+<h2>Size from risk, not from leverage</h2>
+<p>Professional traders decide how much they're willing to lose <em>first</em>:</p>
+<div class="formula">Position size = (Account × Risk %) ÷ Stop-loss distance %</div>
+<p>Example: a $5,000 account risking 1% ($50) with a stop 2.5% below entry → position size = $50 ÷ 0.025 = <strong>$2,000</strong>. Whether you post that with 2× or 10× leverage only changes how much cash sits on the exchange. Make sure liquidation sits well beyond your stop. At 10×, liquidation is about 9.5% away, comfortably past a 2.5% stop.</p>
+
+<h2>Rules of thumb</h2>
+<ol>
+  <li>Risk 0.5–2% of your account per trade.</li>
+  <li>Keep liquidation at least 2× further than your stop-loss.</li>
+  <li>Treat 20×+ as a tool for very tight, very liquid scalps, not for holding.</li>
+  <li>Count fees and funding; at high leverage they're a big share of margin.</li>
+</ol>
+
+<div class="callout info">The <a href="../app.html">FutureX Guided Trade Setup</a> walks through direction, leverage, size and stop-loss and flags when liquidation is too close to your stop.</div>
+
+<h2>Related</h2>
+<div class="related">
+  <a href="liquidation-price.html">How liquidation price is calculated<span>Formula and worked examples.</span></a>
+  <a href="funding-rates.html">Funding rates explained<span>The cost of holding leverage.</span></a>
+</div>
+</article></div>

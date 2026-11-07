@@ -1,0 +1,45 @@
+<!--{"title": "Funding Rates Explained: Who Pays and How Much", "description": "How perpetual futures funding rates work, who pays whom every 8 hours, how to calculate the funding cost of a leveraged position, and what extreme funding signals.", "nav": "learn", "priority": "0.7", "jsonld": {"@context": "https://schema.org", "@type": "Article", "headline": "Funding rates explained", "datePublished": "2026-11-07", "author": {"@type": "Organization", "name": "FutureX"}}}-->
+<div class="wrap"><article class="doc">
+<h1>Funding rates explained</h1>
+<p class="meta">Updated 7 November 2026 · 5 min read</p>
+
+<p>Perpetual futures never expire, so exchanges use <strong>funding</strong>, a periodic payment between longs and shorts, to keep the contract price close to the spot price.</p>
+
+<h2>Who pays whom</h2>
+<ul>
+  <li><strong>Positive funding</strong> (perp trading above spot): <strong>longs pay shorts</strong>.</li>
+  <li><strong>Negative funding</strong> (perp below spot): <strong>shorts pay longs</strong>.</li>
+</ul>
+<p>The exchange doesn't keep it; it passes between traders. On most major exchanges it's settled every <strong>8 hours</strong> (three times a day), though some contracts settle hourly or every 4 hours.</p>
+
+<h2>How to calculate your funding cost</h2>
+<div class="formula">Funding per period = Position notional × Funding rate<br>Cost over a holding period = Notional × Rate × (Hours held ÷ 8)</div>
+<p>Funding is charged on the <strong>full position size</strong>, not your margin. That's why it hurts leveraged traders.</p>
+
+<h3>Example</h3>
+<p>A $10,000 BTC long with $1,000 margin (10×), held for 7 days at a funding rate of +0.01% per 8 h:</p>
+<div class="formula">$10,000 × 0.0001 × (168 ÷ 8) = $21</div>
+<p>That's 2.1% of your margin gone with zero price movement. In hot markets funding can hit 0.05–0.1% per period: the same position would then pay <strong>$105–$210 a week</strong>, 10–21% of your margin.</p>
+
+<h2>What funding tells you</h2>
+<ul>
+  <li><strong>Very high positive funding</strong> means the market is crowded with leveraged longs. That often precedes sharp "long squeezes" when they get liquidated together.</li>
+  <li><strong>Deeply negative funding</strong> means crowded shorts and short-squeeze risk.</li>
+  <li>Funding is a positioning gauge, not a timing signal. Crowded trades can stay crowded for days.</li>
+</ul>
+
+<h2>Practical rules</h2>
+<ol>
+  <li>For trades you'll hold more than a day, include funding in your profit target.</li>
+  <li>Avoid holding high-leverage longs through very high funding unless your edge is large.</li>
+  <li>On isolated margin, funding paid reduces position margin and moves your liquidation price closer.</li>
+</ol>
+
+<div class="callout info">FutureX pulls the live OKX funding rate and subtracts it (plus taker fees) from your projected PnL, showing <strong>gross vs net</strong> side by side. <a href="../app.html">Try it</a>.</div>
+
+<h2>Related</h2>
+<div class="related">
+  <a href="liquidation-price.html">How liquidation price is calculated<span>Formula and worked examples.</span></a>
+  <a href="leverage-and-margin.html">Leverage &amp; margin<span>Isolated vs cross, and sizing.</span></a>
+</div>
+</article></div>

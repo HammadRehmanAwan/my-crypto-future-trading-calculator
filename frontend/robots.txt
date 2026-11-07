@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/sitemap.xml
