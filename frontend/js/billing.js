@@ -44,6 +44,9 @@
   /** @param {'pro'|'trader'} p */
   FX.hasPlan = function (p) {
     if (!billingCfg.paywall) return true;
+    // Plan unknown (backend asleep) and signed in: don't lock a possibly-paying
+    // user out of the UI; the backend still enforces premium endpoints.
+    if (FX.plan.status === 'unknown' && currentUser()) return true;
     return (RANK[FX.plan.plan] || 0) >= RANK[p];
   };
 
@@ -82,7 +85,9 @@
       const me = await api('/billing/me');
       FX.plan = { ...me, paywall: billingCfg.paywall };
     } catch (_) {
-      FX.plan = { plan: 'free', status: 'none', paywall: billingCfg.paywall };
+      // Backend unreachable: we DON'T know the plan. Never treat this as
+      // "free" for anything that could start a second checkout.
+      FX.plan = { plan: 'free', status: 'unknown', paywall: billingCfg.paywall };
     }
     renderAccount();
     document.dispatchEvent(new CustomEvent('fx:plan', { detail: FX.plan }));
@@ -145,7 +150,7 @@
                 <h3>${escape(p.name)}</h3>
                 <div class="fx-price"><b>$${price}</b>/mo${interval === 'yearly' ? `<small>billed $${p.yearly}/yr</small>` : ''}</div>
                 <ul>${p.features.map(f => `<li>${escape(f)}</li>`).join('')}</ul>
-                <button type="button" class="fx-cta" data-plan="${p.id}">Get ${escape(p.name)}</button>
+                <button type="button" class="fx-cta" data-plan="${p.id}">${FX.plan.plan === p.id ? 'Current plan' : FX.plan.plan !== 'free' ? `Switch to ${escape(p.name)}` : `Get ${escape(p.name)}`}</button>
               </div>`;
             }).join('')}
           </div>
@@ -197,6 +202,13 @@
       else toast('Please sign in first.', 'warn');
       return;
     }
+    if (FX.plan.plan !== 'free') {
+      // Plan changes for existing subscribers happen in the portal (prorated),
+      // never through a second checkout.
+      toast('Opening billing to change your plan…');
+      FX.openPortal();
+      return;
+    }
     if (!billingCfg.checkout) { toast('Checkout is not live yet — check back soon.', 'warn'); return; }
     const btns = document.querySelectorAll('.fx-cta');
     btns.forEach(b => b.setAttribute('disabled', ''));
@@ -207,8 +219,14 @@
       });
       location.href = url;
     } catch (e) {
-      toast('Could not start checkout. Please try again in a minute.', 'warn');
       btns.forEach(b => b.removeAttribute('disabled'));
+      if (/** @type {any} */ (e).status === 409) {
+        toast('You already have a subscription. Opening billing to change plan…');
+        await refreshPlan();
+        FX.openPortal();
+        return;
+      }
+      toast('Could not start checkout. Please try again in a minute.', 'warn');
     }
   };
 
@@ -347,7 +365,8 @@
     await refreshPlan();
     if (hashIntent) {
       const intent = hashIntent; hashIntent = null;
-      if (user && FX.plan.plan === 'free') FX.upgrade(intent.plan, intent.int);
+      if (user && FX.plan.plan === 'free' && FX.plan.status !== 'unknown') FX.upgrade(intent.plan, intent.int);
+      else if (user && FX.plan.status === 'unknown') FX.showPaywall(undefined, /** @type {'pro'|'trader'} */ (intent.plan));
       else if (!user) FX.showPaywall(undefined, /** @type {'pro'|'trader'} */ (intent.plan));
     }
     if (!user) return;

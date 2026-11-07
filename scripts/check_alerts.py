@@ -250,7 +250,11 @@ def process_telegram_updates(db, now: float | None = None) -> int:
                 if c.exists:
                     uid = (c.to_dict() or {}).get("uid")
                     if uid:
-                        db.collection("users").document(uid).collection("data").document("telegram").delete()
+                        tg_ref = db.collection("users").document(uid).collection("data").document("telegram")
+                        tg = tg_ref.get()
+                        # Only unlink if that user is still linked to THIS chat.
+                        if tg.exists and (tg.to_dict() or {}).get("chatId") == chat_id:
+                            tg_ref.delete()
                     chat_ref.delete()
                 notify.send_telegram(chat_id, "Telegram alerts turned off. Connect again from the FutureX app anytime.")
                 continue
@@ -269,7 +273,21 @@ def process_telegram_updates(db, now: float | None = None) -> int:
                 continue
             uid = data["uid"]
             frm = msg.get("from") or {}
-            db.collection("users").document(uid).collection("data").document("telegram").set({
+            tg_ref = db.collection("users").document(uid).collection("data").document("telegram")
+            # Clean up stale mappings: this user's previous chat, and any other
+            # user previously linked to this chat.
+            old = tg_ref.get()
+            old_chat = (old.to_dict() or {}).get("chatId") if old.exists else None
+            if old_chat is not None and old_chat != chat_id:
+                db.collection("telegram_chats").document(str(old_chat)).delete()
+            prev_map = db.collection("telegram_chats").document(str(chat_id)).get()
+            prev_uid = (prev_map.to_dict() or {}).get("uid") if prev_map.exists else None
+            if prev_uid and prev_uid != uid:
+                other = db.collection("users").document(prev_uid).collection("data").document("telegram")
+                o = other.get()
+                if o.exists and (o.to_dict() or {}).get("chatId") == chat_id:
+                    other.delete()
+            tg_ref.set({
                 "chatId": chat_id,
                 "username": frm.get("username"),
                 "linkedAt": datetime.now(timezone.utc).isoformat(),

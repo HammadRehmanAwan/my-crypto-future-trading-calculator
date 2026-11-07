@@ -47,7 +47,9 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-from plans import ALERT_COIN_LIMIT, PLAN_RANK, PLANS, effective_plan, parse_ts as _parse_ts  # noqa: E402
+from plans import (  # noqa: E402
+    ALERT_COIN_LIMIT, PLAN_RANK, PLANS, effective_plan, parse_ts as _parse_ts, summarize_subscriptions,
+)
 
 router = APIRouter()
 
@@ -147,7 +149,8 @@ def _verify_token_sync(token: str) -> dict:
         except ImportError:
             pass
         _google_request = g_requests.Request(session=session)
-    claims = id_token.verify_firebase_token(token, _google_request, audience=project)
+    claims = id_token.verify_firebase_token(token, _google_request, audience=project,
+                                            clock_skew_in_seconds=10)
     if not claims or not claims.get("sub"):
         raise ValueError("invalid token")
     return claims
@@ -166,7 +169,8 @@ async def current_user(request: Request) -> dict | None:
         return hit
     try:
         claims = await asyncio.to_thread(_verify_token_sync, token)
-    except Exception:
+    except Exception as e:
+        print(f"[billing] ID token rejected: {type(e).__name__}: {str(e)[:120]}")
         return None
     if len(_TOKEN_CACHE) > 5000:
         _TOKEN_CACHE.clear()
@@ -254,6 +258,12 @@ async def billing_checkout(request: Request, body: dict):
     interval = str(body.get("interval", "monthly")).lower()
     if plan not in ("pro", "trader") or interval not in ("monthly", "yearly"):
         raise HTTPException(400, detail={"error": "bad_plan"})
+    # Already paying? Changing plan goes through the customer portal (it
+    # prorates); a second checkout would double-bill.
+    sub = await get_subscription(user["sub"])
+    if effective_plan(sub) != "free":
+        raise HTTPException(409, detail={"error": "already_subscribed", "plan": effective_plan(sub)})
+
     variant = _variant_for(plan, interval)
     store = os.environ.get("LEMONSQUEEZY_STORE_ID", "").strip()
     if not (variant and store and os.environ.get("LEMONSQUEEZY_API_KEY")):
@@ -336,10 +346,13 @@ def subscription_doc_from_event(event: dict) -> tuple[str | None, str | None, di
     attrs = data.get("attributes", {}) or {}
     custom = meta.get("custom_data") or {}
     uid = custom.get("uid")
+    # The plan comes ONLY from the variant the customer actually paid for.
+    # custom_data can be set by anyone via a public checkout URL
+    # (?checkout[custom][plan]=trader), so it is never trusted for access.
     vmap = _variant_map()
-    plan, interval = vmap.get(str(attrs.get("variant_id")), (custom.get("plan"), custom.get("interval")))
-    if plan not in ("pro", "trader"):
-        plan = "pro"  # unknown variant: safest paid default is the lower tier
+    plan, interval = vmap.get(str(attrs.get("variant_id")), ("free", None))
+    if plan == "free":
+        print(f"[billing] subscription {data.get('id')} has unmapped variant {attrs.get('variant_id')} — no access granted")
     doc = {
         "plan": plan,
         "interval": interval,
@@ -374,6 +387,10 @@ async def billing_webhook(request: Request):
     uid, sub_id, doc = subscription_doc_from_event(event)
     if doc is None:
         return {"ok": True, "ignored": (event.get("meta") or {}).get("event_name")}
+    # Test-mode purchases must never unlock production unless explicitly
+    # allowed while you run the go-live test (SETUP.md §11).
+    if doc.get("test_mode") and os.environ.get("LS_ALLOW_TEST_MODE", "").lower() != "true":
+        return {"ok": True, "ignored": "test_mode"}
     db = firestore_client()
     if db is None:
         # Fail loudly so Lemon Squeezy retries once storage is configured.
@@ -390,13 +407,21 @@ async def billing_webhook(request: Request):
         ref = db.collection("subscriptions").document(uid)
         cur = ref.get()
         cur_doc = cur.to_dict() if cur.exists else {}
-        # Ignore out-of-order deliveries: keep the newest LS state.
+        items = dict(cur_doc.get("items") or {})
+        prev = items.get(sub_id) or {}
+        # Ignore out-of-order deliveries: keep the newest state per subscription.
         new_ts = _parse_ts(doc.get("ls_updated_at")) or 0
-        old_ts = _parse_ts(cur_doc.get("ls_updated_at")) or 0
-        if cur_doc.get("ls_subscription_id") == sub_id and new_ts < old_ts:
+        old_ts = _parse_ts(prev.get("ls_updated_at")) or 0
+        if prev and new_ts < old_ts:
             return True
-        doc["updated_at"] = datetime.now(timezone.utc).isoformat()
-        ref.set(doc, merge=True)
+        if prev.get("affiliate_ref") and not doc.get("affiliate_ref"):
+            doc["affiliate_ref"] = prev["affiliate_ref"]
+        items[sub_id] = doc
+        # One user may hold several subscriptions (e.g. Pro → Trader); the
+        # top-level fields always reflect the best currently-active one.
+        out = {"items": items, **summarize_subscriptions(items),
+               "updated_at": datetime.now(timezone.utc).isoformat()}
+        ref.set(out)
         idx.set({"uid": uid})
         return True
 

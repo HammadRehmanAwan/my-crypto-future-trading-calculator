@@ -83,3 +83,24 @@ def effective_plan(sub: dict | None, now: float | None = None) -> str:
         if ends and ends > now:
             return plan
     return "free"
+
+
+SUMMARY_FIELDS = ("plan", "interval", "status", "ls_subscription_id", "renews_at",
+                  "ends_at", "trial_ends_at", "variant_id", "test_mode")
+
+
+def summarize_subscriptions(items: dict, now: float | None = None) -> dict:
+    """A user can end up with several Lemon Squeezy subscriptions (e.g. an
+    upgrade bought before the old one lapsed). Pick the one that should drive
+    access: the highest plan that is currently effective; if none is, the
+    most recently updated one (so the UI can show e.g. "expired")."""
+    now = now or time.time()
+    if not items:
+        return {"plan": "free", "status": "none"}
+
+    def key(it):
+        eff = effective_plan(it, now)
+        return (PLAN_RANK.get(eff, 0), parse_ts(it.get("ls_updated_at")) or 0)
+
+    best = max(items.values(), key=key)
+    return {k: best.get(k) for k in SUMMARY_FIELDS}

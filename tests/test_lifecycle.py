@@ -59,12 +59,20 @@ def test_run_sends_and_records(monkeypatch):
         "users/u1/data/settings": {"enabled": True},
     })
     sent = []
-    le.run(db, NOW, send=lambda to, subj, h, t, headers: sent.append((to, subj, headers)))
+    auth_emails = {"u1": "a@b.c"}                   # Firebase Auth is the source of truth
+    le.run(db, NOW, send=lambda to, subj, h, t, headers: sent.append((to, subj, headers)), email_for=auth_emails.get)
     assert len(sent) == 1 and sent[0][0] == "a@b.c" and "Welcome" in sent[0][1]
     assert sent[0][2] is None                       # account email: no List-Unsubscribe
     assert "welcome" in db.store["users/u1/data/profile"]["lifecycle"]
-    le.run(db, NOW, send=lambda *a: sent.append(a))
+    le.run(db, NOW, send=lambda *a: sent.append(a), email_for=auth_emails.get)
     assert len(sent) == 1                           # not sent twice
+
+
+def test_profile_email_is_never_the_recipient():
+    db = FakeDB({"users/u1/data/profile": {"email": "victim@x.com", "createdAt": iso(NOW)}})
+    sent = []
+    le.run(db, NOW, send=lambda to, *a: sent.append(to), email_for={"u1": "owner@y.com"}.get)
+    assert sent == ["owner@y.com"]
 
 
 def test_marketing_email_has_unsubscribe(monkeypatch):

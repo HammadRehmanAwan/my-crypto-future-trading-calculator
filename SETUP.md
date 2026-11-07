@@ -119,6 +119,8 @@ Without a verified domain, emails land in spam or are rejected.
 7. **Affiliates:** enable the affiliate program, set the commission (20–30% recurring is common), and copy the signup URL into `site_src/affiliates.html` (replace `[AFFILIATE SIGNUP URL]`), then run `python scripts/build_site.py`. Put your store slug in `frontend/js/config.js` → `lemonStore`.
 8. **Test end-to-end in Test mode** (step 11).
 
+Plan access is granted only from the **variant ID** a customer paid for. A purchase of any variant not listed in the `LS_VARIANT_*` variables grants nothing (it's logged), so keep those four variables in sync with your products.
+
 Changing prices later: edit `plans.py` **and** `site_src/pricing.html` (a test fails if they disagree), rebuild, and create matching LS variants.
 
 ## 9. Monitoring and analytics
@@ -144,11 +146,11 @@ Also decide and confirm:
 
 ## 11. Go-live checklist
 
-1. Lemon Squeezy in **Test mode**. Render `PAYWALL_ENABLED=true`, GitHub variable `PAYWALL_ENABLED=true`.
+1. Lemon Squeezy in **Test mode**. Render `PAYWALL_ENABLED=true` and `LS_ALLOW_TEST_MODE=true` (test-mode purchases are ignored without it), GitHub variable `PAYWALL_ENABLED=true`.
 2. As a test user: sign in → open the Hub → paywall appears → **Get Pro** → pay with LS test card `4242 4242 4242 4242` → redirected back → "Welcome to FutureX Pro" toast → Hub opens.
    ✅ Firestore has `subscriptions/<uid>` with `status: active`.
 3. Click **Manage billing** → cancel → plan shows "ends soon" and stays active until period end.
-4. Switch Lemon Squeezy to **Live mode** (live API key, live variant IDs and webhook secret in Render).
+4. Switch Lemon Squeezy to **Live mode** (live API key, live variant IDs and webhook secret in Render) and **delete `LS_ALLOW_TEST_MODE`** from Render.
 5. Actions → **Weekly forecast backtest** → *Run workflow*. Then check `/accuracy.html` shows real numbers.
    Read them before advertising. If the forecast doesn't beat the naive baseline, say so in your marketing; the landing copy already frames it that way.
 6. Google Search Console: add the site, submit `sitemap.xml`.

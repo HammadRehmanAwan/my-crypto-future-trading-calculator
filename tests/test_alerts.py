@@ -127,3 +127,24 @@ def test_main_sends_once_and_respects_plan_limit(monkeypatch):
 
     ca.main()                                # cooldown: no duplicate alert
     assert len(emails) == 1
+
+
+def test_relink_cleans_stale_mappings(monkeypatch):
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "x")
+    monkeypatch.setattr(ca.notify, "send_telegram", lambda c, t: None)
+    db = FakeDB({
+        # u1 was on chat 111; chat 222 used to belong to u2
+        "users/u1/data/telegram": {"chatId": 111}, "telegram_chats/111": {"uid": "u1"},
+        "users/u2/data/telegram": {"chatId": 222}, "telegram_chats/222": {"uid": "u2"},
+        "telegram_links/newcode": {"uid": "u1", "createdAt": _now_iso()},
+    })
+    monkeypatch.setattr(ca.notify, "tg_call", lambda m, **kw: [{"update_id": 5, "message": {"chat": {"id": 222}, "text": "/start newcode"}}])
+    ca.process_telegram_updates(db)
+    assert db.store["users/u1/data/telegram"]["chatId"] == 222
+    assert "telegram_chats/111" not in db.store          # u1's old chat unmapped
+    assert "users/u2/data/telegram" not in db.store       # u2 no longer gets u1's chat
+    # /stop from the OLD chat must not unlink u1's new chat
+    db.store["telegram_chats/111"] = {"uid": "u1"}
+    monkeypatch.setattr(ca.notify, "tg_call", lambda m, **kw: [{"update_id": 6, "message": {"chat": {"id": 111}, "text": "/stop"}}])
+    ca.process_telegram_updates(db)
+    assert db.store["users/u1/data/telegram"]["chatId"] == 222

@@ -163,6 +163,7 @@ def test_webhook_rejects_bad_signature(client, monkeypatch):
 
 def test_webhook_writes_subscription(client, monkeypatch):
     monkeypatch.setenv("LEMONSQUEEZY_WEBHOOK_SECRET", "whsec")
+    monkeypatch.setenv("LS_ALLOW_TEST_MODE", "true")
     monkeypatch.setenv("LS_VARIANT_PRO_MONTHLY", "111")
     store: dict = {}
 
@@ -222,3 +223,50 @@ def test_unsubscribe_signature(monkeypatch):
     sig = billing.email_link_sig("uid-1")
     assert len(sig) == 32
     assert sig != billing.email_link_sig("uid-2")
+
+
+# ── Regression tests for the security review ─────────────────────
+
+def test_custom_data_plan_is_never_trusted(monkeypatch):
+    # Public checkout URLs can set custom_data; only the paid variant counts.
+    for k in ("LS_VARIANT_PRO_MONTHLY", "LS_VARIANT_PRO_YEARLY", "LS_VARIANT_TRADER_MONTHLY", "LS_VARIANT_TRADER_YEARLY"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("LS_VARIANT_PRO_MONTHLY", "111")
+    ev = _event(variant="999")
+    ev["meta"]["custom_data"]["plan"] = "trader"
+    _, _, doc = billing.subscription_doc_from_event(ev)
+    assert doc["plan"] == "free"
+    assert billing.effective_plan(doc) == "free"
+
+
+def test_second_subscription_does_not_downgrade_user():
+    from plans import summarize_subscriptions
+    items = {
+        "pro_sub": {"plan": "pro", "status": "expired", "ls_updated_at": "2026-05-01T00:00:00Z"},
+        "trader_sub": {"plan": "trader", "status": "active", "ls_updated_at": "2026-04-01T00:00:00Z"},
+    }
+    s = summarize_subscriptions(items)
+    assert s["plan"] == "trader" and s["status"] == "active"
+    assert billing.effective_plan(s) == "trader"
+
+
+def test_test_mode_webhook_ignored_unless_allowed(client, monkeypatch):
+    monkeypatch.setenv("LEMONSQUEEZY_WEBHOOK_SECRET", "whsec")
+    monkeypatch.delenv("LS_ALLOW_TEST_MODE", raising=False)
+    raw = json.dumps(_event()).encode()   # _event() is test_mode=True
+    r = client.post("/billing/webhook", content=raw, headers={"X-Signature": _sign(raw, "whsec")})
+    assert r.json() == {"ok": True, "ignored": "test_mode"}
+
+
+def test_checkout_blocked_for_existing_subscriber(client, monkeypatch):
+    async def fake_user(_req):
+        return {"sub": "u1", "exp": time.time() + 3600}
+
+    async def fake_sub(_uid):
+        return {"plan": "pro", "status": "active"}
+
+    monkeypatch.setattr(billing, "current_user", fake_user)
+    monkeypatch.setattr(billing, "get_subscription", fake_sub)
+    r = client.post("/billing/checkout", json={"plan": "trader", "interval": "monthly"})
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "already_subscribed"

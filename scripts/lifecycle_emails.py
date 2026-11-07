@@ -136,23 +136,35 @@ def main():
         print("EMAIL_LINK_SECRET not set — refusing to send marketing email without a working unsubscribe link.")
         return
     import firebase_admin
-    from firebase_admin import credentials, firestore
+    from firebase_admin import auth, credentials, firestore
     firebase_admin.initialize_app(credentials.Certificate(json.loads(raw)))
     db = firestore.client()
-    run(db, time.time())
+
+    def auth_email(uid: str) -> str | None:
+        try:
+            u = auth.get_user(uid)
+            return u.email  # Google sign-in emails are verified by Google
+        except Exception:
+            return None
+
+    run(db, time.time(), email_for=auth_email)
 
 
-def run(db, now: float, send=None) -> int:
+def run(db, now: float, send=None, email_for=None) -> int:
+    """email_for(uid) returns the address from Firebase Auth. The profile doc
+    is client-writable, so its `email` field is never used as a recipient."""
     send = send or notify.send_email_resend
     sent_count = 0
     for snap in db.collection_group("data").stream():
         if snap.id != "profile" or sent_count >= MAX_PER_RUN:
             continue
         p = snap.to_dict() or {}
-        email = p.get("email")
+        uid = snap.reference.parent.parent.id
+        if email_for is None:
+            continue
+        email = email_for(uid)
         if not email:
             continue
-        uid = snap.reference.parent.parent.id
         sub_snap = db.collection("subscriptions").document(uid).get()
         sub = sub_snap.to_dict() if sub_snap.exists else None
         for kind in due_emails(p, sub, now):

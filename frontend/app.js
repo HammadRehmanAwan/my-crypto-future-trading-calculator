@@ -991,6 +991,7 @@ function forgetAlertData() {
     // so erasure halts all server alerts immediately.
     data.doc('settings').delete().catch(() => {});
     data.doc('alert_state').delete().catch(() => {});
+    data.doc('telegram').delete().catch(() => {});   // unlink Telegram alerts too
   }
   document.getElementById('alertEmail').value = '';
   document.getElementById('alertEnabled').checked = false;
