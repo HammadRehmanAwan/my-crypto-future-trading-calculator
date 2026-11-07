@@ -4,7 +4,7 @@ services:
     env: python
     region: oregon
     plan: free
-    buildCommand: pip install fastapi uvicorn httpx
+    buildCommand: pip install -r requirements-backend.txt
     startCommand: uvicorn backend:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: FIREBASE_API_KEY
@@ -24,4 +24,31 @@ services:
       - key: CG_DEMO_API_KEY
         sync: false
       - key: HF_TOKEN
+        sync: false
+      # ── Accounts & billing (see SETUP.md) ──
+      - key: PAYWALL_ENABLED
+        value: "false"
+      - key: SITE_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        sync: false
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: LEMONSQUEEZY_API_KEY
+        sync: false
+      - key: LEMONSQUEEZY_STORE_ID
+        sync: false
+      - key: LEMONSQUEEZY_WEBHOOK_SECRET
+        sync: false
+      - key: LS_VARIANT_PRO_MONTHLY
+        sync: false
+      - key: LS_VARIANT_PRO_YEARLY
+        sync: false
+      - key: LS_VARIANT_TRADER_MONTHLY
+        sync: false
+      - key: LS_VARIANT_TRADER_YEARLY
+        sync: false
+      - key: EMAIL_LINK_SECRET
+        sync: false
+      - key: SENTRY_DSN
         sync: false

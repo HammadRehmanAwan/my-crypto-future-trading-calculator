@@ -2,22 +2,28 @@
 """
 Server-side Volatility Alert worker for FutureX.
 
-Runs on a schedule (GitHub Actions cron) — independent of any browser. Reads
-every user's alert subscription from Firestore, fetches live prices from
-CoinGecko, evaluates the same volatility conditions the UI describes, and
-sends an email via the EmailJS REST API when a watched coin crosses a
-threshold. Per-coin cooldown (2 h) and a daily cap (5/day) are tracked
-server-side in Firestore so alerts fire exactly once per event, whether or
-not the user has the page open.
+Runs on a schedule (GitHub Actions cron), independent of any browser:
+  1. Redeems pending Telegram links (users who pressed Start in the bot).
+  2. Reads every signed-in user's alert subscription from Firestore.
+  3. Fetches each watched coin's prices from CoinGecko ONCE per run (shared
+     across users), evaluates the same volatility conditions the UI shows.
+  4. Notifies by email (Resend, or EmailJS fallback) and/or Telegram.
+Per-coin cooldown (2 h) and a daily cap (5/day) are tracked in Firestore, so
+each event is delivered once. When PAYWALL_ENABLED=true the number of
+watched coins is capped by plan (plans.ALERT_COIN_LIMIT).
 
-Required environment variables (set as GitHub Actions secrets — never commit):
-  FIREBASE_SERVICE_ACCOUNT   JSON service-account key for the Firebase project
-  EMAILJS_SERVICE_ID         EmailJS service id      (e.g. service_xxxx)
-  EMAILJS_TEMPLATE_ID        EmailJS template id     (e.g. template_xxxx)
-  EMAILJS_PUBLIC_KEY         EmailJS public key      (user id)
-  EMAILJS_PRIVATE_KEY        EmailJS private key     (server access token)
-  CG_DEMO_API_KEY            CoinGecko Demo key       (optional, higher limits)
+Environment (GitHub Actions secrets — never commit):
+  FIREBASE_SERVICE_ACCOUNT   service-account JSON (required)
+  RESEND_API_KEY, EMAIL_FROM email via Resend (recommended)
+  EMAILJS_SERVICE_ID / EMAILJS_TEMPLATE_ID / EMAILJS_PUBLIC_KEY / EMAILJS_PRIVATE_KEY
+                             legacy email fallback
+  TELEGRAM_BOT_TOKEN         Telegram alerts (optional)
+  CG_DEMO_API_KEY            CoinGecko Demo key (optional, higher limits)
+  PAYWALL_ENABLED            "true" to enforce per-plan coin limits
+  SITE_URL                   public site origin, used for links in messages
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -27,7 +33,13 @@ from datetime import datetime, timezone
 
 import requests
 
-# ── Config ────────────────────────────────────────────────────────────────────
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import notify  # noqa: E402
+from plans import ALERT_COIN_LIMIT, effective_plan  # noqa: E402
+
+# ── Config ───────────────────────────────────────────────────────────
 
 COIN_NAMES = {
     "bitcoin": "Bitcoin (BTC)", "ethereum": "Ethereum (ETH)",
@@ -48,13 +60,23 @@ SENSITIVITY = {
 }
 
 COOLDOWN_SECONDS = 2 * 60 * 60   # 2 hours per coin, matching the client
-DAILY_CAP = 5                    # max emails per user per UTC day
+DAILY_CAP = 5                    # max alerts per user per UTC day
+TG_LINK_MAX_AGE = 24 * 60 * 60   # Telegram link codes expire after a day
 
 CG_BASE = "https://api.coingecko.com/api/v3"
-EMAILJS_URL = "https://api.emailjs.com/api/v1.0/email/send"
 
 
-# ── Indicators (parity with app.js calcRSI / calcBollinger) ──────────────────
+def site_url() -> str:
+    return os.environ.get("SITE_URL", "https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator").rstrip("/")
+
+
+# ── Indicators (parity with frontend/js/core.js) ─────────────────────
+
+def _rsi_value(ag: float, al: float) -> float:
+    if ag == 0 and al == 0:
+        return 50.0
+    return 100.0 if al == 0 else 100 - 100 / (1 + ag / al)
+
 
 def calc_rsi(prices, period=14):
     if len(prices) <= period:
@@ -66,12 +88,12 @@ def calc_rsi(prices, period=14):
         al += max(0.0, -d)
     ag /= period
     al /= period
-    rsi = 100.0 if al == 0 else 100 - 100 / (1 + ag / al)
+    rsi = _rsi_value(ag, al)
     for i in range(period + 1, len(prices)):
         d = prices[i] - prices[i - 1]
         ag = (ag * (period - 1) + max(0.0, d)) / period
         al = (al * (period - 1) + max(0.0, -d)) / period
-        rsi = 100.0 if al == 0 else 100 - 100 / (1 + ag / al)
+        rsi = _rsi_value(ag, al)
     return rsi
 
 
@@ -85,56 +107,29 @@ def calc_bb_width(prices, period=20, mult=2):
     return (upper - lower) / m * 100 if m else None
 
 
-# ── CoinGecko ─────────────────────────────────────────────────────────────
+def price_24h_ago(series):
+    """series: [[ts_ms, price], ...] sorted. Price closest to 24 h before the last point.
 
-def cg_headers():
-    key = os.environ.get("CG_DEMO_API_KEY", "")
-    h = {"User-Agent": "FutureX-AlertWorker/1.0"}
-    if key:
-        h["x-cg-demo-api-key"] = key
-    return h
-
-
-def fetch_prices(coin_id, days=30):
-    r = requests.get(
-        f"{CG_BASE}/coins/{coin_id}/market_chart",
-        params={"vs_currency": "usd", "days": str(days)},
-        headers=cg_headers(),
-        timeout=20,
-    )
-    r.raise_for_status()
-    return [p[1] for p in r.json().get("prices", [])]
+    CoinGecko returns hourly points for 2–90 day ranges, so the previous point
+    is ~1 h old, not 24 h — comparing against it under-reports daily moves.
+    """
+    if len(series) < 2:
+        return None
+    target = series[-1][0] - 24 * 3600 * 1000
+    best = min(series[:-1], key=lambda p: abs(p[0] - target))
+    return best[1]
 
 
-# ── EmailJS (server-side send with private access token) ─────────────────
+def evaluate(prices, cfg, prev24=None):
+    """Return (reasons, current_price). reasons == [] means nothing triggers.
 
-def send_email(to_email, coin_name, price, reasons):
-    payload = {
-        "service_id": os.environ["EMAILJS_SERVICE_ID"],
-        "template_id": os.environ["EMAILJS_TEMPLATE_ID"],
-        "user_id": os.environ["EMAILJS_PUBLIC_KEY"],
-        "accessToken": os.environ["EMAILJS_PRIVATE_KEY"],
-        "template_params": {
-            "to_email": to_email,
-            "coin_name": coin_name,
-            "current_price": "$" + f"{price:,.2f}",
-            "alert_reasons": "\n".join(f"{i + 1}. {r}" for i, r in enumerate(reasons)),
-            "alert_time": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-        },
-    }
-    r = requests.post(EMAILJS_URL, json=payload, timeout=20)
-    if r.status_code != 200:
-        raise RuntimeError(f"EmailJS {r.status_code}: {r.text[:200]}")
-
-
-# ── Volatility evaluation ──────────────────────────────────────────────────────
-
-def evaluate(coin_id, prices, cfg):
-    """Return a list of human-readable reasons, or [] if nothing triggers."""
+    prev24: price 24 h ago (see price_24h_ago); defaults to the previous point
+    for daily series.
+    """
     if len(prices) < 21:
-        return []
+        return [], (prices[-1] if prices else 0.0)
     curr = prices[-1]
-    prev = prices[-2]
+    prev = prev24 if prev24 else prices[-2]
     chg24 = (curr - prev) / prev * 100 if prev else 0.0
     rsi = calc_rsi(prices)
     bbw = calc_bb_width(prices)
@@ -152,19 +147,56 @@ def evaluate(coin_id, prices, cfg):
     return reasons, curr
 
 
-# ── Firestore ────────────────────────────────────────────────────────────────────
+# ── CoinGecko (cached per run) ───────────────────────────────────────
+
+def cg_headers():
+    key = os.environ.get("CG_DEMO_API_KEY", "")
+    h = {"User-Agent": "FutureX-AlertWorker/1.1"}
+    if key:
+        h["x-cg-demo-api-key"] = key
+    return h
+
+
+_PRICE_CACHE: dict[str, list | None] = {}
+
+
+def fetch_prices(coin_id, days=30):
+    """Return [[ts_ms, price], ...] for the coin (cached for this run)."""
+    if coin_id in _PRICE_CACHE:
+        cached = _PRICE_CACHE[coin_id]
+        if cached is None:
+            raise RuntimeError("previous fetch failed this run")
+        return cached
+    try:
+        r = requests.get(f"{CG_BASE}/coins/{coin_id}/market_chart",
+                         params={"vs_currency": "usd", "days": str(days)},
+                         headers=cg_headers(), timeout=20)
+        if r.status_code == 429:
+            time.sleep(20)
+            r = requests.get(f"{CG_BASE}/coins/{coin_id}/market_chart",
+                             params={"vs_currency": "usd", "days": str(days)},
+                             headers=cg_headers(), timeout=20)
+        r.raise_for_status()
+        prices = [p for p in r.json().get("prices", []) if len(p) == 2 and p[1]]
+    except Exception:
+        _PRICE_CACHE[coin_id] = None
+        raise
+    _PRICE_CACHE[coin_id] = prices
+    time.sleep(1.5)  # stay well under CoinGecko's rate limit
+    return prices
+
+
+# ── Firestore ────────────────────────────────────────────────────────
 
 def init_firestore():
-    import firebase_admin
-    from firebase_admin import credentials, firestore
-
     raw = os.environ.get("FIREBASE_SERVICE_ACCOUNT", "")
     if not raw:
         print("FIREBASE_SERVICE_ACCOUNT secret not configured — skipping alert run.")
-        print("To enable alerts: add all required secrets in GitHub → Settings → Secrets and variables → Actions.")
+        print("To enable alerts: add the required secrets in GitHub → Settings → Secrets and variables → Actions (see SETUP.md).")
         sys.exit(0)
-    cred = credentials.Certificate(json.loads(raw))
-    firebase_admin.initialize_app(cred)
+    import firebase_admin
+    from firebase_admin import credentials, firestore
+    firebase_admin.initialize_app(credentials.Certificate(json.loads(raw)))
     return firestore.client()
 
 
@@ -172,30 +204,140 @@ def utc_day_key():
     return datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
+def paywall_enabled() -> bool:
+    return os.environ.get("PAYWALL_ENABLED", "").strip().lower() == "true"
+
+
+# ── Telegram linking ─────────────────────────────────────────────────
+# The app writes telegram_links/{code} = {uid, createdAt} and opens
+# t.me/<bot>?start=<code>. Telegram then delivers "/start <code>" to the bot;
+# we read it with getUpdates (no public webhook needed) and store
+# users/{uid}/data/telegram = {chatId, ...} (server-only per firestore.rules).
+
+def parse_start(text: str) -> str | None:
+    parts = (text or "").strip().split()
+    if len(parts) == 2 and parts[0].split("@")[0] == "/start" and parts[1].isalnum() and len(parts[1]) <= 64:
+        return parts[1]
+    return None
+
+
+def process_telegram_updates(db, now: float | None = None) -> int:
+    if not notify.telegram_enabled():
+        return 0
+    now = now or time.time()
+    sys_ref = db.collection("system").document("telegram")
+    snap = sys_ref.get()
+    offset = (snap.to_dict() or {}).get("offset", 0) if snap.exists else 0
+    try:
+        updates = notify.tg_call("getUpdates", offset=offset, timeout=0,
+                                 allowed_updates=["message"]) or []
+    except Exception as e:
+        print(f"  telegram getUpdates failed: {e}", file=sys.stderr)
+        return 0
+    linked = 0
+    max_id = offset - 1
+    for upd in updates:
+        max_id = max(max_id, upd.get("update_id", 0))
+        msg = upd.get("message") or {}
+        chat_id = (msg.get("chat") or {}).get("id")
+        text = msg.get("text", "")
+        if not chat_id:
+            continue
+        try:
+            if text.strip().split("@")[0] == "/stop":
+                chat_ref = db.collection("telegram_chats").document(str(chat_id))
+                c = chat_ref.get()
+                if c.exists:
+                    uid = (c.to_dict() or {}).get("uid")
+                    if uid:
+                        db.collection("users").document(uid).collection("data").document("telegram").delete()
+                    chat_ref.delete()
+                notify.send_telegram(chat_id, "Telegram alerts turned off. Connect again from the FutureX app anytime.")
+                continue
+            code = parse_start(text)
+            if not code:
+                notify.send_telegram(chat_id, "Hi! To get FutureX alerts here, open the app → Volatility Alerts → <b>Connect Telegram</b>.")
+                continue
+            link_ref = db.collection("telegram_links").document(code)
+            link = link_ref.get()
+            data = link.to_dict() if link.exists else None
+            created = datetime.fromisoformat(data["createdAt"].replace("Z", "+00:00")).timestamp() if data and data.get("createdAt") else 0
+            if not data or not data.get("uid") or now - created > TG_LINK_MAX_AGE:
+                notify.send_telegram(chat_id, "That link has expired. Press <b>Connect Telegram</b> in the app again.")
+                if link.exists:
+                    link_ref.delete()
+                continue
+            uid = data["uid"]
+            frm = msg.get("from") or {}
+            db.collection("users").document(uid).collection("data").document("telegram").set({
+                "chatId": chat_id,
+                "username": frm.get("username"),
+                "linkedAt": datetime.now(timezone.utc).isoformat(),
+            })
+            db.collection("telegram_chats").document(str(chat_id)).set({"uid": uid})
+            link_ref.delete()
+            notify.send_telegram(chat_id, "✅ Connected! You'll get FutureX volatility alerts here. Send /stop to turn them off.")
+            linked += 1
+        except Exception as e:
+            print(f"  telegram update {upd.get('update_id')} failed: {e}", file=sys.stderr)
+    if updates:
+        sys_ref.set({"offset": max_id + 1, "updatedAt": datetime.now(timezone.utc).isoformat()})
+    return linked
+
+
+# ── Main loop ────────────────────────────────────────────────────────
+
+def watch_limit_for(db, uid: str) -> int:
+    if not paywall_enabled():
+        return 15
+    snap = db.collection("subscriptions").document(uid).get()
+    plan = effective_plan(snap.to_dict() if snap.exists else None)
+    return ALERT_COIN_LIMIT.get(plan, 1)
+
+
 def main():
     db = init_firestore()
     now = time.time()
     day = utc_day_key()
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    email_ok = notify.email_provider() is not None
+    tg_ok = notify.telegram_enabled()
 
-    # Collection-group query: every users/{uid}/data/settings document.
+    linked = process_telegram_updates(db, now)
+    if linked:
+        print(f"Linked {linked} Telegram chat(s).")
+
     sent_total = 0
+    # Collection-group query: every users/{uid}/data/settings document.
     for snap in db.collection_group("data").stream():
         if snap.id != "settings":
             continue
         s = snap.to_dict() or {}
-        if not s.get("enabled") or not s.get("email") or not s.get("consent"):
+        if not s.get("enabled"):
             continue
-        watch = s.get("watchCoins") or []
+        watch = list(s.get("watchCoins") or [])
         if not watch:
             continue
-        email = s["email"]
+        user_ref = snap.reference.parent  # users/{uid}/data
+        uid = user_ref.parent.id
+
+        email = s.get("email") if (s.get("consent") and email_ok) else None
+        chat_id = None
+        if tg_ok:
+            tg = user_ref.document("telegram").get()
+            chat_id = (tg.to_dict() or {}).get("chatId") if tg.exists else None
+        if not email and not chat_id:
+            continue
+
+        watch = watch[:watch_limit_for(db, uid)]
         cfg = SENSITIVITY.get(s.get("sensitivity", "moderate"), SENSITIVITY["moderate"])
 
         # Per-user alert state (cooldowns + daily count) lives next to settings.
-        state_ref = snap.reference.parent.document("alert_state")
-        st = (state_ref.get().to_dict() or {})
+        state_ref = user_ref.document("alert_state")
+        st_snap = state_ref.get()
+        st = st_snap.to_dict() if st_snap.exists else {}
         if st.get("day") != day:
-            st = {"day": day, "count": 0, "cooldowns": {}}
+            st = {"day": day, "count": 0, "cooldowns": st.get("cooldowns", {})}
         cooldowns = st.get("cooldowns", {})
         count = st.get("count", 0)
 
@@ -203,38 +345,45 @@ def main():
         for coin_id in watch:
             if count >= DAILY_CAP:
                 break
-            last = cooldowns.get(coin_id, 0)
-            if now - last < COOLDOWN_SECONDS:
+            if now - cooldowns.get(coin_id, 0) < COOLDOWN_SECONDS:
                 continue
             try:
-                prices = fetch_prices(coin_id)
+                series = fetch_prices(coin_id)
             except Exception as e:
                 print(f"  price fetch failed for {coin_id}: {e}", file=sys.stderr)
-                time.sleep(1.5)
                 continue
-
-            reasons, curr = evaluate(coin_id, prices, cfg)
+            reasons, curr = evaluate([p[1] for p in series], cfg, price_24h_ago(series))
             if not reasons:
-                time.sleep(1.5)
                 continue
 
-            try:
-                send_email(email, COIN_NAMES.get(coin_id, coin_id), curr, reasons)
+            name = COIN_NAMES.get(coin_id, coin_id)
+            app_url = f"{site_url()}/app.html"
+            delivered = False
+            if email:
+                try:
+                    notify.send_alert_email(email, name, curr, reasons, stamp, app_url)
+                    delivered = True
+                except Exception as e:
+                    print(f"  email failed for {uid}/{coin_id}: {e}", file=sys.stderr)
+            if chat_id:
+                try:
+                    notify.send_telegram(chat_id, notify.alert_telegram_text(name, curr, reasons, app_url))
+                    delivered = True
+                except Exception as e:
+                    print(f"  telegram failed for {uid}/{coin_id}: {e}", file=sys.stderr)
+            if delivered:
                 cooldowns[coin_id] = now
                 count += 1
                 sent_total += 1
                 dirty = True
-                print(f"  sent alert: {email} / {coin_id} ({len(reasons)} reason[s])")
-            except Exception as e:
-                print(f"  email send failed for {email}/{coin_id}: {e}", file=sys.stderr)
-            time.sleep(1.5)  # gentle on CoinGecko + EmailJS rate limits
+                print(f"  alert: {uid} / {coin_id} ({len(reasons)} reason[s])")
 
         if dirty:
             st.update({"day": day, "count": count, "cooldowns": cooldowns,
                        "updatedAt": datetime.now(timezone.utc).isoformat()})
             state_ref.set(st)
 
-    print(f"Done. {sent_total} alert email(s) sent.")
+    print(f"Done. {sent_total} alert(s) sent. Coins fetched: {len(_PRICE_CACHE)}.")
 
 
 if __name__ == "__main__":

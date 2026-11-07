@@ -1,0 +1,10 @@
+# Render backend (backend.py + billing.py). The heavy ML stack lives on the
+# Hugging Face Space (requirements.txt), not here — Render free/starter RAM
+# cannot hold PyTorch.
+fastapi>=0.111.0
+uvicorn>=0.29.0
+httpx>=0.27.0
+requests>=2.31.0
+google-auth>=2.29.0
+firebase-admin>=6.5.0
+sentry-sdk[fastapi]>=2.0.0

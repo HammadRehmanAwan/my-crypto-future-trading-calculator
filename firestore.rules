@@ -1,0 +1,49 @@
+rules_version = '2';
+
+// FutureX Firestore security rules.
+// Deploy: Firebase console → Firestore → Rules → paste → Publish
+//     or: firebase deploy --only firestore:rules
+//
+// The server (backend.py, scripts/*.py) uses the Admin SDK, which bypasses
+// these rules. Browsers get only what is listed here — in particular they can
+// NEVER write subscriptions, so a user cannot grant themselves a paid plan.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function isOwner(uid) { return signedIn() && request.auth.uid == uid; }
+
+    // users/{uid}/data/{doc}
+    //   settings  – alert preferences        (owner read/write)
+    //   profile   – email, consent, signup   (owner read/write; server adds lifecycle flags)
+    //   telegram  – linked chat id           (owner read; server write)
+    //   alert_state – cooldowns/daily cap    (owner read; server write)
+    match /users/{uid}/data/{doc} {
+      allow read: if isOwner(uid);
+      allow write: if isOwner(uid) && doc in ['settings', 'profile']
+                   && request.resource.size() < 20;   // field-count guard
+      allow delete: if isOwner(uid) && doc in ['settings', 'profile'];
+    }
+
+    // Subscription state — written only by the Lemon Squeezy webhook.
+    match /subscriptions/{uid} {
+      allow read: if isOwner(uid);
+      allow write: if false;
+    }
+
+    // One-time Telegram link codes. The browser may create one for itself;
+    // only the server reads/redeems them.
+    match /telegram_links/{code} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['uid', 'createdAt'])
+        && request.resource.data.uid == request.auth.uid
+        && code.size() >= 16 && code.size() <= 64;
+      allow read, update, delete: if false;
+    }
+
+    // Server-only bookkeeping.
+    match /ls_subscriptions/{id} { allow read, write: if false; }
+    match /telegram_chats/{id}   { allow read, write: if false; }
+    match /system/{id}           { allow read, write: if false; }
+  }
+}

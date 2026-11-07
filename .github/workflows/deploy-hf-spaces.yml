@@ -1,41 +1,74 @@
 name: Deploy to Hugging Face Spaces
 
+# Publishes the ML model server (app.py: Chronos-Bolt + XGBoost) and the
+# static site to the Hugging Face Space as a *Docker* Space.
+#
+# History: this workflow used to copy README.md with `sdk: static`, which made
+# the Space a plain static site — app.py never ran, so the backend's
+# /api/ml-forecast calls always failed and the ensemble silently fell back to
+# statistical baselines. The Space now gets its own README (space/README.md)
+# with `sdk: docker`.
+
 on:
   push:
-    branches:
-      - claude/crypto-model-hugging-face-rSr4s
-      - main
+    branches: [main]
     paths:
       - 'frontend/**'
-      - 'README.md'
+      - 'app.py'
+      - 'Dockerfile'
+      - 'requirements.txt'
+      - 'space/**'
+      - '.github/workflows/deploy-hf-spaces.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: hf-space
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Push static frontend to HF Space
+      - name: Push model server + site to HF Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          set -euo pipefail
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Actions"
+          git clone "https://HammadRehman:${HF_TOKEN}@huggingface.co/spaces/HammadRehman/crypto-futures-calculator" hf_space
 
-          # Clone the HF Space repo
-          git clone https://HammadRehman:$HF_TOKEN@huggingface.co/spaces/HammadRehman/crypto-futures-calculator hf_space
+          # Replace the Space contents with exactly what it needs.
+          find hf_space -mindepth 1 -maxdepth 1 ! -name .git ! -name .gitattributes -exec rm -rf {} +
+          cp space/README.md   hf_space/README.md
+          cp Dockerfile        hf_space/Dockerfile
+          cp app.py            hf_space/app.py
+          cp requirements.txt  hf_space/requirements.txt
+          cp -r frontend       hf_space/frontend
 
-          # Copy README (frontmatter tells HF this is a static space)
-          cp README.md hf_space/README.md
-
-          # Copy frontend files to the Space root
-          cp frontend/index.html hf_space/index.html
-          cp frontend/style.css  hf_space/style.css
-          cp frontend/app.js     hf_space/app.js
-
-          # Commit and push
           cd hf_space
-          git add README.md index.html style.css app.js
-          git diff --staged --quiet || git commit -m "Deploy: update static frontend"
+          git add -A
+          git diff --staged --quiet || git commit -m "Deploy ${GITHUB_SHA::7}: Docker model server + site"
           git push
+
+  verify:
+    # The Docker build + model download takes several minutes; then confirm
+    # the real models report as loaded. Fails loudly instead of silently.
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for /api/model-status to report Chronos loaded
+        run: |
+          url="https://hammadrehman-crypto-futures-calculator.hf.space/api/model-status"
+          for i in $(seq 1 40); do
+            body=$(curl -fsS -m 20 "$url" || true)
+            echo "attempt $i: ${body:-no response}"
+            if echo "$body" | grep -q '"chronos_bolt": *true'; then
+              echo "✅ Chronos-Bolt is live"; exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::Chronos-Bolt did not report loaded within 20 minutes. Check the Space build logs."
+          exit 1

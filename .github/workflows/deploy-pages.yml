@@ -1,18 +1,16 @@
 name: Deploy Frontend to GitHub Pages
 
-# Deploys the static frontend straight from `main`. Only the frontend files
-# in the frontend/ directory are deployed (backend.py / app.py / configs are
-# never published), so there is no more manual mirror to the gh-pages branch.
+# Deploys the static site straight from `main`. frontend/ is the ONLY copy of
+# the site (landing page index.html, app.html, legal pages, js/, css/); the
+# backend, model server and configs are never published.
+# Also triggered by the weekly backtest workflow after it refreshes
+# frontend/data/accuracy.json (workflow_dispatch).
 
 on:
   push:
     branches: ["main"]
     paths:
-      - "frontend/index.html"
-      - "frontend/app.js"
-      - "frontend/style.css"
-      - "frontend/favicon.svg"
-      - "frontend/privacy.html"
+      - "frontend/**"
       - ".github/workflows/deploy-pages.yml"
   workflow_dispatch:
 
@@ -34,6 +32,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

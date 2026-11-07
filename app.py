@@ -45,10 +45,19 @@ SUPPORTED_COINS = {
 _pipeline = None
 
 
+_load_error: str | None = None
+_load_failed_at = 0.0
+
+
 def load_model():
-    global _pipeline
+    """Load Chronos-Bolt once. A failure is cached for 10 min so a broken
+    download doesn't stall every request."""
+    global _pipeline, _load_error, _load_failed_at
     if _pipeline is not None:
         return _pipeline, None
+    import time as _t
+    if _load_error and _t.time() - _load_failed_at < 600:
+        return None, _load_error
     try:
         from chronos import BaseChronosPipeline
         _pipeline = BaseChronosPipeline.from_pretrained(
@@ -56,9 +65,19 @@ def load_model():
             device_map="cpu",
             torch_dtype=torch.float32,
         )
+        _load_error = None
+        print("[ml] Chronos-Bolt-Small loaded", flush=True)
         return _pipeline, None
     except Exception as exc:
-        return None, str(exc)
+        _load_error, _load_failed_at = str(exc), _t.time()
+        print(f"[ml] Chronos load failed: {exc}", flush=True)
+        return None, _load_error
+
+
+# Warm the model in the background at boot so the first forecast is fast
+# and /api/model-status reports the truth immediately.
+import threading as _threading
+_threading.Thread(target=load_model, daemon=True).start()
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -557,7 +576,8 @@ with gr.Blocks(title="Crypto Futures AI Calculator", theme=THEME) as demo:
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 _fastapi = FastAPI()
 
@@ -585,25 +605,9 @@ async def _firebase_config():
     })
 
 
-@_fastapi.get("/", include_in_schema=False)
-@_fastapi.get("/index.html", include_in_schema=False)
-async def _index():
-    return FileResponse("index.html")
-
-
-@_fastapi.get("/app.js", include_in_schema=False)
-async def _appjs():
-    return FileResponse("app.js")
-
-
-@_fastapi.get("/style.css", include_in_schema=False)
-async def _css():
-    return FileResponse("style.css")
-
-
-@_fastapi.get("/favicon.svg", include_in_schema=False)
-async def _favicon():
-    return FileResponse("favicon.svg")
+# The static site (frontend/) is mounted at "/" at the very bottom of this
+# file, after every API route and the Gradio app, so those take precedence.
+FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -975,15 +979,24 @@ def api_ml_forecast(body: dict):
 
 @_fastapi.get("/api/model-status", include_in_schema=False)
 def api_model_status():
-    pipe, _ = load_model()
+    pipe = _pipeline  # never block this endpoint on a model download
     xgb_ok = False
     try:
         import xgboost  # noqa: F401
         xgb_ok = True
     except ImportError:
         pass
-    return {"chronos_bolt": pipe is not None, "xgboost": xgb_ok}
+    out = {"chronos_bolt": pipe is not None, "xgboost": xgb_ok}
+    if pipe is None:
+        out["chronos_status"] = "error" if _load_error else "loading"
+        if _load_error:
+            out["chronos_error"] = _load_error[:200]
+    return out
 
 
 # Gradio AI calculator at /ai  (does NOT override the HTML frontend at /)
 app = gr.mount_gradio_app(_fastapi, demo, path="/ai")
+
+# Static FutureX site (landing page at /, app at /app.html). Mounted last.
+if os.path.isdir(FRONTEND_DIR):
+    app.mount("/", StaticFiles(directory=FRONTEND_DIR, html=True), name="site")

@@ -4,18 +4,19 @@ name: Volatility Alerts
 # Checks every subscribed user's watched coins and emails them when a
 # threshold is crossed. See scripts/check_alerts.py for the logic.
 #
-# Required repository secrets (Settings → Secrets and variables → Actions):
-#   FIREBASE_SERVICE_ACCOUNT   JSON service-account key (Firebase console)
-#   EMAILJS_SERVICE_ID         EmailJS service id
-#   EMAILJS_TEMPLATE_ID        EmailJS template id
-#   EMAILJS_PUBLIC_KEY         EmailJS public key (user id)
-#   EMAILJS_PRIVATE_KEY        EmailJS private key (server access token)
+# Secrets (Settings → Secrets and variables → Actions → Secrets) — SETUP.md §5:
+#   FIREBASE_SERVICE_ACCOUNT   JSON service-account key (required)
+#   RESEND_API_KEY             Resend API key (recommended email provider)
+#   EMAILJS_*                  legacy EmailJS fallback (4 keys)
+#   TELEGRAM_BOT_TOKEN         Telegram alerts (optional)
 #   CG_DEMO_API_KEY            CoinGecko Demo key (optional, higher limits)
+# Variables (… → Variables): EMAIL_FROM, SITE_URL, PAYWALL_ENABLED
 
 on:
   schedule:
-    # Every 30 minutes. GitHub may delay scheduled runs under load.
-    - cron: "*/30 * * * *"
+    # Every 15 minutes. GitHub may delay scheduled runs by several minutes
+    # under load, so this is "near real-time", not tick-by-tick.
+    - cron: "*/15 * * * *"
   workflow_dispatch: {}   # allow manual runs from the Actions tab
 
 # Prevent overlapping runs piling up if one is slow.
@@ -33,6 +34,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scripts/requirements.txt
 
       - name: Install dependencies
         run: pip install -r scripts/requirements.txt
@@ -45,4 +48,9 @@ jobs:
           EMAILJS_PUBLIC_KEY: ${{ secrets.EMAILJS_PUBLIC_KEY }}
           EMAILJS_PRIVATE_KEY: ${{ secrets.EMAILJS_PRIVATE_KEY }}
           CG_DEMO_API_KEY: ${{ secrets.CG_DEMO_API_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
+          SITE_URL: ${{ vars.SITE_URL }}
+          PAYWALL_ENABLED: ${{ vars.PAYWALL_ENABLED }}
         run: python scripts/check_alerts.py

@@ -1,0 +1,16 @@
+{
+  // Type-checks the plain-JS browser modules via JSDoc (no build step).
+  // app.js is the legacy 5k-line file and is not checked yet; every new
+  // module under frontend/js/ is, so the codebase gets stricter as it grows.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": [],
+    "skipLibCheck": true
+  },
+  "include": ["frontend/js/**/*.js", "frontend/js/globals.d.ts"]
+}

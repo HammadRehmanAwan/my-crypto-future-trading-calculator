@@ -1,0 +1,15 @@
+{
+  "name": "futurex",
+  "private": true,
+  "description": "FutureX — AI crypto futures calculator (static frontend + FastAPI backend)",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "typecheck": "tsc -p tsconfig.json",
+    "smoke": "node tests/smoke.mjs",
+    "check": "npm run typecheck && npm test && npm run smoke"
+  },
+  "devDependencies": {
+    "chart.js": "^4.4.0",
+    "typescript": "5.6.3"
+  }
+}

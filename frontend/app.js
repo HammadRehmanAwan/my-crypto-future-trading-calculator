@@ -35,7 +35,7 @@ const BASE = 'https://api.coingecko.com/api/v3';
 // Credentials are served from the backend so they never appear in source.
 // Set BACKEND_URL to wherever app.py is deployed (Render, HuggingFace, etc.)
 // and add the seven FIREBASE_* environment variables on that server.
-const BACKEND_URL = 'https://my-crypto-future-trading-calculator.onrender.com';
+const BACKEND_URL = (window.FX_CONFIG && window.FX_CONFIG.backendUrl) || 'https://my-crypto-future-trading-calculator.onrender.com';
 // ────────────────────────────────────────────────────────────────────
 
 let _db   = null;
@@ -157,13 +157,27 @@ async function backendFetch(url, key, ttl = 60_000, { method = 'GET', body = nul
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-      const opts = { method, signal: ctrl.signal };
+      const opts = { method, signal: ctrl.signal, headers: {} };
       if (body != null) {
-        opts.headers = { 'Content-Type': 'application/json' };
+        opts.headers['Content-Type'] = 'application/json';
         opts.body = JSON.stringify(body);
       }
+      // Signed-in users send their Firebase ID token so the backend can
+      // check their plan (js/billing.js). Anonymous calls stay anonymous.
+      const tok = window.FX && typeof window.FX.getIdToken === 'function'
+        ? await window.FX.getIdToken().catch(() => null) : null;
+      if (tok) opts.headers['Authorization'] = `Bearer ${tok}`;
       const r = await fetch(url, opts);
       clearTimeout(timer);
+      // 401/402 = plan gate (paywall on). Don't retry; tell the UI once.
+      if (r.status === 401 || r.status === 402) {
+        let detail = {};
+        try { detail = (await r.json()).detail || {}; } catch (_) {}
+        document.dispatchEvent(new CustomEvent('fx:paywall', { detail: { url, status: r.status, ...detail } }));
+        const err = new Error(r.status === 401 ? 'Sign in required' : 'Upgrade required');
+        err.paywall = true;
+        throw err;
+      }
       // 502/503/504 mean the dyno is still waking up — back off and retry.
       if ((r.status === 502 || r.status === 503 || r.status === 504) && attempt < retries) {
         if (!_backendWaking) {
@@ -184,6 +198,7 @@ async function backendFetch(url, key, ttl = 60_000, { method = 'GET', body = nul
     } catch (e) {
       clearTimeout(timer);
       lastErr = e;
+      if (e && e.paywall) break;
       if (attempt < retries) {
         await new Promise(res => setTimeout(res, 2500 * (attempt + 1)));
         continue;
@@ -589,121 +604,7 @@ function renderSentimentCard(data) {
     <div class="sent-block sent-block-full">${fbHtml}</div>`;
 }
 
-// ═══════════════════════════════════════════════════════════════════
-// TECHNICAL INDICATORS
-// ═══════════════════════════════════════════════════════════════════
-
-function calcRSI(prices, period = 14) {
-  const rsi = new Array(prices.length).fill(50);
-  let ag = 0, al = 0;
-  for (let i = 1; i <= period; i++) {
-    const d = prices[i] - prices[i - 1];
-    ag += Math.max(0, d); al += Math.max(0, -d);
-  }
-  ag /= period; al /= period;
-  rsi[period] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
-  for (let i = period + 1; i < prices.length; i++) {
-    const d = prices[i] - prices[i - 1];
-    ag = (ag * (period - 1) + Math.max(0, d)) / period;
-    al = (al * (period - 1) + Math.max(0, -d)) / period;
-    rsi[i] = al === 0 ? 100 : 100 - 100 / (1 + ag / al);
-  }
-  return rsi;
-}
-
-function ema(prices, period) {
-  const k = 2 / (period + 1);
-  const out = [prices[0]];
-  for (let i = 1; i < prices.length; i++)
-    out.push(prices[i] * k + out[i - 1] * (1 - k));
-  return out;
-}
-
-function calcMACD(prices, fast = 12, slow = 26, sig = 9) {
-  const ef = ema(prices, fast);
-  const es = ema(prices, slow);
-  const macdLine   = ef.map((v, i) => v - es[i]);
-  const sigArr     = ema(macdLine.slice(slow - 1), sig);
-  const signalLine = [...new Array(slow - 1).fill(null), ...sigArr];
-  const hist       = macdLine.map((v, i) => signalLine[i] != null ? v - signalLine[i] : null);
-  return { macdLine, signalLine, hist };
-}
-
-function calcBollinger(prices, period = 20, mult = 2) {
-  const upper = [], mid = [], lower = [];
-  for (let i = 0; i < prices.length; i++) {
-    if (i < period - 1) { upper.push(null); mid.push(null); lower.push(null); continue; }
-    const sl = prices.slice(i - period + 1, i + 1);
-    const m  = sl.reduce((a, b) => a + b) / period;
-    const sd = Math.sqrt(sl.reduce((a, b) => a + (b - m) ** 2, 0) / period);
-    upper.push(m + mult * sd); mid.push(m); lower.push(m - mult * sd);
-  }
-  return { upper, mid, lower };
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// STATISTICAL FORECAST  (Holt double-exponential smoothing)
-// ═══════════════════════════════════════════════════════════════════
-
-function holtForecast(prices, horizon = 7, alpha = 0.35, beta = 0.08) {
-  let level = prices[0], trend = prices[1] - prices[0];
-  for (let i = 1; i < prices.length; i++) {
-    const prevL = level;
-    level = alpha * prices[i] + (1 - alpha) * (level + trend);
-    trend = beta * (level - prevL) + (1 - beta) * trend;
-  }
-  const recent = prices.slice(-20);
-  let s = recent[0];
-  const res = [];
-  for (let i = 1; i < recent.length; i++) {
-    res.push(Math.abs(recent[i] - s));
-    s = alpha * recent[i] + (1 - alpha) * s;
-  }
-  const avgRes = res.reduce((a, b) => a + b, 0) / res.length;
-  const median = Array.from({ length: horizon }, (_, i) => level + trend * (i + 1));
-  const low    = median.map((v, i) => v - avgRes * Math.sqrt(i + 1) * 1.8);
-  const high   = median.map((v, i) => v + avgRes * Math.sqrt(i + 1) * 1.8);
-  return { median, low, high };
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// FUTURES CALCULATOR
-// ═══════════════════════════════════════════════════════════════════
-
-function calcFutures(entry, leverage, size, dir, tp, sl, fundingRate = 0, horizon = 7) {
-  const margin = size / leverage;
-  const contracts = size / entry;
-  const mmr = 0.005;
-  const takerFee = 0.0005; // 0.05% per side; open + close = 0.10%
-  const totalFees = size * takerFee * 2;
-  // Funding paid every 8h = 3×/day; long pays positive rate, short earns it
-  const fundingPeriods = horizon * 3;
-  const fundingCost = fundingRate * size * fundingPeriods * (dir === 'Long' ? 1 : -1);
-
-  let liq, liqDist, pnlFn;
-  if (dir === 'Long') {
-    liq = entry * (1 - 1 / leverage + mmr);
-    liqDist = (entry - liq) / entry * 100;
-    pnlFn = px => contracts * (px - entry);
-  } else {
-    liq = entry * (1 + 1 / leverage - mmr);
-    liqDist = (liq - entry) / entry * 100;
-    pnlFn = px => contracts * (entry - px);
-  }
-  const res = { entry, leverage, size, margin, contracts, liq, liqDist, dir, totalFees, fundingCost };
-  if (tp) {
-    const gross = pnlFn(tp);
-    const net = gross - totalFees - fundingCost;
-    res.tp = tp; res.pnlTpGross = gross; res.pnlTp = net; res.roeTp = net / margin * 100;
-  }
-  if (sl) {
-    const gross = pnlFn(sl);
-    const net = gross - totalFees - fundingCost;
-    res.sl = sl; res.pnlSlGross = gross; res.pnlSl = net; res.roeSl = net / margin * 100;
-  }
-  if (tp && sl) res.rr = Math.abs(tp - entry) / Math.abs(sl - entry);
-  return res;
-}
+// Indicators, Holt forecast and calcFutures live in js/core.js (unit-tested).
 
 // ═══════════════════════════════════════════════════════════════════
 // CHART
@@ -824,7 +725,8 @@ async function updateForecast(coinId) {
   let renderStepMs = hzCfg.stepMs, renderHistPoints = hzCfg.histPoints;
   if (hz === '7d') {
     if (!state.prices || !state.dates) return;
-    dates = state.dates; prices = state.prices;
+    // state.* is hourly (CoinGecko 30-day range); forecast on daily closes.
+    ({ dates, prices } = toDaily(state.dates, state.prices));
   } else {
     try {
       ({ dates, prices } = await fetchForecastData(coinId, hzCfg.cgDays));
@@ -836,7 +738,7 @@ async function updateForecast(coinId) {
     // the chart degrades coherently instead of crashing or garbling labels.
     if (!prices || !prices.length || !dates || !dates.length) {
       if (!state.prices || !state.dates) return;
-      dates = state.dates; prices = state.prices;
+      ({ dates, prices } = toDaily(state.dates, state.prices));
       renderStepMs = 24 * 60 * 60 * 1000;
       renderHistPoints = state.days;
     }
@@ -1195,6 +1097,7 @@ async function loadCoin(coinId, days) {
   try {
     const { dates, prices, volumes } = await fetchHistory(coinId, days);
     state.prices = prices; state.dates = dates; state.volumes = volumes;
+    document.dispatchEvent(new CustomEvent('fx:coin', { detail: { coinId, price: prices[prices.length - 1] } }));
     const curr   = prices[prices.length - 1];
     const wkAgo  = prices[Math.max(0, prices.length - 8)];
     const chg7d  = (curr - wkAgo) / wkAgo * 100;
@@ -1360,7 +1263,11 @@ async function analyze() {
   const dir     = state.direction;
   // For the trade analysis, always use 7-day daily Holt so RSI/BB/signals are meaningful.
   // Sub-hour timeframes still show their short-term projection on the main chart.
-  const fcst    = holtForecast(prices, hzCfg.warning ? 7 : hzCfg.steps);
+  // Hourly series for the 24h/48h horizons; daily closes for 7-day (and as the
+  // fallback for sub-hour views) so "7 steps" really means 7 days.
+  const useDaily = hz === '7d' || hzCfg.warning;
+  const fcstSeries = useDaily && state.dates ? toDaily(state.dates, prices).prices : prices;
+  const fcst    = holtForecast(fcstSeries, useDaily ? 7 : hzCfg.steps);
   const horizDays = hzCfg.horizDays;
   const tp      = parseFloat(document.getElementById('takeProfit').value)  || fcst.median[fcst.median.length - 1];
   const sl      = parseFloat(document.getElementById('stopLoss').value)    || 0;
@@ -1638,12 +1545,14 @@ async function initFirebase() {
     firebase.initializeApp(config);
     _auth = firebase.auth();
     _db   = firebase.firestore();
+    document.dispatchEvent(new CustomEvent('fx:firebase-ready'));
 
     renderAuthUI(null);
 
     _auth.onAuthStateChanged(async user => {
       state.user = user;
       renderAuthUI(user);
+      document.dispatchEvent(new CustomEvent('fx:auth', { detail: { user } }));
       if (user) {
         await loadUserSettingsFromFirestore(user.uid);
         // Re-populate alert UI with cloud settings
@@ -2015,8 +1924,10 @@ async function runDashboard() {
       if      (chg24 >  2) { score += 1; why.push(`Up ${chg24.toFixed(1)}% today — strong upward momentum`); }
       else if (chg24 < -2) { score -= 1; why.push(`Down ${Math.abs(chg24).toFixed(1)}% today — selling pressure`); }
 
-      const fcst    = holtForecast(prices, 7);
-      const fcstChg = (fcst.median[6] - curr) / curr * 100;
+      // sparkline_in_7d is hourly (~168 points): project 7 *days* = 168 steps.
+      const fc7     = forecastDaysAhead(prices, 7, pointsPerDayFor(prices.length, 7));
+      const fcst    = fc7.forecast;
+      const fcstChg = (fc7.price - curr) / curr * 100;
       if      (fcstChg >  3) { score += 1; why.push(`AI model forecasts +${fcstChg.toFixed(1)}% over 7 days`); }
       else if (fcstChg < -3) { score -= 1; why.push(`AI model forecasts ${fcstChg.toFixed(1)}% over 7 days`); }
 
@@ -2180,65 +2091,9 @@ function hubCacheSet(key, data) {
 
 // ── New Technical Indicators ───────────────────────────────────────
 
-function calcATR(prices, period = 14) {
-  if (prices.length < 2) return 0;
-  const changes = [];
-  for (let i = 1; i < prices.length; i++) {
-    changes.push(Math.abs(prices[i] - prices[i - 1]));
-  }
-  if (changes.length === 0) return 0;
-  // Smooth with EMA
-  const smoothed = ema(changes, period);
-  return smoothed[smoothed.length - 1] || 0;
-}
 
-function calcVWAP(prices, volumes, period = 14) {
-  const n = Math.min(period, prices.length, volumes ? volumes.length : prices.length);
-  if (n === 0) return prices[prices.length - 1] || 0;
-  const pSlice = prices.slice(-n);
-  const vSlice = volumes ? volumes.slice(-n) : new Array(n).fill(1);
-  let totalPV = 0, totalV = 0;
-  for (let i = 0; i < n; i++) {
-    totalPV += pSlice[i] * vSlice[i];
-    totalV  += vSlice[i];
-  }
-  return totalV > 0 ? totalPV / totalV : pSlice[pSlice.length - 1];
-}
 
-function calcSupportResistance(prices, lookback = 30) {
-  const slice = prices.slice(-Math.min(lookback, prices.length));
-  const locals = [];
-  for (let i = 1; i < slice.length - 1; i++) {
-    if (slice[i] < slice[i - 1] && slice[i] < slice[i + 1]) locals.push({ type: 'S', price: slice[i] });
-    if (slice[i] > slice[i - 1] && slice[i] > slice[i + 1]) locals.push({ type: 'R', price: slice[i] });
-  }
-  // Cluster within 2%
-  function cluster(arr) {
-    const groups = [];
-    for (const pt of arr) {
-      const grp = groups.find(g => Math.abs(g.avg - pt.price) / g.avg < 0.02);
-      if (grp) { grp.sum += pt.price; grp.count++; grp.avg = grp.sum / grp.count; }
-      else groups.push({ sum: pt.price, count: 1, avg: pt.price });
-    }
-    return groups.sort((a, b) => b.count - a.count).slice(0, 3).map(g => g.avg);
-  }
-  const supports    = cluster(locals.filter(l => l.type === 'S').sort((a, b) => b.price - a.price));
-  const resistances = cluster(locals.filter(l => l.type === 'R').sort((a, b) => a.price - b.price));
-  return { supports, resistances };
-}
 
-function calcTrendStrength(prices) {
-  if (prices.length < 10) return { strength: 50, direction: 'Sideways' };
-  const recent = prices.slice(-20);
-  const n = recent.length;
-  const mid = recent[Math.floor(n / 2)];
-  const last = recent[n - 1];
-  const first = recent[0];
-  const momentum = (last - first) / first * 100;
-  const strength = Math.min(100, Math.max(0, Math.abs(momentum) * 5));
-  const direction = momentum > 3 ? 'Bullish' : momentum < -3 ? 'Bearish' : 'Sideways';
-  return { strength: Math.round(strength), direction };
-}
 
 function calcHubTechScore(rsi, macdVal, sigVal, curr, bbU, bbL, ema20, ema50, ema200) {
   let score = 50;
@@ -2583,8 +2438,8 @@ function computeIntelModel() {
   let expMovePct = null, expMoveUsd = null;
   const horizon = 7;
   if (tech?.prices?.length >= 10) {
-    const f = holtForecast(tech.prices, horizon);
-    const pred = f.median[f.median.length - 1];
+    // Hub history is CoinGecko 90-day = hourly; forecast `horizon` days ahead.
+    const pred = forecastDaysAhead(tech.prices, horizon, pointsPerDayFor(tech.prices.length, 90)).price;
     expMovePct = (pred - tech.curr) / tech.curr * 100;
     expMoveUsd = pred - tech.curr;
     sub.push({ key: 'forecast', label: 'AI Forecast', score: Math.round(clamp(50 + expMovePct * 5, 0, 100)), weight: 0.15 });
@@ -2648,8 +2503,7 @@ function computeTradeFactors() {
     factors.push({ key: 'Sentiment', score: Math.round(clamp(parts ? acc / parts : 50, 0, 100)) });
   }
   if (t?.prices?.length >= 10) {
-    const fc = holtForecast(t.prices, 7);
-    const mv = (fc.median[fc.median.length - 1] - t.curr) / t.curr * 100;
+    const mv = forecastDaysAhead(t.prices, 7, pointsPerDayFor(t.prices.length, 90)).pct;
     factors.push({ key: 'AI Forecast', score: Math.round(clamp(50 + mv * 5, 0, 100)) });
   }
   return factors;
@@ -3961,8 +3815,7 @@ const AIService = {
         ctx.macd = macdLine[macdLine.length - 1] > signalLine[signalLine.length - 1] ? 'Bullish' : 'Bearish';
         ctx.techScore = ts.score;
         ctx.trend = ts.score >= 58 ? 'Bullish' : ts.score <= 43 ? 'Bearish' : 'Neutral';
-        const f = holtForecast(prices, 7);
-        const chg = (f.median[6] - curr) / curr * 100;
+        const chg = forecastDaysAhead(prices, 7, pointsPerDayFor(prices.length, 90)).pct;
         ctx.forecast = `${chg >= 0 ? '+' : ''}${chg.toFixed(1)}% (7d)`;
         ctx.forecastPct = +chg.toFixed(1);
         // Real support/resistance + volatility for trust metrics

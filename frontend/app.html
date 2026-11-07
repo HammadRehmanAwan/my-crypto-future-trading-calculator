@@ -3,14 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FutureX — AI Crypto Futures Calculator</title>
+  <title>FutureX App — Crypto Futures Calculator</title>
+  <link rel="canonical" href="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/app.html" />
   <meta name="description" content="Real-time Bitcoin and crypto futures calculator with AI price forecasting, Fear & Greed Index, FinBERT news sentiment, and volatility alerts." />
 
   <!-- OG / Social sharing -->
   <meta property="og:title" content="FutureX — AI Crypto Futures Calculator" />
   <meta property="og:description" content="Real-time crypto futures calculator: live prices, AI 7-day forecast, Fear & Greed gauge, FinBERT news sentiment, and volatility email alerts for 15 coins." />
   <meta property="og:type" content="website" />
-  <meta property="og:url" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/" />
+  <meta property="og:url" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/app.html" />
   <meta property="og:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/og-preview.png" />
   <meta name="twitter:image" content="https://hammadrehmanawan.github.io/my-crypto-future-trading-calculator/og-preview.png" />
   <meta name="twitter:card" content="summary_large_image" />
@@ -26,6 +27,7 @@
   <link rel="dns-prefetch" href="https://min-api.cryptocompare.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="css/fx.css" />
   <!-- Libraries deferred so they never block first paint; they execute in
        order before DOMContentLoaded, so app.js still sees Chart/emailjs/firebase. -->
   <script defer src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -34,6 +36,9 @@
   <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script defer src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <!-- Site config + error tracking/analytics (each off until its key is set in js/config.js) -->
+  <script src="js/config.js"></script>
+  <script defer src="js/fx.js"></script>
 </head>
 <body>
 
@@ -103,10 +108,10 @@
         <button class="btn-hero-ghost" onclick="heroSignals()">&#128225; View Live Signals</button>
       </div>
       <div class="hero-trust">
-        <span class="trust-chip">&#10003; 100% Free</span>
-        <span class="trust-chip">&#10003; No signup</span>
-        <span class="trust-chip">&#10003; Real-time data</span>
-        <span class="trust-chip">&#10003; Amazon Chronos AI</span>
+        <span class="trust-chip">&#10003; Free calculator</span>
+        <span class="trust-chip">&#10003; No signup to start</span>
+        <span class="trust-chip">&#10003; Live OKX data</span>
+        <a class="trust-chip" href="accuracy.html">&#10003; Public accuracy record</a>
       </div>
     </div>
     <div class="hero-metrics">
@@ -753,14 +758,24 @@
 </div>
 
 <footer class="footer">
-  Powered by
-  <a href="https://huggingface.co/amazon/chronos-bolt-small" target="_blank">amazon/chronos-bolt-small</a>
-  (Apache 2.0) &middot; Data: CoinGecko Free API &middot; Statistical forecast via Holt&rsquo;s smoothing &middot;
+  Chart forecast: Holt&rsquo;s smoothing (statistical) &middot; Hub ensemble:
+  <a href="https://huggingface.co/amazon/chronos-bolt-small" target="_blank" rel="noopener">amazon/chronos-bolt-small</a>
+  + XGBoost when the model server is online &middot; Data: CoinGecko, OKX &middot;
   <strong>Not financial advice</strong> &middot;
+  <a href="index.html">Home</a> &middot;
+  <a href="pricing.html">Pricing</a> &middot;
+  <a href="accuracy.html">Accuracy</a> &middot;
+  <a href="terms.html">Terms</a> &middot;
+  <a href="risk.html">Risk disclosure</a> &middot;
+  <a href="refund.html">Refunds</a> &middot;
   <a href="privacy.html">Privacy</a> &middot;
   <a href="#" onclick="document.getElementById('disclaimerBanner').style.display='flex';return false;">Disclaimer</a>
 </footer>
 
+<script defer src="js/core.js"></script>
 <script defer src="app.js"></script>
+<script defer src="js/billing.js"></script>
+<script defer src="js/live.js"></script>
+<script defer src="js/onboarding.js"></script>
 </body>
 </html>

@@ -11,9 +11,25 @@ import time
 import re
 import asyncio
 import httpx
-from fastapi import FastAPI, Query
+from fastapi import Depends, FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+import billing
+from billing import require_plan
+
+# ─── Error tracking (Sentry) — active only when SENTRY_DSN is set ────
+if os.environ.get("SENTRY_DSN"):
+    try:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=os.environ["SENTRY_DSN"],
+            environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_RATE", "0.05")),
+            send_default_pii=False,
+        )
+    except Exception as _e:  # never let monitoring take the API down
+        print(f"[sentry] init failed: {_e}")
 
 # CoinGecko Demo API key (free tier, 30 req/min keyed vs ~5/min keyless).
 # Set CG_DEMO_API_KEY as an env var on Render; leave blank for keyless fallback.
@@ -21,15 +37,22 @@ CG_DEMO_KEY = os.environ.get("CG_DEMO_API_KEY", "")
 
 app = FastAPI()
 
+# Extra origins (e.g. your custom domain) come from ALLOWED_ORIGINS,
+# comma-separated: "https://futurex.app,https://www.futurex.app".
+_DEFAULT_ORIGINS = [
+    "https://hammadrehmanawan.github.io",
+    "https://hammadrehman-crypto-futures-calculator.hf.space",
+]
+_EXTRA_ORIGINS = [o.strip().rstrip("/") for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://hammadrehmanawan.github.io",
-        "https://hammadrehman-crypto-futures-calculator.hf.space",
-    ],
+    allow_origins=_DEFAULT_ORIGINS + _EXTRA_ORIGINS,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+
+app.include_router(billing.router)
 
 # ─── Coin → OKX perpetual swap instId ──────────────────────────────
 # OKX public market data API works from US servers; Binance fapi is geo-blocked.
@@ -76,7 +99,7 @@ def cache_set(key: str, data):
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok", "paywall": billing.paywall_enabled()}
 
 
 # ════════════════════════════════════════════════════════════════════
@@ -343,7 +366,33 @@ async def get_futures(coin_id: str):
 # TOKENOMICS  (10-minute cache)
 # ════════════════════════════════════════════════════════════════════
 
-@app.get("/tokenomics/{coin_id}")
+# ════════════════════════════════════════════════════════════════════
+# OKX CONTRACT SIZES  (24 h cache) — lets the live liquidation feed turn
+# OKX contract counts into USD notional (sz × ctVal × price).
+# ════════════════════════════════════════════════════════════════════
+
+@app.get("/okx/contract-values")
+async def okx_contract_values():
+    cached = cache_get("okx-ctval", 86400)
+    if cached is not None:
+        return cached
+    wanted = set(OKX_INST_IDS.values())
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(f"{OKX_BASE}/api/v5/public/instruments",
+                                 params={"instType": "SWAP"})
+            r.raise_for_status()
+            rows = r.json().get("data", [])
+        out = {row["instId"]: float(row["ctVal"]) for row in rows
+               if row.get("instId") in wanted and row.get("ctVal")}
+        if out:
+            cache_set("okx-ctval", out)
+        return out
+    except Exception:
+        return {}
+
+
+@app.get("/tokenomics/{coin_id}", dependencies=[Depends(require_plan("pro"))])
 async def get_tokenomics(coin_id: str):
     coin_id = coin_id.lower()
     cached = cache_get(f"tokenomics-{coin_id}", 600)
@@ -417,7 +466,7 @@ async def get_tokenomics(coin_id: str):
 # ON-CHAIN  (10-minute cache)
 # ════════════════════════════════════════════════════════════════════
 
-@app.get("/onchain/{coin_id}")
+@app.get("/onchain/{coin_id}", dependencies=[Depends(require_plan("pro"))])
 async def get_onchain(coin_id: str):
     coin_id = coin_id.lower()
     cached = cache_get(f"onchain-{coin_id}", 600)
@@ -800,7 +849,7 @@ def _clean_llm_text(text: str) -> str:
     return text.strip()
 
 
-@app.post("/chat")
+@app.post("/chat", dependencies=[Depends(require_plan("pro"))])
 async def chat(body: dict):
     message = (body.get("message") or "").strip()
     context = body.get("context") or {}
@@ -1069,7 +1118,7 @@ def _model_xgboost(prices: list, rsi: float, macd_v: float, sig_v: float,
 
 # ── HF Space real-model bridge ───────────────────────────────────────
 
-HF_SPACE_URL = "https://hammadrehman-crypto-futures-calculator.hf.space"
+HF_SPACE_URL = os.environ.get("HF_SPACE_URL", "https://hammadrehman-crypto-futures-calculator.hf.space").rstrip("/")
 
 
 async def _call_hf_ml_models(prices: list) -> dict:
@@ -1089,7 +1138,7 @@ async def _call_hf_ml_models(prices: list) -> dict:
 
 # ── Endpoint ─────────────────────────────────────────────────────────
 
-@app.get("/ensemble-forecast/{coin_id}")
+@app.get("/ensemble-forecast/{coin_id}", dependencies=[Depends(require_plan("pro"))])
 async def ensemble_forecast(coin_id: str):
     coin_id = coin_id.lower()
 
